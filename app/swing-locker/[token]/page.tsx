@@ -1,18 +1,28 @@
 import type { Metadata } from "next";
 import { getLockerByToken, type LockerData } from "@/lib/queries/locker";
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
 
+type ClubTest = LockerData["clubTests"][number];
+type MetricsRecord = NonNullable<ClubTest["metrics"]>;
 type Num = { toString(): string } | number | null | undefined;
 
-function fmt(val: Num, decimals = 1): string {
-  if (val == null) return "—";
-  return parseFloat(val.toString()).toFixed(decimals);
+// ── Numeric helpers ────────────────────────────────────────────────────────────
+
+function numVal(v: Num): number | null {
+  if (v == null) return null;
+  const n = parseFloat(v.toString());
+  return isNaN(n) ? null : n;
 }
 
-function fmtInt(val: number | null | undefined): string {
-  if (val == null) return "—";
-  return val.toLocaleString("en-US");
+function fmt(val: Num, decimals = 1): string {
+  const n = numVal(val);
+  return n == null ? "—" : n.toFixed(decimals);
+}
+
+function fmtInt(val: Num): string {
+  const n = numVal(val);
+  return n == null ? "—" : Math.round(n).toLocaleString("en-US");
 }
 
 function fmtDate(date: Date): string {
@@ -23,6 +33,90 @@ function fmtDate(date: Date): string {
     timeZone: "UTC",
   }).format(date);
 }
+
+// ── Delta helpers ──────────────────────────────────────────────────────────────
+
+/** 1 = higher is better, -1 = lower is better */
+const DIR: Record<keyof MetricsRecord, 1 | -1> = {
+  clubSpeed:     1,
+  ballSpeed:     1,
+  smashFactor:   1,
+  carryDistance: 1,
+  totalDistance: 1,
+  launchAngle:   1,
+  spinRate:      -1,
+  dispersion:    -1,
+};
+
+function calcDelta(
+  demoVal: Num,
+  currVal: Num,
+  key: keyof MetricsRecord
+): { raw: number; good: boolean; neutral: boolean } | null {
+  const d = numVal(demoVal);
+  const c = numVal(currVal);
+  if (d == null || c == null) return null;
+  const raw = d - c;
+  const neutral = Math.abs(raw) < 0.005;
+  return { raw, good: raw * DIR[key] > 0, neutral };
+}
+
+// ── Auto-generated insights ────────────────────────────────────────────────────
+
+function buildInsights(
+  dm: MetricsRecord,
+  cm: MetricsRecord
+): Array<{ text: string; positive: boolean }> {
+  const out: Array<{ text: string; positive: boolean }> = [];
+
+  const carry = calcDelta(dm.carryDistance, cm.carryDistance, "carryDistance");
+  if (carry && !carry.neutral && Math.abs(carry.raw) >= 3) {
+    const y = Math.round(Math.abs(carry.raw));
+    out.push({ text: carry.good ? `${y} more yards carry` : `${y} fewer yards carry`, positive: carry.good });
+  }
+
+  const bs = calcDelta(dm.ballSpeed, cm.ballSpeed, "ballSpeed");
+  if (bs && !bs.neutral && Math.abs(bs.raw) >= 1.5) {
+    out.push({ text: bs.good ? "Higher ball speed" : "Lower ball speed", positive: bs.good });
+  }
+
+  const disp = calcDelta(dm.dispersion, cm.dispersion, "dispersion");
+  if (disp && !disp.neutral && Math.abs(disp.raw) >= 1) {
+    out.push({ text: disp.good ? "Tighter miss pattern" : "Wider miss pattern", positive: disp.good });
+  }
+
+  const smash = calcDelta(dm.smashFactor, cm.smashFactor, "smashFactor");
+  if (smash && !smash.neutral && Math.abs(smash.raw) >= 0.01) {
+    out.push({ text: smash.good ? "Better energy transfer" : "Lower efficiency", positive: smash.good });
+  }
+
+  const spin = calcDelta(dm.spinRate, cm.spinRate, "spinRate");
+  if (spin && !spin.neutral && Math.abs(spin.raw) >= 200) {
+    out.push({ text: spin.good ? "Optimized spin rate" : "Higher spin rate", positive: spin.good });
+  }
+
+  return out;
+}
+
+// ── Metric definitions (display order) ────────────────────────────────────────
+
+const METRIC_DEFS: Array<{
+  key: keyof MetricsRecord;
+  label: string;
+  unit: string;
+  decimals: number;
+  isInt?: boolean;
+  neutralDelta?: boolean;
+}> = [
+  { key: "clubSpeed",     label: "Club Speed",   unit: "mph", decimals: 1 },
+  { key: "ballSpeed",     label: "Ball Speed",   unit: "mph", decimals: 1 },
+  { key: "smashFactor",   label: "Smash Factor", unit: "",    decimals: 2 },
+  { key: "carryDistance", label: "Carry",        unit: "yds", decimals: 0 },
+  { key: "totalDistance", label: "Total",        unit: "yds", decimals: 0 },
+  { key: "dispersion",    label: "Dispersion",   unit: "yds", decimals: 1 },
+  { key: "launchAngle",   label: "Launch Angle", unit: "°",   decimals: 1, neutralDelta: true },
+  { key: "spinRate",      label: "Spin Rate",    unit: "rpm", decimals: 0, isInt: true, neutralDelta: true },
+];
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -45,29 +139,252 @@ function SummaryItem({
   );
 }
 
-function MetricCell({
-  label,
-  value,
-  unit,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-}) {
+function MetricCell({ label, value, unit }: { label: string; value: string; unit: string }) {
   const isEmpty = value === "—";
   return (
     <div className="bg-white px-4 py-5 text-center">
       <p className="font-body text-2xl font-bold text-slate-900 leading-none">
         {value}
         {!isEmpty && unit && (
-          <span className="font-body text-sm font-medium text-slate-400 ml-1">
-            {unit}
-          </span>
+          <span className="font-body text-sm font-medium text-slate-400 ml-1">{unit}</span>
         )}
       </p>
       <p className="font-body text-xs text-slate-400 mt-2 leading-tight">{label}</p>
     </div>
   );
+}
+
+// ── Performance headline deltas ───────────────────────────────────────────────
+
+function HeadlineDeltas({ demo, current }: { demo: ClubTest; current: ClubTest }) {
+  if (!demo.metrics || !current.metrics) return null;
+  const dm = demo.metrics;
+  const cm = current.metrics;
+
+  const candidates: Array<{ key: keyof MetricsRecord; label: string; unit: string; decimals: number; isInt?: boolean }> = [
+    { key: "carryDistance", label: "Carry",       unit: "yds", decimals: 0 },
+    { key: "ballSpeed",     label: "Ball Speed",  unit: "mph", decimals: 1 },
+    { key: "dispersion",    label: "Dispersion",  unit: "yds", decimals: 1 },
+    { key: "smashFactor",   label: "Efficiency",  unit: "",    decimals: 2 },
+    { key: "totalDistance", label: "Total Dist.", unit: "yds", decimals: 0 },
+    { key: "clubSpeed",     label: "Club Speed",  unit: "mph", decimals: 1 },
+  ];
+
+  const items = candidates
+    .map((c) => ({ ...c, d: calcDelta(dm[c.key], cm[c.key], c.key) }))
+    .filter((c) => c.d !== null)
+    .slice(0, 4);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="px-5 py-6 sm:px-6 bg-slate-900 border-b border-slate-800">
+      <p className="font-body text-xs font-semibold uppercase tracking-widest text-emerald-400 mb-5">
+        Performance Gains vs. Your Current Club
+      </p>
+      <div className={`grid gap-4 ${items.length <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
+        {items.map(({ key, label, unit, decimals, isInt, d }) => {
+          const sign = d!.raw > 0 ? "+" : "";
+          const valStr = isInt
+            ? `${sign}${Math.round(d!.raw).toLocaleString("en-US")}`
+            : `${sign}${d!.raw.toFixed(decimals)}`;
+          const color = d!.neutral
+            ? "text-slate-500"
+            : d!.good
+            ? "text-emerald-400"
+            : "text-red-400";
+          return (
+            <div key={key} className="text-center">
+              <p className={`font-heading text-3xl font-bold leading-none ${color}`}>
+                {valStr}
+                {unit && (
+                  <span className="font-body text-base font-medium ml-1 opacity-70">{unit}</span>
+                )}
+              </p>
+              <p className="font-body text-xs text-slate-500 mt-2 uppercase tracking-wide">{label}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Carry distance visual bars ─────────────────────────────────────────────────
+
+function CarryBars({
+  demoCarry,
+  currentCarry,
+  demoName,
+  currentName,
+}: {
+  demoCarry: number | null;
+  currentCarry: number | null;
+  demoName: string;
+  currentName: string;
+}) {
+  if (!demoCarry && !currentCarry) return null;
+  const max = Math.max(demoCarry ?? 0, currentCarry ?? 0);
+  if (max === 0) return null;
+  const scale = (v: number) => Math.round((v / max) * 88);
+
+  return (
+    <div className="px-5 py-5 sm:px-6 border-b border-slate-100">
+      <p className="font-body text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">
+        Carry Distance
+      </p>
+      <div className="space-y-4">
+        {demoCarry != null && (
+          <div className="flex items-center gap-3">
+            <div className="w-28 shrink-0 text-right">
+              <p className="font-body text-xs font-semibold text-slate-700 leading-tight truncate">{demoName}</p>
+              <p className="font-body text-xs text-slate-400 leading-tight">Demo Club</p>
+            </div>
+            <div className="flex-1 bg-slate-100 rounded-full h-3.5 overflow-hidden">
+              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${scale(demoCarry)}%` }} />
+            </div>
+            <span className="font-body text-sm font-bold text-slate-800 w-16 shrink-0">{Math.round(demoCarry)} yds</span>
+          </div>
+        )}
+        {currentCarry != null && (
+          <div className="flex items-center gap-3">
+            <div className="w-28 shrink-0 text-right">
+              <p className="font-body text-xs font-semibold text-slate-600 leading-tight truncate">{currentName}</p>
+              <p className="font-body text-xs text-slate-400 leading-tight">Your Club</p>
+            </div>
+            <div className="flex-1 bg-slate-100 rounded-full h-3.5 overflow-hidden">
+              <div className="h-full rounded-full bg-slate-400" style={{ width: `${scale(currentCarry)}%` }} />
+            </div>
+            <span className="font-body text-sm font-bold text-slate-500 w-16 shrink-0">{Math.round(currentCarry)} yds</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Insight pills ───────────────────────────────────────────────────────────────
+
+function InsightPills({ insights }: { insights: Array<{ text: string; positive: boolean }> }) {
+  if (insights.length === 0) return null;
+  return (
+    <div className="px-5 py-4 sm:px-6 bg-slate-50 border-b border-slate-100">
+      <div className="flex flex-wrap gap-2">
+        {insights.map(({ text, positive }) => (
+          <span
+            key={text}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold font-body ${
+              positive ? "bg-emerald-100 text-emerald-700" : "bg-red-50 text-red-600"
+            }`}
+          >
+            {positive ? (
+              <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+              </svg>
+            ) : (
+              <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+            )}
+            {text}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Metrics table (side-by-side Δ or solo grid) ──────────────────────────────────
+
+function MetricsComparison({ demo, current }: { demo: ClubTest; current?: ClubTest }) {
+  const dm = demo.metrics;
+  const cm = current?.metrics;
+  if (!dm && !cm) return null;
+
+  if (dm && cm) {
+    const rows = METRIC_DEFS.map(({ key, label, unit, decimals, isInt, neutralDelta }) => {
+      const dv = dm[key];
+      const cv = cm[key];
+      const dn = numVal(dv);
+      const cn = numVal(cv);
+      if (dn == null && cn == null) return null;
+      const dStr = isInt ? fmtInt(dv) : fmt(dv, decimals);
+      const cStr = isInt ? fmtInt(cv) : fmt(cv, decimals);
+      const d = calcDelta(dv, cv, key);
+      let deltaStr = "—";
+      if (d) {
+        const sign = d.raw > 0 ? "+" : "";
+        const raw = isInt
+          ? `${sign}${Math.round(d.raw).toLocaleString("en-US")}`
+          : `${sign}${d.raw.toFixed(decimals)}`;
+        deltaStr = unit ? `${raw} ${unit}` : raw;
+      }
+      const deltaColor =
+        !d || d.neutral || neutralDelta
+          ? "text-slate-700"
+          : d.good
+          ? "text-emerald-600 font-bold"
+          : "text-red-500 font-bold";
+      return { key, label, unit, dStr, cStr, deltaStr, deltaColor, dn, cn };
+    }).filter(Boolean);
+
+    if (rows.length === 0) return null;
+
+    return (
+      <div className="border-b border-slate-100">
+        <div className="grid grid-cols-[1fr_5rem_5rem_6rem] px-5 py-2.5 bg-slate-50 border-b border-slate-100 sm:px-6">
+          <span className="font-body text-xs font-semibold uppercase tracking-widest text-slate-300" />
+          <span className="font-body text-xs font-semibold uppercase tracking-widest text-emerald-600 text-right">Demo</span>
+          <span className="font-body text-xs font-semibold uppercase tracking-widest text-slate-400 text-right">Yours</span>
+          <span className="font-body text-xs font-semibold uppercase tracking-widest text-slate-400 text-right">Change</span>
+        </div>
+        {rows.map((row, i) => (
+          <div
+            key={row!.key}
+            className={`grid grid-cols-[1fr_5rem_5rem_6rem] px-5 py-3 sm:px-6 ${
+              i % 2 === 0 ? "bg-white" : "bg-slate-50/60"
+            }`}
+          >
+            <span className="font-body text-sm text-slate-600">{row!.label}</span>
+            <span className="font-body text-sm font-semibold text-slate-900 text-right tabular-nums">
+              {row!.dStr}
+              {row!.dn != null && row!.unit && <span className="text-xs text-slate-400 ml-0.5">{row!.unit}</span>}
+            </span>
+            <span className="font-body text-sm text-slate-500 text-right tabular-nums">
+              {row!.cStr}
+              {row!.cn != null && row!.unit && <span className="text-xs text-slate-400 ml-0.5">{row!.unit}</span>}
+            </span>
+            <span className={`font-body text-xs text-right tabular-nums ${row!.deltaColor}`}>
+              {row!.deltaStr}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Solo grid (no current club)
+  if (dm) {
+    const cells = [
+      { label: "Club Speed",   value: fmt(dm.clubSpeed),        unit: "mph" },
+      { label: "Ball Speed",   value: fmt(dm.ballSpeed),        unit: "mph" },
+      { label: "Smash Factor", value: fmt(dm.smashFactor, 2),   unit: ""    },
+      { label: "Carry",        value: fmt(dm.carryDistance, 0), unit: "yds" },
+      { label: "Total",        value: fmt(dm.totalDistance, 0), unit: "yds" },
+      { label: "Launch",       value: fmt(dm.launchAngle),      unit: "°"   },
+      { label: "Spin Rate",    value: fmtInt(dm.spinRate),      unit: "rpm" },
+      { label: "Dispersion",   value: fmt(dm.dispersion),       unit: "yds" },
+    ];
+    return (
+      <div className="grid grid-cols-2 gap-px bg-slate-100 sm:grid-cols-4">
+        {cells.map((m) => (
+          <MetricCell key={m.label} label={m.label} value={m.value} unit={m.unit} />
+        ))}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function SectionAccent({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -88,69 +405,59 @@ function SectionAccent({ title, subtitle }: { title: string; subtitle?: string }
 
 // ── Comparison Card ────────────────────────────────────────────────────────────
 
-type ClubTest = LockerData["clubTests"][number];
-
-function ClubSection({
-  club,
-  label,
-  isRecommended = false,
+function ComparisonCard({
+  demo,
+  current,
 }: {
-  club: ClubTest | undefined;
-  label: string;
-  isRecommended?: boolean;
+  demo: ClubTest | undefined;
+  current: ClubTest | undefined;
 }) {
-  if (!club) return null;
+  if (!demo) return null;
 
-  const clubLabel =
-    [club.brand, club.model].filter(Boolean).join(" ") || club.clubType || "—";
-  const specLine = [club.shaft, club.loft].filter(Boolean).join(" · ");
+  const isRecommended = demo.isRecommended ?? false;
+  const hasComparison = !!current;
 
-  const metrics: Array<{ label: string; value: string; unit: string }> = [
-    { label: "Club Speed", value: fmt(club.metrics?.clubSpeed), unit: "mph" },
-    { label: "Ball Speed", value: fmt(club.metrics?.ballSpeed), unit: "mph" },
-    { label: "Smash Factor", value: fmt(club.metrics?.smashFactor, 2), unit: "" },
-    { label: "Carry", value: fmt(club.metrics?.carryDistance, 0), unit: "yds" },
-    { label: "Total", value: fmt(club.metrics?.totalDistance, 0), unit: "yds" },
-    { label: "Launch", value: fmt(club.metrics?.launchAngle), unit: "°" },
-    { label: "Spin Rate", value: fmtInt(club.metrics?.spinRate), unit: "rpm" },
-    { label: "Dispersion", value: fmt(club.metrics?.dispersion), unit: "yds" },
-  ];
+  const demoLabel = [demo.brand, demo.model].filter(Boolean).join(" ") || demo.clubType || "Demo Club";
+  const demoSpec  = [demo.shaft, demo.loft].filter(Boolean).join(" · ");
+  const currLabel = current
+    ? [current.brand, current.model].filter(Boolean).join(" ") || current.clubType || "Current Club"
+    : null;
 
-  const hasMetrics = club.metrics !== null;
+  const insights =
+    hasComparison && demo.metrics && current!.metrics
+      ? buildInsights(demo.metrics, current!.metrics)
+      : [];
+
+  const demoCarry    = numVal(demo.metrics?.carryDistance);
+  const currentCarry = current ? numVal(current.metrics?.carryDistance) : null;
 
   return (
-    <div>
+    <div
+      className={`rounded-xl border shadow-sm overflow-hidden ${
+        isRecommended
+          ? "border-emerald-300 ring-2 ring-emerald-300/50"
+          : "border-slate-200"
+      }`}
+    >
+      {/* Card header */}
       <div
-        className={`px-5 py-3 flex items-center justify-between sm:px-6 ${
-          isRecommended
-            ? "bg-emerald-50 border-b border-emerald-100"
-            : "bg-slate-50 border-b border-slate-100"
+        className={`px-5 py-4 sm:px-6 flex items-start justify-between ${
+          isRecommended ? "bg-emerald-50 border-b border-emerald-100" : "bg-slate-50 border-b border-slate-100"
         }`}
       >
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`h-2 w-2 rounded-full shrink-0 ${
-              isRecommended ? "bg-emerald-500" : "bg-slate-400"
-            }`}
-          />
+        <div className="flex items-start gap-2.5">
+          <span className={`mt-0.5 h-2.5 w-2.5 rounded-full shrink-0 ${isRecommended ? "bg-emerald-500" : "bg-slate-400"}`} />
           <div>
-            <p
-              className={`font-subheading text-sm font-semibold leading-none ${
-                isRecommended ? "text-emerald-800" : "text-slate-700"
-              }`}
-            >
-              {label}
+            <p className={`font-subheading text-base font-bold leading-tight ${isRecommended ? "text-emerald-900" : "text-slate-800"}`}>
+              {demoLabel}
             </p>
-            <p className="font-body text-xs text-slate-500 mt-0.5">
-              {clubLabel}
-              {specLine ? ` · ${specLine}` : ""}
-            </p>
+            {demoSpec && <p className="font-body text-xs text-slate-500 mt-0.5">{demoSpec}</p>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {club.clubType && (
+        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+          {demo.clubType && (
             <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 font-body">
-              {club.clubType}
+              {demo.clubType}
             </span>
           )}
           {isRecommended && (
@@ -164,57 +471,54 @@ function ClubSection({
         </div>
       </div>
 
-      {hasMetrics && (
-        <div className="grid grid-cols-2 gap-px bg-slate-100 sm:grid-cols-4">
-          {metrics.map((m) => (
-            <MetricCell key={m.label} label={m.label} value={m.value} unit={m.unit} />
-          ))}
+      {/* Performance headline deltas — only shown with a current club comparison */}
+      {hasComparison && <HeadlineDeltas demo={demo} current={current!} />}
+
+      {/* Carry distance bars */}
+      {hasComparison && (demoCarry != null || currentCarry != null) && (
+        <CarryBars
+          demoCarry={demoCarry}
+          currentCarry={currentCarry}
+          demoName={demoLabel}
+          currentName={currLabel ?? "Current Club"}
+        />
+      )}
+
+      {/* Insight pills */}
+      {insights.length > 0 && <InsightPills insights={insights} />}
+
+      {/* Metrics — comparison table or solo grid */}
+      {demo.metrics && (
+        <>
+          {hasComparison && (
+            <div className="px-5 py-2.5 sm:px-6 bg-white border-b border-slate-100">
+              <p className="font-body text-xs font-semibold uppercase tracking-widest text-slate-400">Full Numbers</p>
+            </div>
+          )}
+          <MetricsComparison demo={demo} current={current} />
+        </>
+      )}
+
+      {/* Demo club notes */}
+      {demo.notes?.trim() && (
+        <div className="px-5 py-3 sm:px-6 bg-white border-t border-slate-100">
+          <p className="font-body text-xs text-slate-500 italic leading-relaxed">{demo.notes}</p>
         </div>
       )}
 
-      {club.notes?.trim() && (
-        <div className="px-5 py-3 sm:px-6">
-          <p className="font-body text-xs text-slate-500 italic leading-relaxed">
-            {club.notes}
+      {/* Current club footer */}
+      {hasComparison && (
+        <div className="px-5 py-3 sm:px-6 bg-slate-50 border-t border-slate-200 flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-slate-400 shrink-0" />
+          <p className="font-body text-xs text-slate-500">
+            <span className="font-semibold text-slate-600">Your current club: </span>
+            {currLabel}
+            {(current?.shaft || current?.loft)
+              ? ` · ${[current!.shaft, current!.loft].filter(Boolean).join(" · ")}`
+              : ""}
           </p>
         </div>
       )}
-    </div>
-  );
-}
-
-function ComparisonCard({
-  demo,
-  current,
-  pairNumber,
-}: {
-  demo: ClubTest | undefined;
-  current: ClubTest | undefined;
-  pairNumber: number;
-}) {
-  const isRecommended = demo?.isRecommended ?? false;
-
-  return (
-    <div
-      className={`rounded-xl border shadow-sm overflow-hidden ${
-        isRecommended
-          ? "border-emerald-300 ring-2 ring-emerald-300/50"
-          : "border-slate-200"
-      }`}
-    >
-      <ClubSection club={demo} label="Demo Club" isRecommended={isRecommended} />
-
-      {current && (
-        <div className="flex items-center gap-3 px-5 py-2 bg-white border-y border-slate-100 sm:px-6">
-          <div className="h-px flex-1 bg-slate-100" />
-          <span className="font-body text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            vs. your current club
-          </span>
-          <div className="h-px flex-1 bg-slate-100" />
-        </div>
-      )}
-
-      {current && <ClubSection club={current} label="Your Current Club" />}
     </div>
   );
 }
@@ -432,12 +736,7 @@ export default async function SwingLockerPage({
               </span>
             </div>
             {pairs.map(([pairIndex, { demo, current }]) => (
-              <ComparisonCard
-                key={pairIndex}
-                demo={demo}
-                current={current}
-                pairNumber={pairIndex + 1}
-              />
+              <ComparisonCard key={pairIndex} demo={demo} current={current} />
             ))}
           </div>
         )}
@@ -522,7 +821,7 @@ export default async function SwingLockerPage({
         <div className="text-center py-4">
           <p className="font-body text-xs text-slate-400">
             This locker is private and secured. &copy;{" "}
-            {new Date().getFullYear()} Jake Swing Lockers
+            {new Date().getFullYear()} JL Golf Sales
           </p>
         </div>
       </main>
