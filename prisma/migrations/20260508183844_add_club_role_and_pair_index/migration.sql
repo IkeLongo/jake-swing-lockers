@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE `DemoClubTest` ADD COLUMN `clubRole` VARCHAR(191) NOT NULL DEFAULT 'demo',
+    ADD COLUMN `pairIndex` INTEGER NOT NULL DEFAULT 0;

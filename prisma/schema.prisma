@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../app/generated/prisma"
@@ -13,39 +11,34 @@ datasource db {
 }
 
 model GolfClient {
-  id          Int      @id @default(autoincrement())
-  ghlContactId String? @unique
-  firstName   String?
-  lastName    String?
-  email       String?
-  phone       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  ghlContactId String?  @unique
+  firstName    String?
+  lastName     String?
+  email        String?
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   demoSessions DemoSession[]
 }
 
 model DemoSession {
-  id                  Int      @id @default(autoincrement())
-  clientId            Int
-  lockerToken         String   @unique
-  lockerUrl           String?
-  demoDate            DateTime @default(now())
-  salesRep            String?
-  journeyStage        String   @default("demo_completed")
-  clubTested          String?
-  clientGoal          String?
-  currentClub         String?
-  recommendedProduct  String?
-  recommendedShaft    String?
-  recommendedLoft     String?
-  estimatedPrice      Decimal? @db.Decimal(10, 2)
-  notes               String?  @db.Text
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  clientId     Int
+  lockerToken  String   @unique
+  lockerUrl    String?
+  demoDate     DateTime @default(now())
+  salesRep     String?
+  journeyStage String   @default("demo_completed")
+  currentClub  String?
+  clientGoal   String?
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  client       GolfClient    @relation(fields: [clientId], references: [id])
-  swingMetrics SwingMetrics?
+  client        GolfClient     @relation(fields: [clientId], references: [id])
+  clubTests     DemoClubTest[]
   ghlSyncEvents GhlSyncEvent[]
 
   @@index([clientId])
@@ -53,31 +46,54 @@ model DemoSession {
   @@index([demoDate])
 }
 
-model SwingMetrics {
+model DemoClubTest {
   id             Int      @id @default(autoincrement())
-  demoSessionId  Int      @unique
-  clubSpeed      Decimal? @db.Decimal(6, 2)
-  ballSpeed      Decimal? @db.Decimal(6, 2)
-  smashFactor    Decimal? @db.Decimal(5, 2)
-  carryDistance  Decimal? @db.Decimal(6, 2)
-  totalDistance  Decimal? @db.Decimal(6, 2)
-  launchAngle    Decimal? @db.Decimal(5, 2)
-  spinRate       Int?
-  dispersion     Decimal? @db.Decimal(6, 2)
+  demoSessionId  Int
+  clubType       String?
+  brand          String?
+  model          String?
+  shaft          String?
+  loft           String?
+  estimatedPrice Decimal? @db.Decimal(10, 2)
+  notes          String?  @db.Text
+  isRecommended  Boolean  @default(false)
+  sortOrder      Int      @default(0)
+  clubRole       String   @default("demo")
+  pairIndex      Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  demoSession DemoSession @relation(fields: [demoSessionId], references: [id])
+  demoSession DemoSession      @relation(fields: [demoSessionId], references: [id])
+  metrics     ClubTestMetrics?
+
+  @@index([demoSessionId])
+}
+
+model ClubTestMetrics {
+  id            Int      @id @default(autoincrement())
+  clubTestId    Int      @unique
+  clubSpeed     Decimal? @db.Decimal(6, 2)
+  ballSpeed     Decimal? @db.Decimal(6, 2)
+  smashFactor   Decimal? @db.Decimal(5, 2)
+  carryDistance Decimal? @db.Decimal(6, 2)
+  totalDistance Decimal? @db.Decimal(6, 2)
+  launchAngle   Decimal? @db.Decimal(5, 2)
+  spinRate      Int?
+  dispersion    Decimal? @db.Decimal(6, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  clubTest DemoClubTest @relation(fields: [clubTestId], references: [id])
 }
 
 model GhlSyncEvent {
-  id             Int      @id @default(autoincrement())
-  demoSessionId  Int
-  ghlContactId   String?
-  eventType      String
-  status         String   @default("pending")
-  message        String?  @db.Text
-  createdAt      DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  demoSessionId Int
+  ghlContactId  String?
+  eventType     String
+  status        String   @default("pending")
+  message       String?  @db.Text
+  createdAt     DateTime @default(now())
 
   demoSession DemoSession @relation(fields: [demoSessionId], references: [id])
 
