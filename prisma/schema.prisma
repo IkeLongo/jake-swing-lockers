@@ -1,0 +1,87 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model GolfClient {
+  id          Int      @id @default(autoincrement())
+  ghlContactId String? @unique
+  firstName   String?
+  lastName    String?
+  email       String?
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  demoSessions DemoSession[]
+}
+
+model DemoSession {
+  id                  Int      @id @default(autoincrement())
+  clientId            Int
+  lockerToken         String   @unique
+  lockerUrl           String?
+  demoDate            DateTime @default(now())
+  salesRep            String?
+  journeyStage        String   @default("demo_completed")
+  clubTested          String?
+  clientGoal          String?
+  currentClub         String?
+  recommendedProduct  String?
+  recommendedShaft    String?
+  recommendedLoft     String?
+  estimatedPrice      Decimal? @db.Decimal(10, 2)
+  notes               String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  client       GolfClient    @relation(fields: [clientId], references: [id])
+  swingMetrics SwingMetrics?
+  ghlSyncEvents GhlSyncEvent[]
+
+  @@index([clientId])
+  @@index([journeyStage])
+  @@index([demoDate])
+}
+
+model SwingMetrics {
+  id             Int      @id @default(autoincrement())
+  demoSessionId  Int      @unique
+  clubSpeed      Decimal? @db.Decimal(6, 2)
+  ballSpeed      Decimal? @db.Decimal(6, 2)
+  smashFactor    Decimal? @db.Decimal(5, 2)
+  carryDistance  Decimal? @db.Decimal(6, 2)
+  totalDistance  Decimal? @db.Decimal(6, 2)
+  launchAngle    Decimal? @db.Decimal(5, 2)
+  spinRate       Int?
+  dispersion     Decimal? @db.Decimal(6, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  demoSession DemoSession @relation(fields: [demoSessionId], references: [id])
+}
+
+model GhlSyncEvent {
+  id             Int      @id @default(autoincrement())
+  demoSessionId  Int
+  ghlContactId   String?
+  eventType      String
+  status         String   @default("pending")
+  message        String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  demoSession DemoSession @relation(fields: [demoSessionId], references: [id])
+
+  @@index([demoSessionId])
+  @@index([status])
+  @@index([eventType])
+}
