@@ -11,31 +11,39 @@ datasource db {
 }
 
 model GolfClient {
-  id           Int      @id @default(autoincrement())
-  ghlContactId String?  @unique
-  firstName    String?
-  lastName     String?
-  email        String?
-  phone        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               Int       @id @default(autoincrement())
+  ghlContactId     String?   @unique
+  ghlLastSyncedAt  DateTime?
+  ghlSyncStatus    String?
+  ghlSyncError     String?   @db.Text
+  firstName        String?
+  lastName         String?
+  email            String?
+  phone            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   demoSessions DemoSession[]
 }
 
 model DemoSession {
-  id           Int      @id @default(autoincrement())
-  clientId     Int
-  lockerToken  String   @unique
-  lockerUrl    String?
-  demoDate     DateTime @default(now())
-  salesRep     String?
-  journeyStage String   @default("demo_completed")
-  currentClub  String?
-  clientGoal   String?
-  notes        String?  @db.Text
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                        Int       @id @default(autoincrement())
+  clientId                  Int
+  lockerToken               String    @unique
+  lockerUrl                 String?
+  demoDate                  DateTime  @default(now())
+  salesRep                  String?
+  journeyStage              String    @default("demo_completed")
+  currentClub               String?
+  clientGoal                String?
+  notes                     String?   @db.Text
+  ghlOpportunityId          String?
+  ghlLockerReadyTagAddedAt  DateTime?
+  ghlLastSyncedAt           DateTime?
+  ghlSyncStatus             String?
+  ghlSyncError              String?   @db.Text
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   client        GolfClient     @relation(fields: [clientId], references: [id])
   clubTests     DemoClubTest[]

@@ -178,5 +178,10 @@ export const demoFormSchema = z
 export type DemoFormValues = z.infer<typeof demoFormSchema>;
 
 export type ActionResult =
-  | { success: true; lockerToken: string; demoSessionId: number }
+  | {
+      success: true;
+      lockerToken: string;
+      demoSessionId: number;
+      ghlSync?: { success: boolean; error?: string };
+    }
   | { success: false; message: string; errors?: Record<string, string[]> };

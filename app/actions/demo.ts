@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import { demoFormSchema, type ActionResult, type ClubTabValues } from "@/lib/validations/demo";
+import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
 
 export async function createDemoSession(
   rawData: unknown
@@ -125,10 +126,20 @@ export async function createDemoSession(
       }
     }
 
+    // ── 6. Sync to GHL (non-blocking — failure must not break form submission) ──
+    let ghlSync: { success: boolean; error?: string } | undefined;
+    try {
+      ghlSync = await syncGolfDemoToGHL(demoSession.id);
+    } catch (ghlErr) {
+      const msg = ghlErr instanceof Error ? ghlErr.message : String(ghlErr);
+      ghlSync = { success: false, error: msg };
+    }
+
     return {
       success: true,
       lockerToken,
       demoSessionId: demoSession.id,
+      ghlSync,
     };
   } catch (err) {
     console.error("[createDemoSession]", err);
