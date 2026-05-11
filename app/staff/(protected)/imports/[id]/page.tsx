@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import type { Prisma } from "@/app/generated/prisma/client";
+import {
+  ImportReviewActions,
+  type ImportRow,
+} from "./_components/ImportReviewActions";
 
 export const metadata: Metadata = {
   title: "Review Import — Jake Swing Lockers Staff",
@@ -12,7 +15,7 @@ export const metadata: Metadata = {
 // Show at most this many rows in the table — keeps the page fast
 const DISPLAY_LIMIT = 200;
 
-const STATUS_STYLES: Record<string, string> = {
+const BATCH_STATUS_STYLES: Record<string, string> = {
   uploaded: "bg-slate-100 text-slate-600",
   parsed: "bg-blue-100 text-blue-700",
   reviewing: "bg-yellow-100 text-yellow-700",
@@ -29,23 +32,43 @@ export default async function ImportBatchPage({
   const batchId = parseInt(id, 10);
   if (isNaN(batchId)) notFound();
 
-  const batch = await db.importBatch.findUnique({
-    where: { id: batchId },
-    include: {
-      rows: {
-        orderBy: { rowIndex: "asc" },
-        take: DISPLAY_LIMIT,
-        select: {
-          id: true,
-          rowIndex: true,
-          rawData: true,
-          status: true,
+  const [batch, rowStatusCounts] = await Promise.all([
+    db.importBatch.findUnique({
+      where: { id: batchId },
+      include: {
+        rows: {
+          orderBy: { rowIndex: "asc" },
+          take: DISPLAY_LIMIT,
+          select: {
+            id: true,
+            rowIndex: true,
+            rawData: true,
+            status: true,
+            validationErrors: true,
+          },
         },
       },
-    },
-  });
+    }),
+    db.importRow.groupBy({
+      by: ["status"],
+      where: { importBatchId: batchId },
+      _count: { status: true },
+    }),
+  ]);
 
   if (!batch) notFound();
+
+  // Status counts across ALL rows (not just the displayed slice)
+  const pendingCount =
+    rowStatusCounts.find((c) => c.status === "pending")?._count.status ?? 0;
+  const approvedCount =
+    rowStatusCounts.find((c) => c.status === "approved")?._count.status ?? 0;
+  const rejectedCount =
+    rowStatusCounts.find((c) => c.status === "rejected")?._count.status ?? 0;
+  // Error count from displayed rows only (accurate for batches ≤ DISPLAY_LIMIT)
+  const errorCount = batch.rows.filter(
+    (r) => r.validationErrors !== null && r.validationErrors !== undefined,
+  ).length;
 
   // Derive column list from the first row's keys so the table is dynamic
   const firstRow = batch.rows[0]?.rawData;
@@ -55,8 +78,17 @@ export default async function ImportBatchPage({
       : [];
 
   const isTruncated = batch.rowCount > DISPLAY_LIMIT;
-  const statusStyle =
-    STATUS_STYLES[batch.status] ?? "bg-slate-100 text-slate-600";
+  const batchStatusStyle =
+    BATCH_STATUS_STYLES[batch.status] ?? "bg-slate-100 text-slate-600";
+
+  // Cast Prisma JSON types to the plain interface the client component expects
+  const rows: ImportRow[] = batch.rows.map((row) => ({
+    id: row.id,
+    rowIndex: row.rowIndex,
+    rawData: row.rawData as Record<string, unknown>,
+    status: row.status,
+    validationErrors: row.validationErrors,
+  }));
 
   return (
     <>
@@ -70,9 +102,9 @@ export default async function ImportBatchPage({
         </Link>
 
         <div className="flex flex-wrap items-start gap-3">
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 flex-1">
             <h1
-              className="text-2xl font-bold tracking-tight text-slate-900 font-heading truncate"
+              className="truncate text-2xl font-bold tracking-tight text-slate-900 font-heading"
               title={batch.originalFileName}
             >
               {batch.originalFileName}
@@ -90,16 +122,34 @@ export default async function ImportBatchPage({
           </div>
 
           <span
-            className={`shrink-0 self-start rounded-full px-3 py-1 text-xs font-semibold font-body uppercase tracking-wide ${statusStyle}`}
+            className={`shrink-0 self-start rounded-full px-3 py-1 text-xs font-semibold font-body uppercase tracking-wide ${batchStatusStyle}`}
           >
             {batch.status}
           </span>
         </div>
       </div>
 
-      {/* ── Stats bar ───────────────────────────────────────────────────────── */}
-      <div className="mb-6 flex flex-wrap gap-4">
+      {/* ── Summary stats ───────────────────────────────────────────────────── */}
+      <div className="mb-6 flex flex-wrap gap-3">
         <Stat label="Total rows" value={batch.rowCount.toString()} />
+        <Stat label="Pending" value={pendingCount.toString()} accent="slate" />
+        <Stat
+          label="Approved"
+          value={approvedCount.toString()}
+          accent="emerald"
+        />
+        <Stat
+          label="Rejected"
+          value={rejectedCount.toString()}
+          accent="red"
+        />
+        {errorCount > 0 && (
+          <Stat
+            label={isTruncated ? "Errors (first 200)" : "Errors"}
+            value={errorCount.toString()}
+            accent="red"
+          />
+        )}
         <Stat label="Columns" value={columns.length.toString()} />
         <Stat label="Batch ID" value={`#${batch.id}`} />
       </div>
@@ -121,80 +171,43 @@ export default async function ImportBatchPage({
         </div>
       )}
 
-      {/* ── Row table ───────────────────────────────────────────────────────── */}
+      {/* ── Review actions (bulk + per-row) ─────────────────────────────────── */}
       {batch.rows.length > 0 && (
-        <>
-          {isTruncated && (
-            <div className="mb-4 rounded-lg bg-yellow-50 px-4 py-3 text-sm text-yellow-800 font-body">
-              Showing first {DISPLAY_LIMIT} of {batch.rowCount} rows.
-              {/* TODO: add pagination in a future phase */}
-            </div>
-          )}
-
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
-            <table className="min-w-full text-sm font-body">
-              <thead className="border-b border-slate-200 bg-slate-50">
-                <tr>
-                  <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 w-12">
-                    #
-                  </th>
-                  {columns.map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap"
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {batch.rows.map((row) => {
-                  const data = row.rawData as Prisma.JsonObject;
-                  return (
-                    <tr key={row.id} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 text-xs text-slate-400 tabular-nums">
-                        {row.rowIndex + 1}
-                      </td>
-                      {columns.map((col) => (
-                        <td
-                          key={col}
-                          className="px-3 py-2 text-slate-700 whitespace-nowrap max-w-xs truncate"
-                          title={String(data[col] ?? "")}
-                        >
-                          {String(data[col] ?? "")}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* TODO: Add review actions here (approve, flag rows, map columns)
-               once TrackMan column structure is confirmed and mapping logic
-               into DemoSession / DemoClubTest / ClubTestMetrics is defined. */}
-          <div className="mt-6 rounded-xl border border-dashed border-slate-200 bg-white px-6 py-5 text-center">
-            <p className="text-sm font-semibold text-slate-500 font-subheading">
-              Review actions coming soon
-            </p>
-            <p className="mt-1 text-xs text-slate-400 font-body">
-              Column mapping, row approval, and saving to client records will be
-              available after TrackMan export format is confirmed.
-            </p>
-          </div>
-        </>
+        <ImportReviewActions
+          batchId={batchId}
+          rows={rows}
+          columns={columns}
+          isTruncated={isTruncated}
+          displayLimit={DISPLAY_LIMIT}
+          totalRowCount={batch.rowCount}
+        />
       )}
     </>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: "slate" | "emerald" | "red";
+}) {
+  const valueColor =
+    accent === "emerald"
+      ? "text-emerald-700"
+      : accent === "red"
+        ? "text-red-600"
+        : "text-slate-900";
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-xs">
       <p className="text-xs font-medium text-slate-500 font-body">{label}</p>
-      <p className="mt-0.5 text-lg font-bold text-slate-900 font-heading tabular-nums">
+      <p
+        className={`mt-0.5 text-lg font-bold font-heading tabular-nums ${valueColor}`}
+      >
         {value}
       </p>
     </div>
