@@ -133,7 +133,8 @@ model StaffUser {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  otps StaffOtp[]
+  otps          StaffOtp[]
+  importBatches ImportBatch[]
 }
 
 model StaffOtp {
@@ -151,4 +152,55 @@ model StaffOtp {
   @@index([staffUserId])
   @@index([expiresAt])
   @@index([usedAt])
+}
+
+// ── Import Staging Layer ───────────────────────────────────────────────────────
+// Generic file import pipeline for CSV / XLSX uploads.
+//
+// Design intent:
+//   unknown CSV/XLSX → ImportBatch + ImportRow staging → human review
+//   → future: normalize into GolfClient / DemoSession / DemoClubTest
+//
+// ImportRow.rawData is intentionally unstructured Json — we do NOT know the
+// exact TrackMan export schema yet.  Mapping logic will be added in a later
+// phase once column names are confirmed.
+//
+// GolfClient / DemoSession / etc. remain the source of truth for all
+// finalized data.  ImportRow is ephemeral staging storage only.
+
+model ImportBatch {
+  id                    Int       @id @default(autoincrement())
+  originalFileName      String
+  // Nullable in V1 — staff identity injection added in a future phase
+  uploadedByStaffUserId Int?
+  // Lifecycle: uploaded → parsed → reviewing → approved | failed
+  status                String    @default("uploaded")
+  rowCount              Int       @default(0)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  uploadedBy StaffUser?  @relation(fields: [uploadedByStaffUserId], references: [id])
+  rows       ImportRow[]
+
+  @@index([uploadedByStaffUserId])
+  @@index([status])
+}
+
+model ImportRow {
+  id               Int      @id @default(autoincrement())
+  importBatchId    Int
+  rowIndex         Int
+  // Raw parsed row data — stored as-is from CSV/XLSX, no normalization
+  rawData          Json
+  // pending → reviewed | flagged
+  status           String   @default("pending")
+  // TODO: populate in validation phase when column mapping is known
+  validationErrors Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  batch ImportBatch @relation(fields: [importBatchId], references: [id])
+
+  @@index([importBatchId])
+  @@index([status])
 }

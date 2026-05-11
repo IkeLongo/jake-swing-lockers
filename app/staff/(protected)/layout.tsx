@@ -17,7 +17,7 @@ export default function StaffProtectedLayout({
             className="flex items-center gap-2.5 font-heading text-base font-bold text-slate-900 hover:text-emerald-700 transition-colors"
           >
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-            Jake Swing Lockers
+            JL Golf Sales
             <span className="hidden sm:inline-block rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500 font-body">
               STAFF
             </span>
@@ -41,7 +41,7 @@ export default function StaffProtectedLayout({
 
       {/* ── Footer ──────────────────────────────────────────────────────────── */}
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400 font-body">
-        Jake Swing Lockers — Internal Staff Portal
+        JL Golf Sales — Internal Staff Portal
       </footer>
     </div>
   );
