@@ -1,0 +1,1 @@
+curl -s -b cookies.txt -X POST http://localhost:3000/api/staff-auth/logout
