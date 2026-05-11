@@ -182,7 +182,97 @@ export default async function ImportBatchPage({
           totalRowCount={batch.rowCount}
         />
       )}
+
+      {/* ── Next-step CTA ───────────────────────────────────────────────────── */}
+      {batch.rows.length > 0 && batch.status !== "failed" && (
+        <NextStepPanel
+          batchId={batchId}
+          pendingCount={pendingCount}
+          approvedCount={approvedCount}
+          rejectedCount={rejectedCount}
+        />
+      )}
     </>
+  );
+}
+
+function NextStepPanel({
+  batchId,
+  pendingCount,
+  approvedCount,
+  rejectedCount,
+}: {
+  batchId: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+}) {
+  const hasPending = pendingCount > 0;
+  const hasApproved = approvedCount > 0;
+  const allRejected = approvedCount === 0 && rejectedCount > 0 && !hasPending;
+
+  return (
+    <div className="mt-8 rounded-xl border border-slate-200 bg-white px-6 py-5 shadow-xs">
+      <h2 className="mb-1 text-sm font-bold text-slate-800 font-heading">
+        Next step
+      </h2>
+
+      {/* Pending rows remain — staff must finish reviewing */}
+      {hasPending && (
+        <p className="text-sm text-slate-500 font-body">
+          <span className="font-semibold text-yellow-700">
+            {pendingCount} row{pendingCount !== 1 ? "s" : ""} still pending.
+          </span>{" "}
+          Review all rows before continuing to mapping.
+        </p>
+      )}
+
+      {/* All rows rejected — nothing to map */}
+      {allRejected && (
+        <div>
+          <p className="text-sm text-slate-500 font-body">
+            All rows have been rejected. There is nothing to import.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href={`/staff/imports/${batchId}`}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors font-body"
+            >
+              Reset rows and review again
+            </Link>
+            <Link
+              href="/staff/imports/new"
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors font-body"
+            >
+              Upload a new file
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Ready to map — some approved rows exist and no pending */}
+      {!hasPending && hasApproved && (
+        <div>
+          <p className="text-sm text-slate-500 font-body">
+            {approvedCount} row{approvedCount !== 1 ? "s" : ""} approved
+            {rejectedCount > 0
+              ? `, ${rejectedCount} rejected and excluded`
+              : ""}
+            .
+          </p>
+          <div className="mt-4">
+            <Link
+              href={`/staff/imports/${batchId}/map`}
+              className="inline-block rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors font-body"
+            >
+              {rejectedCount > 0
+                ? "Continue with approved rows only →"
+                : "Continue to mapping →"}
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
