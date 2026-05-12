@@ -179,8 +179,9 @@ model ImportBatch {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  uploadedBy StaffUser?  @relation(fields: [uploadedByStaffUserId], references: [id])
-  rows       ImportRow[]
+  uploadedBy    StaffUser?          @relation(fields: [uploadedByStaffUserId], references: [id])
+  rows          ImportRow[]
+  clubSummaries ImportClubSummary[]
 
   @@index([uploadedByStaffUserId])
   @@index([status])
@@ -203,4 +204,30 @@ model ImportRow {
 
   @@index([importBatchId])
   @@index([status])
+}
+
+// Club-level aggregation of TrackMan shot rows.
+// Generated from ImportRow.rawData grouped by Club.Type.
+// Sales reps review and optionally edit these before final confirmation.
+model ImportClubSummary {
+  id               Int       @id @default(autoincrement())
+  importBatchId    Int
+  // Original club name parsed from Club.Type (null if blank in source data)
+  originalClubName String?
+  // Editable club name — defaults to originalClubName, or "Unassigned"
+  clubName         String
+  shotCount        Int
+  avgClubSpeed     Decimal?  @db.Decimal(6, 2)
+  avgBallSpeed     Decimal?  @db.Decimal(6, 2)
+  avgSpinRate      Decimal?  @db.Decimal(8, 2)
+  avgMaxHeight     Decimal?  @db.Decimal(6, 2)
+  avgCarry         Decimal?  @db.Decimal(6, 2)
+  avgTotal         Decimal?  @db.Decimal(6, 2)
+  isManuallyEdited Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  batch ImportBatch @relation(fields: [importBatchId], references: [id])
+
+  @@index([importBatchId])
 }

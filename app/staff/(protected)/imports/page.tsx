@@ -41,12 +41,20 @@ export default async function StaffImportsPage() {
             client records.
           </p>
         </div>
-        <Link
-          href="/staff/imports/new"
-          className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors font-body"
-        >
-          Upload file
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/staff/imports/debug-parser"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-xs hover:bg-slate-50 transition-colors font-body"
+          >
+            Debug parser
+          </Link>
+          <Link
+            href="/staff/imports/new"
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors font-body"
+          >
+            Upload file
+          </Link>
+        </div>
       </div>
 
       {/* ── Empty state ─────────────────────────────────────────────────────── */}
