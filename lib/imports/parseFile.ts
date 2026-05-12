@@ -6,6 +6,15 @@ import * as XLSX from "xlsx";
 /** A single parsed row: column name → raw value (string, number, null, etc.) */
 export type ParsedRow = Record<string, unknown>;
 
+/** Parser mode stored on ImportBatch to drive downstream UI decisions. */
+export type ParserMode = "trackman-result" | "generic";
+
+/** Result returned by parseFileBuffer. */
+export interface ParseResult {
+  rows: ParsedRow[];
+  parserMode: ParserMode;
+}
+
 // ── TrackMan constants ────────────────────────────────────────────────────────
 
 /**
@@ -39,6 +48,20 @@ const TRACKMAN_SIGNATURE_COLS = [
   "Measurement.BallSpeed",
 ];
 
+/**
+ * The only fields we store in rawData for a TrackMan shot row.
+ * All other columns are dropped to keep the payload lean.
+ */
+const TRACKMAN_FIELDS_OF_INTEREST = new Set([
+  "Club.Type",
+  "Measurement.ClubSpeed",
+  "Measurement.BallSpeed",
+  "Measurement.SpinRate",
+  "MaxHeight.Height",
+  "Measurement.Carry",
+  "Measurement.Total",
+]);
+
 // Strings that indicate a row is a unit/conversion row, not a shot row.
 // Used only for dev-mode assertion.
 const UNIT_VALUE_PATTERN = /^(mph|rpm|yrd|yd|ft|m|deg|[°%])$/i;
@@ -62,13 +85,13 @@ const CONVERSION_FACTORS = new Set([
  *       (headers from row 2, data from row 8 onward — rows 1–7 are skipped).
  *     → otherwise, the first sheet is parsed generically.
  *
- * Returns an empty array if the file has no data rows.
+ * Returns a ParseResult containing the rows and the detected parserMode.
  */
-export function parseFileBuffer(buffer: Buffer, fileName: string): ParsedRow[] {
+export function parseFileBuffer(buffer: Buffer, fileName: string): ParseResult {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
 
   if (ext === "csv") {
-    return parseCsv(buffer);
+    return { rows: parseCsv(buffer), parserMode: "generic" };
   }
 
   if (ext === "xlsx" || ext === "xls") {
@@ -105,7 +128,7 @@ function parseCsv(buffer: Buffer): ParsedRow[] {
 
 // ── XLSX ──────────────────────────────────────────────────────────────────────
 
-function parseXlsx(buffer: Buffer): ParsedRow[] {
+function parseXlsx(buffer: Buffer): ParseResult {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
 
   // Prefer TrackMan-specific parsing when the workbook layout matches.
@@ -134,7 +157,7 @@ function parseXlsx(buffer: Buffer): ParsedRow[] {
           `imperial units=row ${TRACKMAN_IMPERIAL_UNIT_ROW_INDEX + 1} (skipped), ` +
           `data starts row ${TRACKMAN_DATA_START_INDEX + 1}`,
       );
-      return parseTrackManSheet(raw, headerStrings);
+      return { rows: parseTrackManSheet(raw, headerStrings), parserMode: "trackman-result" };
     }
 
     console.warn(
@@ -156,7 +179,7 @@ function parseXlsx(buffer: Buffer): ParsedRow[] {
     raw: false, // format all values as strings for consistent rawData
   });
 
-  return rows;
+  return { rows, parserMode: "generic" };
 }
 
 // ── TrackMan sheet parser ─────────────────────────────────────────────────────
@@ -170,6 +193,8 @@ function parseXlsx(buffer: Buffer): ParsedRow[] {
  * processed as shot data.
  *
  * Each returned object maps header string → cell value (string | null).
+ * Only fields listed in TRACKMAN_FIELDS_OF_INTEREST are stored; all other
+ * columns (units, group labels, metadata, etc.) are dropped.
  * Columns with a blank header are omitted.
  * Completely empty rows are omitted.
  */
@@ -189,7 +214,8 @@ function parseTrackManSheet(
 
     for (let col = 0; col < headers.length; col++) {
       const header = headers[col];
-      if (!header) continue; // skip blank header columns
+      // Skip blank headers and columns not in the fields-of-interest list.
+      if (!header || !TRACKMAN_FIELDS_OF_INTEREST.has(header)) continue;
 
       const cellVal = rowArr[col] ?? null;
       const strVal =

@@ -176,6 +176,8 @@ model ImportBatch {
   // Lifecycle: uploaded → parsed → reviewing → approved | failed
   status                String    @default("uploaded")
   rowCount              Int       @default(0)
+  // "generic" | "trackman-result" — set at parse time, drives review UI
+  parserMode            String    @default("generic")
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -217,13 +219,26 @@ model ImportClubSummary {
   // Editable club name — defaults to originalClubName, or "Unassigned"
   clubName         String
   shotCount        Int
+
+  // Averages — null when no valid values exist for that metric
   avgClubSpeed     Decimal?  @db.Decimal(6, 2)
   avgBallSpeed     Decimal?  @db.Decimal(6, 2)
   avgSpinRate      Decimal?  @db.Decimal(8, 2)
   avgMaxHeight     Decimal?  @db.Decimal(6, 2)
   avgCarry         Decimal?  @db.Decimal(6, 2)
   avgTotal         Decimal?  @db.Decimal(6, 2)
+
+  // Count of shots that contributed a valid numeric value to each average
+  validClubSpeedCount  Int  @default(0)
+  validBallSpeedCount  Int  @default(0)
+  validSpinRateCount   Int  @default(0)
+  validMaxHeightCount  Int  @default(0)
+  validCarryCount      Int  @default(0)
+  validTotalCount      Int  @default(0)
+
   isManuallyEdited Boolean   @default(false)
+  // Staff can exclude a club from the final Swing Locker / report
+  includeInReport  Boolean   @default(true)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

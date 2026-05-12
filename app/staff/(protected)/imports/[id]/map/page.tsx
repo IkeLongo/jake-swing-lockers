@@ -2,12 +2,27 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { ImportMappingPreview } from "../_components/ImportMappingPreview";
+import { ClubSummarySection } from "./_components/ClubSummarySection";
+import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
 
 export const metadata: Metadata = {
-  title: "Map Import — Jake Swing Lockers Staff",
+  title: "Club Averages — Jake Swing Lockers Staff",
   robots: { index: false, follow: false },
 };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function toNum(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  // Prisma Decimal has a toNumber() method
+  if (typeof v === "object" && "toNumber" in (v as object)) {
+    return (v as { toNumber(): number }).toNumber();
+  }
+  const n = parseFloat(String(v));
+  return isFinite(n) ? n : null;
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function ImportMapPage({
   params,
@@ -18,7 +33,7 @@ export default async function ImportMapPage({
   const batchId = parseInt(id, 10);
   if (isNaN(batchId)) notFound();
 
-  const [batch, rowStatusCounts, approvedRows] = await Promise.all([
+  const [batch, summariesRaw] = await Promise.all([
     db.importBatch.findUnique({
       where: { id: batchId },
       select: {
@@ -26,38 +41,40 @@ export default async function ImportMapPage({
         originalFileName: true,
         status: true,
         rowCount: true,
+        parserMode: true,
         createdAt: true,
       },
     }),
-    db.importRow.groupBy({
-      by: ["status"],
+    db.importClubSummary.findMany({
       where: { importBatchId: batchId },
-      _count: { status: true },
-    }),
-    db.importRow.findMany({
-      where: { importBatchId: batchId, status: "approved" },
-      orderBy: { rowIndex: "asc" },
-      select: { rawData: true },
+      orderBy: [{ clubName: "asc" }],
     }),
   ]);
 
   if (!batch) notFound();
 
-  const approvedCount =
-    rowStatusCounts.find((c) => c.status === "approved")?._count.status ?? 0;
-  const rejectedCount =
-    rowStatusCounts.find((c) => c.status === "rejected")?._count.status ?? 0;
-  const pendingCount =
-    rowStatusCounts.find((c) => c.status === "pending")?._count.status ?? 0;
-
-  // Derive column list from first approved row
-  const firstApprovedRaw = approvedRows[0]?.rawData;
-  const columns: string[] =
-    firstApprovedRaw !== null &&
-    typeof firstApprovedRaw === "object" &&
-    !Array.isArray(firstApprovedRaw)
-      ? Object.keys(firstApprovedRaw as Record<string, unknown>)
-      : [];
+  // Serialize Decimal fields for client components
+  const summaries: SerializedClubSummary[] = summariesRaw.map((s) => ({
+    id: s.id,
+    importBatchId: s.importBatchId,
+    originalClubName: s.originalClubName,
+    clubName: s.clubName,
+    shotCount: s.shotCount,
+    avgClubSpeed: toNum(s.avgClubSpeed),
+    avgBallSpeed: toNum(s.avgBallSpeed),
+    avgSpinRate: toNum(s.avgSpinRate),
+    avgMaxHeight: toNum(s.avgMaxHeight),
+    avgCarry: toNum(s.avgCarry),
+    avgTotal: toNum(s.avgTotal),
+    validClubSpeedCount: s.validClubSpeedCount,
+    validBallSpeedCount: s.validBallSpeedCount,
+    validSpinRateCount: s.validSpinRateCount,
+    validMaxHeightCount: s.validMaxHeightCount,
+    validCarryCount: s.validCarryCount,
+    validTotalCount: s.validTotalCount,
+    isManuallyEdited: s.isManuallyEdited,
+    includeInReport: s.includeInReport,
+  }));
 
   return (
     <>
@@ -71,148 +88,43 @@ export default async function ImportMapPage({
         </Link>
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
-          Map Import
+          Club Averages
         </h1>
         <p className="mt-1 text-sm text-slate-500 font-body">
           {batch.originalFileName}
         </p>
       </div>
 
-      {/* ── Batch summary ───────────────────────────────────────────────────── */}
+      {/* ── Batch summary cards ──────────────────────────────────────────────── */}
       <div className="mb-6 flex flex-wrap gap-3">
-        <StatCard label="Total rows" value={batch.rowCount.toString()} />
+        <StatCard label="Total Shots" value={batch.rowCount.toLocaleString()} />
+        <StatusCard status={batch.status} />
         <StatCard
-          label="Approved"
-          value={approvedCount.toString()}
-          accent="emerald"
+          label="Clubs Found"
+          value={summaries.length.toString()}
+          accent="blue"
         />
-        <StatCard
-          label="Rejected"
-          value={rejectedCount.toString()}
-          accent="red"
-        />
-        {pendingCount > 0 && (
-          <StatCard
-            label="Pending"
-            value={pendingCount.toString()}
-            accent="yellow"
-          />
-        )}
-        <StatCard label="Columns detected" value={columns.length.toString()} />
       </div>
 
-      {/* ── Pending rows warning ─────────────────────────────────────────────── */}
-      {pendingCount > 0 && (
-        <div className="mb-6 rounded-xl border border-yellow-200 bg-yellow-50 px-5 py-4 text-sm text-yellow-800 font-body">
-          <span className="font-semibold">
-            {pendingCount} row{pendingCount !== 1 ? "s" : ""} are still pending.
-          </span>{" "}
-          Only approved rows are included below.{" "}
-          <Link
-            href={`/staff/imports/${batchId}`}
-            className="underline hover:text-yellow-900"
-          >
-            Go back to review the remaining rows.
-          </Link>
-        </div>
-      )}
+      {/* ── Club summaries (primary) ────────────────────────────────────────── */}
+      <ClubSummarySection
+        batchId={batchId}
+        initialSummaries={summaries}
+        parserMode={batch.parserMode}
+      />
 
-      {/* ── No approved rows ────────────────────────────────────────────────── */}
-      {approvedCount === 0 && (
-        <div className="mb-6 rounded-xl border border-dashed border-slate-300 bg-white px-8 py-12 text-center">
-          <p className="text-sm font-semibold text-slate-500 font-subheading">
-            No approved rows
-          </p>
-          <p className="mt-1 text-xs text-slate-400 font-body">
-            Approve at least one row on the review page before mapping.
-          </p>
-          <Link
-            href={`/staff/imports/${batchId}`}
-            className="mt-4 inline-block text-sm font-medium text-emerald-700 hover:underline font-body"
-          >
-            ← Back to review
-          </Link>
-        </div>
-      )}
-
-      {/* ── Column preview ──────────────────────────────────────────────────── */}
-      {approvedCount > 0 && (
-        <>
-          <div className="mb-4">
-            <h2 className="text-base font-bold text-slate-800 font-heading">
-              Detected columns
-            </h2>
-            <p className="mt-0.5 text-sm text-slate-500 font-body">
-              Columns from the first approved row. Sample values are shown for
-              reference.
-            </p>
-          </div>
-
-          <ImportMappingPreview rows={approvedRows} />
-        </>
-      )}
-
-      {/* ── Target model placeholders ───────────────────────────────────────── */}
-      {approvedCount > 0 && (
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          {(
-            [
-              {
-                model: "GolfClient",
-                desc: "The client receiving the demo session. Matched by name or email.",
-              },
-              {
-                model: "DemoSession",
-                desc: "The top-level demo event. Links date, rep, and client.",
-              },
-              {
-                model: "DemoClubTest",
-                desc: "One test entry per club tested during the session.",
-              },
-              {
-                model: "ClubTestMetrics",
-                desc: "Numeric performance data attached to each club test.",
-              },
-            ] as const
-          ).map(({ model, desc }) => (
-            <div
-              key={model}
-              className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-xs"
-            >
-              <h3 className="text-sm font-bold text-slate-800 font-heading">
-                {model}
-              </h3>
-              <p className="mt-1 text-xs text-slate-500 font-body">{desc}</p>
-              <p className="mt-3 text-xs italic text-slate-400 font-body">
-                Column mapping will be configured once the TrackMan export
-                format is confirmed.
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── TrackMan notice ─────────────────────────────────────────────────── */}
+      {/* ── Future import architecture note ────────────────────────────────── */}
       <div className="mt-8 rounded-xl border border-blue-100 bg-blue-50 px-5 py-4 text-sm text-blue-800 font-body">
         <p className="font-semibold font-heading mb-1">
-          TrackMan column mapping pending
+          Final import — coming next
         </p>
         <p>
-          Final import into client records is intentionally not available yet.
-          TrackMan column mapping will be completed after we receive the real
-          export sample. At that point the following will be implemented:
+          After confirming club summaries, the following will be implemented:
         </p>
         <ul className="mt-2 list-disc pl-5 space-y-0.5 text-xs">
-          <li>
-            <code>normalizeTrackManRow()</code> — maps raw column names to typed
-            fields
-          </li>
-          <li>Mapping profile support for different TrackMan export formats</li>
-          <li>Final import confirmation step</li>
+          <li>Save club averages into DemoClubTest + ClubTestMetrics</li>
           <li>Create or match existing GolfClient by name / email</li>
           <li>Create DemoSession linked to the client</li>
-          <li>Create DemoClubTest rows per club</li>
-          <li>Create ClubTestMetrics per club test</li>
           <li>GHL follow-up sync trigger</li>
           <li>Swing Locker link generation</li>
         </ul>
@@ -221,32 +133,95 @@ export default async function ImportMapPage({
   );
 }
 
+// ── Stat card ─────────────────────────────────────────────────────────────────
+
 function StatCard({
   label,
   value,
-  accent,
+  accent = "slate",
 }: {
   label: string;
   value: string;
-  accent?: "emerald" | "red" | "yellow";
+  accent?: "slate" | "emerald" | "red" | "yellow" | "blue";
 }) {
-  const valueColor =
-    accent === "emerald"
-      ? "text-emerald-700"
-      : accent === "red"
-        ? "text-red-600"
-        : accent === "yellow"
-          ? "text-yellow-700"
-          : "text-slate-900";
+  const accentClass = {
+    slate: "text-slate-700",
+    emerald: "text-emerald-700",
+    red: "text-red-600",
+    yellow: "text-yellow-700",
+    blue: "text-blue-700",
+  }[accent];
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-xs">
-      <p className="text-xs font-medium text-slate-500 font-body">{label}</p>
-      <p
-        className={`mt-0.5 text-lg font-bold font-heading tabular-nums ${valueColor}`}
-      >
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-xs min-w-[110px]">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+        {label}
+      </p>
+      <p className={`mt-1 text-lg font-bold font-heading ${accentClass}`}>
         {value}
       </p>
+    </div>
+  );
+}
+
+// ── Status card ───────────────────────────────────────────────────────────────
+
+const STATUS_STYLES: Record<
+  string,
+  { bg: string; border: string; text: string; label: string }
+> = {
+  parsed: {
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    text: "text-blue-700",
+    label: "Parsed",
+  },
+  reviewing: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-700",
+    label: "Reviewing",
+  },
+  approved: {
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-700",
+    label: "Approved",
+  },
+  failed: {
+    bg: "bg-red-50",
+    border: "border-red-200",
+    text: "text-red-700",
+    label: "Failed",
+  },
+  uploaded: {
+    bg: "bg-slate-50",
+    border: "border-slate-200",
+    text: "text-slate-600",
+    label: "Uploaded",
+  },
+};
+
+function StatusCard({ status }: { status: string }) {
+  const style = STATUS_STYLES[status] ?? {
+    bg: "bg-slate-50",
+    border: "border-slate-200",
+    text: "text-slate-600",
+    label: status,
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-xs min-w-[110px]">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+        Status
+      </p>
+      <div className="mt-1">
+        <span
+          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold font-subheading ${style.bg} ${style.border} ${style.text}`}
+        >
+          {style.label}
+        </span>
+      </div>
     </div>
   );
 }

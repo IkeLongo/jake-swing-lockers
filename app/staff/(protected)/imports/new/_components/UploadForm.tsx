@@ -44,11 +44,18 @@ export default function UploadForm() {
       const data = (await res.json().catch(() => ({}))) as {
         success?: boolean;
         batchId?: number;
+        parserMode?: string;
         message?: string;
       };
 
       if (res.ok && data.success && data.batchId != null) {
-        router.push(`/staff/imports/${data.batchId}`);
+        // TrackMan imports have club summaries generated during upload —
+        // redirect directly to the club averages review page.
+        const redirectPath =
+          data.parserMode === "trackman-result"
+            ? `/staff/imports/${data.batchId}/map`
+            : `/staff/imports/${data.batchId}`;
+        router.push(redirectPath);
         return;
       }
 

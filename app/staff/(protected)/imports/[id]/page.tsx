@@ -81,6 +81,8 @@ export default async function ImportBatchPage({
   const batchStatusStyle =
     BATCH_STATUS_STYLES[batch.status] ?? "bg-slate-100 text-slate-600";
 
+  const isTrackMan = batch.parserMode === "trackman-result";
+
   // Cast Prisma JSON types to the plain interface the client component expects
   const rows: ImportRow[] = batch.rows.map((row) => ({
     id: row.id,
@@ -172,7 +174,7 @@ export default async function ImportBatchPage({
       )}
 
       {/* ── Review actions (bulk + per-row) ─────────────────────────────────── */}
-      {batch.rows.length > 0 && (
+      {batch.rows.length > 0 && !isTrackMan && (
         <ImportReviewActions
           batchId={batchId}
           rows={rows}
@@ -183,8 +185,22 @@ export default async function ImportBatchPage({
         />
       )}
 
+      {/* ── TrackMan info banner ─────────────────────────────────────────────── */}
+      {isTrackMan && batch.rows.length > 0 && (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm text-blue-800 font-body">
+          <p className="font-semibold mb-1">TrackMan export detected</p>
+          <p>
+            Shot rows are grouped by club for review. Individual row
+            approve&thinsp;/&thinsp;reject is not used for TrackMan imports.
+          </p>
+        </div>
+      )}
+
       {/* ── Next-step CTA ───────────────────────────────────────────────────── */}
-      {batch.rows.length > 0 && batch.status !== "failed" && (
+      {isTrackMan && batch.rows.length > 0 && batch.status !== "failed" && (
+        <TrackManNextStepPanel batchId={batchId} rowCount={batch.rowCount} />
+      )}
+      {!isTrackMan && batch.rows.length > 0 && batch.status !== "failed" && (
         <NextStepPanel
           batchId={batchId}
           pendingCount={pendingCount}
@@ -272,6 +288,34 @@ function NextStepPanel({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function TrackManNextStepPanel({
+  batchId,
+  rowCount,
+}: {
+  batchId: number;
+  rowCount: number;
+}) {
+  return (
+    <div className="mt-8 rounded-xl border border-slate-200 bg-white px-6 py-5 shadow-xs">
+      <h2 className="mb-1 text-sm font-bold text-slate-800 font-heading">
+        Club averages ready
+      </h2>
+      <p className="text-sm text-slate-500 font-body">
+        {rowCount} shot{rowCount !== 1 ? "s" : ""} parsed. Club summaries were
+        generated automatically during upload.
+      </p>
+      <div className="mt-4">
+        <Link
+          href={`/staff/imports/${batchId}/map`}
+          className="inline-block rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors font-body"
+        >
+          View club averages →
+        </Link>
+      </div>
     </div>
   );
 }
