@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
+import SessionDetailsCard from "./_components/SessionDetailsCard";
 
 export const metadata: Metadata = {
   title: "Club Averages — Jake Swing Lockers Staff",
@@ -42,7 +43,25 @@ export default async function ImportMapPage({
         status: true,
         rowCount: true,
         parserMode: true,
+        demoSessionId: true,
         createdAt: true,
+        demoSession: {
+          select: {
+            id: true,
+            demoDate: true,
+            status: true,
+            notes: true,
+            client: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+              },
+            },
+          },
+        },
       },
     }),
     db.importClubSummary.findMany({
@@ -78,14 +97,30 @@ export default async function ImportMapPage({
 
   return (
     <>
-      {/* ── Back nav ────────────────────────────────────────────────────────── */}
+      {/* ── Back nav ───────────────────────────────────────────────────────── */}
       <div className="mb-6">
         <Link
-          href={`/staff/imports/${batchId}`}
+          href="/staff/imports"
           className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
         >
-          ← Back to Review
+          ← Back to Sessions
         </Link>
+
+        {/* Golfer context card (shown when linked to a DemoSession) */}
+        {batch.demoSession && (
+          <SessionDetailsCard
+            sessionId={batch.demoSession.id}
+            sessionStatus={batch.demoSession.status}
+            initial={{
+              firstName: batch.demoSession.client.firstName ?? "",
+              lastName: batch.demoSession.client.lastName ?? "",
+              email: batch.demoSession.client.email ?? "",
+              phone: batch.demoSession.client.phone ?? "",
+              demoDate: batch.demoSession.demoDate.toISOString(),
+              notes: batch.demoSession.notes ?? "",
+            }}
+          />
+        )}
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
           Club Averages
@@ -118,15 +153,10 @@ export default async function ImportMapPage({
         <p className="font-semibold font-heading mb-1">
           Final import — coming next
         </p>
-        <p>
-          After confirming club summaries, the following will be implemented:
-        </p>
-        <ul className="mt-2 list-disc pl-5 space-y-0.5 text-xs">
+        <ul className="mt-1 list-disc pl-5 space-y-0.5 text-xs">
           <li>Save club averages into DemoClubTest + ClubTestMetrics</li>
-          <li>Create or match existing GolfClient by name / email</li>
-          <li>Create DemoSession linked to the client</li>
-          <li>GHL follow-up sync trigger</li>
           <li>Swing Locker link generation</li>
+          <li>GHL follow-up sync trigger</li>
         </ul>
       </div>
     </>

@@ -8,18 +8,18 @@ export const metadata: Metadata = {
 
 const features = [
   {
-    href: "/staff/imports",
-    label: "Demo Imports",
+    href: "/staff/demo-sessions/new",
+    label: "Upload Demo Session",
     description:
-      "Upload and review TrackMan CSV exports. Map club data to demo sessions before publishing to clients.",
+      "Create a client, set the demo date, and upload a TrackMan XLSX file to generate club averages.",
     icon: "📥",
     status: "active" as const,
   },
   {
     href: "/staff/imports",
-    label: "Review Sessions",
+    label: "Demo Sessions",
     description:
-      "Review and finalize a submitted demo session before the client's Swing Locker goes live.",
+      "View all demo sessions, review club averages, and finalize imports for clients.",
     icon: "🔍",
     status: "active" as const,
   },

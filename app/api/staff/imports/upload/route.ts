@@ -58,6 +58,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // ── Optional: link to a draft DemoSession ───────────────────────────────────
+  const rawDemoSessionId = formData.get("demoSessionId");
+  const demoSessionId =
+    rawDemoSessionId && typeof rawDemoSessionId === "string"
+      ? parseInt(rawDemoSessionId, 10) || null
+      : null;
+
+  // Verify the DemoSession exists and is still in draft state before linking
+  if (demoSessionId !== null) {
+    const ds = await db.demoSession.findUnique({
+      where: { id: demoSessionId },
+      select: { id: true, status: true },
+    });
+    if (!ds) {
+      return NextResponse.json(
+        { success: false, message: "Demo session not found." },
+        { status: 404 },
+      );
+    }
+  }
+
   // ── Create ImportBatch record ──────────────────────────────────────────────
   const batch = await db.importBatch.create({
     data: {
@@ -65,6 +86,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       uploadedByStaffUserId: session.staffUserId,
       status: "uploaded",
       rowCount: 0,
+      ...(demoSessionId !== null ? { demoSessionId } : {}),
     },
   });
 
@@ -133,6 +155,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         parserMode,
       },
     });
+
+    // Advance DemoSession status from draft → uploaded
+    if (demoSessionId !== null) {
+      await db.demoSession.update({
+        where: { id: demoSessionId },
+        data: { status: "reviewing" },
+      });
+    }
 
     return NextResponse.json({
       success: true,
