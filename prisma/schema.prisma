@@ -34,6 +34,8 @@ model DemoSession {
   demoDate                  DateTime  @default(now())
   // Lifecycle: draft → uploaded → reviewing → finalized | failed
   status                    String    @default("draft")
+  // True when a finalized session's club summaries have been edited and re-finalization is required
+  needsRefinalization       Boolean   @default(false)
   salesRep                  String?
   journeyStage              String    @default("demo_completed")
   currentClub               String?
@@ -247,6 +249,8 @@ model ImportClubSummary {
   isManuallyEdited Boolean   @default(false)
   // Staff can exclude a club from the final Swing Locker / report
   includeInReport  Boolean   @default(true)
+  // Optional price set during review; copied into DemoClubTest.estimatedPrice on finalization
+  estimatedPrice   Decimal?  @db.Decimal(10, 2)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

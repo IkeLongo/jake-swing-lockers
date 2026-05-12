@@ -24,11 +24,17 @@ interface Props {
   batchId: number;
   initialSummaries: SerializedClubSummary[];
   parserMode?: string;
+  /** ID of the linked DemoSession, if one exists. Required for finalization. */
+  sessionId?: number;
+  /** Current status of the linked DemoSession. */
+  sessionStatus?: string;
+  /** True when the session is finalized but club summaries have been edited since. */
+  needsRefinalization?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Props) {
+export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization }: Props) {
   const [summaries, setSummaries] =
     useState<SerializedClubSummary[]>(initialSummaries);
   const [generating, setGenerating] = useState(false);
@@ -37,6 +43,14 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Pr
   // IDs currently awaiting a PATCH toggle response
   const [toggling, setToggling] = useState<Set<number>>(new Set());
   const [toggleError, setToggleError] = useState<string | null>(null);
+
+  const [finalizing, setFinalizing] = useState(false);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [finalized, setFinalized] = useState(
+    sessionStatus === "finalized",
+  );
+  // Tracks whether edits have been made since last finalization
+  const [dirty, setDirty] = useState(initialNeedsRefinalization ?? false);
 
   const hasSummaries = summaries.length > 0;
   const editingSummary = summaries.find((s) => s.id === editingId) ?? null;
@@ -88,6 +102,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Pr
           validTotalCount: Number(s.validTotalCount),
           isManuallyEdited: Boolean(s.isManuallyEdited),
           includeInReport: s.includeInReport === undefined ? true : Boolean(s.includeInReport),
+          estimatedPrice: toN(s.estimatedPrice),
         }),
       );
 
@@ -103,6 +118,8 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Pr
     setSummaries((prev) =>
       prev.map((s) => (s.id === updated.id ? updated : s)),
     );
+    // If the session was finalized, mark it as needing re-finalization
+    if (finalized) setDirty(true);
   }
 
   async function handleToggleInclude(id: number, currentIncluded: boolean) {
@@ -145,6 +162,8 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Pr
             ),
           );
         }
+        // If the session was finalized, mark it as needing re-finalization
+        if (finalized) setDirty(true);
       }
     } catch {
       // Revert on network error
@@ -245,6 +264,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Pr
               <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
                 <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Club</th>
+                <th className="min-w-[130px] whitespace-nowrap px-5 py-3 font-subheading text-right">Est. Price</th>
                 <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Shots</th>
                 <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Club Speed</th>
                 <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Ball Speed</th>
@@ -312,6 +332,14 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Pr
                         </span>
                       )}
                     </td>
+                    {/* Est. Price */}
+                    <td className="whitespace-nowrap px-5 py-4 text-right text-slate-700">
+                      {s.estimatedPrice !== null && s.estimatedPrice !== undefined ? (
+                        <span className="font-medium">${s.estimatedPrice.toFixed(2)}</span>
+                      ) : (
+                        <span className="text-slate-300 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-5 py-4 text-center text-slate-600">
                       {s.shotCount}
                     </td>
@@ -376,29 +404,98 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode }: Pr
         </div>
       )}
 
-      {/* ── Confirm placeholder ─────────────────────────────────────────────── */}
+      {/* ── Finalize section ────────────────────────────────────────────────── */}
       {hasSummaries && (
         <div className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-xs">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-700 font-subheading">
-                Ready to confirm?
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500 font-body">
-                Review and edit club averages above, then confirm to proceed.
-                Only included club summaries will be used in the future Swing
-                Locker/report.{" "}
-                {/* TODO: filter by includeInReport === true when final import/report generation is implemented */}
-              </p>
+          {finalized && !dirty ? (
+            // ── Clean finalized state ────────────────────────────────────────────
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-emerald-700 font-subheading">
+                  ✓ Session Finalized
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500 font-body">
+                  Demo session finalized successfully. Club averages have been saved.
+                </p>
+              </div>
+              <span className="shrink-0 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 font-subheading">
+                Finalized
+              </span>
             </div>
-            <button
-              disabled
-              title="Coming soon — final import into golf records will be implemented next."
-              className="shrink-0 rounded-lg bg-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-400 cursor-not-allowed font-body"
-            >
-              Confirm Club Summaries
-            </button>
-          </div>
+          ) : (
+            // ── Not yet finalized, OR finalized-but-dirty (needs re-finalization) ───────
+            <div className="flex flex-col gap-3">
+              {/* Dirty warning banner */}
+              {finalized && dirty && (
+                <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                  <span className="mt-0.5 shrink-0 text-amber-500" aria-hidden>&#9888;</span>
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800 font-subheading">
+                      Club summaries have changed since finalization.
+                    </p>
+                    <p className="mt-0.5 text-xs text-amber-700 font-body">
+                      Re-finalize this session to update the saved club data.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-700 font-subheading">
+                    {dirty ? "Ready to re-finalize?" : "Ready to finalize?"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500 font-body">
+                    Review and edit club averages above. Only included clubs will
+                    be saved. This action cannot be undone.
+                  </p>
+                  {finalizeError && (
+                    <p className="mt-2 text-xs text-red-600 font-body">{finalizeError}</p>
+                  )}
+                </div>
+                <button
+                  disabled={finalizing || !sessionId}
+                  onClick={() => {
+                    if (!sessionId) return;
+                    setFinalizing(true);
+                    setFinalizeError(null);
+                    fetch(`/api/staff/demo-sessions/${sessionId}/finalize`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ batchId }),
+                    })
+                      .then(async (res) => {
+                        const data = (await res.json().catch(() => ({}))) as {
+                          success?: boolean;
+                          alreadyFinalized?: boolean;
+                          error?: string;
+                        };
+                        if (!res.ok || !data.success) {
+                          setFinalizeError(
+                            data.error ?? "Failed to finalize. Please try again.",
+                          );
+                        } else {
+                          setFinalized(true);
+                          setDirty(false);
+                        }
+                      })
+                      .catch(() => {
+                        setFinalizeError("Network error — please try again.");
+                      })
+                      .finally(() => setFinalizing(false));
+                  }}
+                  className="shrink-0 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-body"
+                >
+                  {finalizing
+                    ? dirty
+                      ? "Re-Finalizing…"
+                      : "Finalizing…"
+                    : dirty
+                      ? "Re-Finalize Session"
+                      : "Finalize Session"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

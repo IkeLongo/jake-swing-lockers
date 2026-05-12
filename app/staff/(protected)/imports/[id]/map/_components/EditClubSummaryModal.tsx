@@ -24,6 +24,8 @@ export interface SerializedClubSummary {
   validTotalCount: number;
   isManuallyEdited: boolean;
   includeInReport: boolean;
+  /** Optional price entered during review; copied into DemoClubTest on finalization. */
+  estimatedPrice: number | null;
 }
 
 interface Props {
@@ -64,6 +66,9 @@ export function EditClubSummaryModal({
   );
   const [avgCarry, setAvgCarry] = useState(numToString(summary.avgCarry));
   const [avgTotal, setAvgTotal] = useState(numToString(summary.avgTotal));
+  const [estimatedPrice, setEstimatedPrice] = useState(
+    numToString(summary.estimatedPrice),
+  );
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +104,7 @@ export function EditClubSummaryModal({
             avgMaxHeight: avgMaxHeight === "" ? null : avgMaxHeight,
             avgCarry: avgCarry === "" ? null : avgCarry,
             avgTotal: avgTotal === "" ? null : avgTotal,
+            estimatedPrice: estimatedPrice === "" ? null : estimatedPrice,
           }),
         },
       );
@@ -141,6 +147,7 @@ export function EditClubSummaryModal({
         validTotalCount: Number(s.validTotalCount),
         isManuallyEdited: Boolean(s.isManuallyEdited),
         includeInReport: s.includeInReport === undefined ? true : Boolean(s.includeInReport),
+        estimatedPrice: toN(s.estimatedPrice),
       });
 
       onClose();
@@ -265,6 +272,17 @@ export function EditClubSummaryModal({
             Leave a numeric field blank to store it as no data (—). Shot counts
             and valid counts are not editable.
           </p>
+
+          {/* Estimated price */}
+          <ModalField
+            label="Estimated Price ($)"
+            id="estimatedPrice"
+            type="number"
+            value={estimatedPrice}
+            onChange={setEstimatedPrice}
+            disabled={saving}
+            hint="Optional. Must be a positive number if provided."
+          />
         </div>
 
         {/* Footer */}

@@ -23,6 +23,7 @@ interface PatchBody {
   avgCarry?: unknown;
   avgTotal?: unknown;
   includeInReport?: unknown;
+  estimatedPrice?: unknown;
 }
 
 export async function PATCH(
@@ -118,11 +119,46 @@ export async function PATCH(
   if (markEdited) {
     update.isManuallyEdited = true;
   }
+
+  // estimatedPrice: optional non-negative decimal; null to clear
+  if ("estimatedPrice" in body) {
+    const raw = body.estimatedPrice;
+    if (raw === null || raw === undefined || raw === "") {
+      update.estimatedPrice = null;
+    } else {
+      const n = typeof raw === "number" ? raw : parseFloat(String(raw));
+      if (!isFinite(n) || n < 0) {
+        return NextResponse.json(
+          { error: "estimatedPrice must be a non-negative number or null." },
+          { status: 422 },
+        );
+      }
+      update.estimatedPrice = n;
+    }
+  }
   // ── Persist ─────────────────────────────────────────────────────────────────
   const updated = await db.importClubSummary.update({
     where: { id: summaryIdNum },
     data: update,
   });
+
+  // ── Flag session as needing re-finalization ──────────────────────────────────
+  // If the related DemoSession is already finalized, mark it dirty so the UI
+  // prompts the rep to re-finalize and push the new values into DemoClubTest.
+  const batch = await db.importBatch.findUnique({
+    where: { id: batchId },
+    select: { demoSessionId: true },
+  });
+  if (batch?.demoSessionId) {
+    await db.demoSession.updateMany({
+      where: {
+        id: batch.demoSessionId,
+        status: "finalized",
+        needsRefinalization: false,
+      },
+      data: { needsRefinalization: true },
+    });
+  }
 
   return NextResponse.json({ success: true, summary: updated });
 }

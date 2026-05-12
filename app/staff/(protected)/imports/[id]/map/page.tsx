@@ -50,6 +50,7 @@ export default async function ImportMapPage({
             id: true,
             demoDate: true,
             status: true,
+            needsRefinalization: true,
             notes: true,
             client: {
               select: {
@@ -93,6 +94,7 @@ export default async function ImportMapPage({
     validTotalCount: s.validTotalCount,
     isManuallyEdited: s.isManuallyEdited,
     includeInReport: s.includeInReport,
+    estimatedPrice: toNum(s.estimatedPrice),
   }));
 
   return (
@@ -146,19 +148,11 @@ export default async function ImportMapPage({
         batchId={batchId}
         initialSummaries={summaries}
         parserMode={batch.parserMode}
+        sessionId={batch.demoSession?.id}
+        sessionStatus={batch.demoSession?.status}
+        needsRefinalization={batch.demoSession?.needsRefinalization ?? false}
       />
 
-      {/* ── Future import architecture note ────────────────────────────────── */}
-      <div className="mt-8 rounded-xl border border-blue-100 bg-blue-50 px-5 py-4 text-sm text-blue-800 font-body">
-        <p className="font-semibold font-heading mb-1">
-          Final import — coming next
-        </p>
-        <ul className="mt-1 list-disc pl-5 space-y-0.5 text-xs">
-          <li>Save club averages into DemoClubTest + ClubTestMetrics</li>
-          <li>Swing Locker link generation</li>
-          <li>GHL follow-up sync trigger</li>
-        </ul>
-      </div>
     </>
   );
 }
