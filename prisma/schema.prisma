@@ -24,6 +24,7 @@ model GolfClient {
   updatedAt        DateTime  @updatedAt
 
   demoSessions DemoSession[]
+  swingLockerOtps SwingLockerOtp[]
 }
 
 model DemoSession {
@@ -155,6 +156,35 @@ model StaffOtp {
   staff StaffUser @relation(fields: [staffUserId], references: [id])
 
   @@index([staffUserId])
+  @@index([expiresAt])
+  @@index([usedAt])
+}
+
+// ── Swing Locker Customer Authentication ──────────────────────────────────────
+// Used by GolfClient / golfer customers only. Intentionally separate from staff auth.
+//
+// Auth flow (passwordless OTP):
+//   POST /api/swing-locker-auth/request-code  — lookup GolfClient by email or phone, create SwingLockerOtp
+//   POST /api/swing-locker-auth/verify-code   — verify code, issue HMAC-signed session cookie
+//   POST /api/swing-locker-auth/logout        — clear session cookie
+//
+// Sessions are NOT stored in the database. They are self-verifying HMAC tokens
+// stored as HTTP-only cookies (cookie name: swing_locker_session).
+// SwingLockerOtp is single-use and expires in 10 minutes.
+
+model SwingLockerOtp {
+  id            Int       @id @default(autoincrement())
+  golfClientId  Int
+  // SHA-256 hash of the 6-digit numeric code — raw code is never stored
+  codeHash      String
+  expiresAt     DateTime
+  // Set when the OTP is consumed — used to enforce single-use
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  client GolfClient @relation(fields: [golfClientId], references: [id])
+
+  @@index([golfClientId])
   @@index([expiresAt])
   @@index([usedAt])
 }
