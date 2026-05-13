@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
 import SessionDetailsCard from "./_components/SessionDetailsCard";
+import SendAccessButton from "../../_components/SendAccessButton";
 
 export const metadata: Metadata = {
   title: "Club Averages — Jake Swing Lockers Staff",
@@ -52,6 +53,7 @@ export default async function ImportMapPage({
             status: true,
             needsRefinalization: true,
             notes: true,
+            accessInviteStatus: true,
             client: {
               select: {
                 id: true,
@@ -103,7 +105,7 @@ export default async function ImportMapPage({
       <div className="mb-6">
         <Link
           href="/staff/imports"
-          className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+          className="mb-6 underline inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
         >
           ← Back to Sessions
         </Link>
@@ -113,6 +115,7 @@ export default async function ImportMapPage({
           <SessionDetailsCard
             sessionId={batch.demoSession.id}
             sessionStatus={batch.demoSession.status}
+            uploadedAt={batch.createdAt.toISOString()}
             initial={{
               firstName: batch.demoSession.client.firstName ?? "",
               lastName: batch.demoSession.client.lastName ?? "",
@@ -142,6 +145,29 @@ export default async function ImportMapPage({
           accent="blue"
         />
       </div>
+
+      {/* ── Swing Locker Access ──────────────────────────────────────────── */}
+      {batch.demoSession && (
+        <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+            Swing Locker Access
+          </h2>
+          {batch.demoSession.status !== "finalized" ? (
+            <p className="text-sm text-slate-400">
+              Finalize this session before sending Swing Locker access.
+            </p>
+          ) : (
+            <SendAccessButton
+              sessionId={batch.demoSession.id}
+              initialStatus={batch.demoSession.accessInviteStatus ?? null}
+              clientHasContact={
+                !!(batch.demoSession.client.email || batch.demoSession.client.phone)
+              }
+              variant="card"
+            />
+          )}
+        </div>
+      )}
 
       {/* ── Club summaries (primary) ────────────────────────────────────────── */}
       <ClubSummarySection

@@ -18,11 +18,12 @@ interface Props {
   initialRequests: PurchaseRequestSummary[];
 }
 
-function fmtDate(date: Date | string): string {
+function fmtDate(date: Date | string, utc = false): string {
   return new Date(date).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
+    ...(utc ? { timeZone: "UTC" } : {}),
   });
 }
 
@@ -79,9 +80,6 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Submitted
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Notes
-              </th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
@@ -92,7 +90,7 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
                   {req.clientName}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
-                  {fmtDate(req.demoDate)}
+                  {fmtDate(req.demoDate, true)}
                 </td>
                 <td className="px-4 py-3 text-center text-slate-600">
                   {req.itemCount}
@@ -115,9 +113,6 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
                 </td>
                 <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
                   {fmtDate(req.createdAt)}
-                </td>
-                <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate">
-                  {req.notes ?? <span className="text-slate-300">—</span>}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <Link

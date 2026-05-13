@@ -48,6 +48,12 @@ model DemoSession {
   ghlLastSyncedAt           DateTime?
   ghlSyncStatus             String?
   ghlSyncError              String?   @db.Text
+  // Access invite: null | pending | sent | failed
+  // Future: background job reads pending rows, sends GHL message, sets sent + sentAt
+  accessInviteStatus        String?
+  accessInviteQueuedAt      DateTime?
+  accessInviteSentAt        DateTime?
+  accessInviteError         String?   @db.Text
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
 
@@ -60,6 +66,7 @@ model DemoSession {
   @@index([clientId])
   @@index([journeyStage])
   @@index([demoDate])
+  @@index([accessInviteStatus])
 }
 
 model DemoClubTest {

@@ -9,6 +9,18 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+const ACCESS_BADGE_STYLES: Record<string, string> = {
+  pending: "bg-yellow-100 text-yellow-700",
+  sent: "bg-emerald-100 text-emerald-700",
+  failed: "bg-red-100 text-red-700",
+};
+
+const ACCESS_BADGE_LABELS: Record<string, string> = {
+  pending: "Pending",
+  sent: "Sent",
+  failed: "Failed",
+};
+
 const SESSION_STATUS_STYLES: Record<string, string> = {
   draft: "bg-slate-100 text-slate-500",
   uploaded: "bg-blue-100 text-blue-700",
@@ -34,7 +46,7 @@ export default async function StaffImportsPage() {
       id: true,
       status: true,
       demoDate: true,
-      createdAt: true,
+      accessInviteStatus: true,
       client: {
         select: {
           firstName: true,
@@ -80,7 +92,7 @@ export default async function StaffImportsPage() {
         <div>
           <Link
             href="/staff/dashboard"
-            className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+            className="mb-6 underline inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
           >
             ← Back to Dashboard
           </Link>
@@ -146,7 +158,7 @@ export default async function StaffImportsPage() {
                   Clubs
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
-                  Uploaded
+                  Access
                 </th>
                 <th className="px-4 py-3" />
               </tr>
@@ -165,10 +177,6 @@ export default async function StaffImportsPage() {
                 const demoDateStr = new Date(s.demoDate).toLocaleDateString(
                   "en-US",
                   { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" },
-                );
-                const uploadedStr = new Date(s.createdAt).toLocaleDateString(
-                  "en-US",
-                  { month: "short", day: "numeric", year: "numeric" },
                 );
 
                 // Determine the best action link
@@ -197,8 +205,16 @@ export default async function StaffImportsPage() {
                     <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                       {clubCount > 0 ? clubCount : <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                      {uploadedStr}
+                    <td className="px-4 py-3">
+                      {s.status === "finalized" ? (
+                        <span
+                          className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${ACCESS_BADGE_STYLES[s.accessInviteStatus ?? ""] ?? "bg-slate-100 text-slate-500"}`}
+                        >
+                          {ACCESS_BADGE_LABELS[s.accessInviteStatus ?? ""] ?? "Not Sent"}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-5">

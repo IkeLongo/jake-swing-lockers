@@ -11,6 +11,8 @@ interface Props {
   sessionId: number;
   sessionStatus: string;
   initial: SessionEditData;
+  /** ISO date string — the batch upload timestamp */
+  uploadedAt?: string;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -19,6 +21,7 @@ export default function SessionDetailsCard({
   sessionId,
   sessionStatus,
   initial,
+  uploadedAt,
 }: Props) {
   const [details, setDetails] = useState<SessionEditData>(initial);
   const [editOpen, setEditOpen] = useState(false);
@@ -53,6 +56,16 @@ export default function SessionDetailsCard({
           <p className="text-xs text-slate-500 font-body">
             Demo Session — {formattedDate}
           </p>
+          {uploadedAt && (
+            <p className="text-xs text-slate-400 font-body">
+              Uploaded{" "}
+              {new Date(uploadedAt).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </p>
+          )}
           {details.notes && (
             <p className="mt-1 text-xs text-slate-400 font-body">
               Notes: {details.notes}

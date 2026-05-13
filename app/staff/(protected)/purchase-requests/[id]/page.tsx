@@ -19,6 +19,7 @@ function fmtDate(date: Date | string): string {
     year: "numeric",
     month: "long",
     day: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -33,6 +34,15 @@ function fmtPrice(value: number): string {
 function fmtNum(value: number | null, decimals = 1): string {
   if (value == null) return "—";
   return value.toFixed(decimals);
+}
+
+function fmtPhone(phone: string | null | undefined): string {
+  if (!phone) return "—";
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return phone;
 }
 
 const SESSION_STATUS_STYLES: Record<string, string> = {
@@ -194,7 +204,7 @@ export default async function PurchaseRequestDetailPage({
           <div className="flex flex-col gap-2.5">
             <DetailRow label="Name" value={clientName} />
             <DetailRow label="Email" value={client.email} />
-            <DetailRow label="Phone" value={client.phone} />
+            <DetailRow label="Phone" value={fmtPhone(client.phone)} />
           </div>
         </SectionCard>
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { listAllPurchaseRequests } from "@/lib/queries/purchase-requests";
 import { PurchaseRequestsTable } from "./_components/PurchaseRequestsTable";
 
@@ -14,6 +15,12 @@ export default async function PurchaseRequestsPage() {
     <>
       {/* ── Page header ─────────────────────────────────────────────────────── */}
       <div className="mb-8">
+        <Link
+          href="/staff/dashboard"
+          className="mb-6 underline inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+        >
+          ← Back to Dashboard
+        </Link>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
           Purchase Requests
         </h1>

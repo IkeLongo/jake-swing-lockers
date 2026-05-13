@@ -13,7 +13,7 @@ export default function NewImportPage() {
       <div className="mb-8">
         <Link
           href="/staff/imports"
-          className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+          className="mb-6 underline inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
         >
           ← Back to Imports
         </Link>
