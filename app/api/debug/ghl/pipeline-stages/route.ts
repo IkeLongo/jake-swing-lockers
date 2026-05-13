@@ -30,29 +30,29 @@ function checkSecret(req: NextRequest): NextResponse | null {
 
 // Stage name → env key mapping
 const STAGE_ENV_MAP: Record<string, string> = {
-  "demosubmitted":      "GHL_STAGE_DEMO_SUBMITTED_ID",
-  "swinglockersentid":  "GHL_STAGE_SWING_LOCKER_SENT_ID",
-  "swingleckersent":    "GHL_STAGE_SWING_LOCKER_SENT_ID",
-  "swinglockerssent":   "GHL_STAGE_SWING_LOCKER_SENT_ID",
+  "demosubmitted":      "GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID",
+  "swinglockersentid":  "GHL_SWINGLOCKER_STAGE_SWING_LOCKER_SENT_ID",
+  "swingleckersent":    "GHL_SWINGLOCKER_STAGE_SWING_LOCKER_SENT_ID",
+  "swinglockerssent":   "GHL_SWINGLOCKER_STAGE_SWING_LOCKER_SENT_ID",
 };
 
 const STAGE_TARGETS = [
-  { envKey: "GHL_STAGE_DEMO_SUBMITTED_ID",    normalized: normalizeName("Demo Submitted") },
-  { envKey: "GHL_STAGE_SWING_LOCKER_SENT_ID", normalized: normalizeName("Swing Locker Sent") },
+  { envKey: "GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID",    normalized: normalizeName("Demo Submitted") },
+  { envKey: "GHL_SWINGLOCKER_STAGE_SWING_LOCKER_SENT_ID", normalized: normalizeName("Swing Locker Sent") },
 ];
 
 export async function GET(req: NextRequest) {
   const deny = checkSecret(req);
   if (deny) return deny;
 
-  const locationId = process.env.GHL_LOCATION_ID;
+  const locationId = process.env.GHL_SWINGLOCKER_LOCATION_ID;
   if (!locationId) {
-    return NextResponse.json({ success: false, error: "Missing GHL_LOCATION_ID" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Missing GHL_SWINGLOCKER_LOCATION_ID" }, { status: 500 });
   }
 
-  const pipelineId = process.env.GHL_PIPELINE_ID;
+  const pipelineId = process.env.GHL_SWINGLOCKER_PIPELINE_ID;
   if (!pipelineId) {
-    return NextResponse.json({ success: false, error: "Missing GHL_PIPELINE_ID" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Missing GHL_SWINGLOCKER_PIPELINE_ID" }, { status: 500 });
   }
 
   let data: GhlPipelinesResponse;

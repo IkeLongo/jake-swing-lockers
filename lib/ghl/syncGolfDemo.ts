@@ -107,18 +107,18 @@ export async function syncGolfDemoToGHL(
       }
     };
 
-    addField("GHL_CF_SWING_LOCKER_URL", lockerUrl);
-    addField("GHL_CF_LATEST_DEMO_SESSION_ID", String(session.id));
+    addField("GHL_SWINGLOCKER_CF_SWING_LOCKER_URL", lockerUrl);
+    addField("GHL_SWINGLOCKER_CF_LATEST_DEMO_SESSION_ID", String(session.id));
     addField(
-      "GHL_CF_LATEST_DEMO_DATE",
+      "GHL_SWINGLOCKER_CF_LATEST_DEMO_DATE",
       session.demoDate.toISOString().split("T")[0]
     );
-    addField("GHL_CF_RECOMMENDED_CLUB_SUMMARY", recommendedClubSummary);
-    addField("GHL_CF_CURRENT_CLUB_SUMMARY", currentClubSummary);
-    addField("GHL_CF_DEMO_FOLLOWUP_STATUS", "pending");
-    addField("GHL_CF_SALES_REP_NAME", session.salesRep ?? "");
-    addField("GHL_CF_DEMO_CLUB_COUNT", String(demoClubCount));
-    addField("GHL_CF_LAST_DEMO_SUBMITTED_AT", new Date().toISOString());
+    addField("GHL_SWINGLOCKER_CF_RECOMMENDED_CLUB_SUMMARY", recommendedClubSummary);
+    addField("GHL_SWINGLOCKER_CF_CURRENT_CLUB_SUMMARY", currentClubSummary);
+    addField("GHL_SWINGLOCKER_CF_DEMO_FOLLOWUP_STATUS", "pending");
+    addField("GHL_SWINGLOCKER_CF_SALES_REP_NAME", session.salesRep ?? "");
+    addField("GHL_SWINGLOCKER_CF_DEMO_CLUB_COUNT", String(demoClubCount));
+    addField("GHL_SWINGLOCKER_CF_LAST_DEMO_SUBMITTED_AT", new Date().toISOString());
 
     let customFieldsUpdated = false;
     if (customFields.length > 0) {

@@ -19,9 +19,9 @@ export class GhlDuplicateContactError extends Error {
 }
 
 function getToken(): string {
-  const token = process.env.GHL_PRIVATE_INTEGRATION_TOKEN;
+  const token = process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
   if (!token) {
-    throw new Error("Missing GHL_PRIVATE_INTEGRATION_TOKEN environment variable.");
+    throw new Error("Missing GHL_SWINGLOCKER_PRIVATE_TOKEN environment variable.");
   }
   return token;
 }

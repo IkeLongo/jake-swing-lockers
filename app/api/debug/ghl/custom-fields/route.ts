@@ -39,13 +39,13 @@ function checkSecret(req: NextRequest): NextResponse | null {
 
 // Target field name → env key
 const FIELD_TARGETS: Array<{ envKey: string; normalized: string }> = [
-  { envKey: "GHL_CF_SWING_LOCKER_URL",          normalized: normalizeName("Swing Locker URL") },
-  { envKey: "GHL_CF_LATEST_DEMO_SESSION_ID",     normalized: normalizeName("Latest Demo Session ID") },
-  { envKey: "GHL_CF_LATEST_DEMO_DATE",           normalized: normalizeName("Latest Demo Date") },
-  { envKey: "GHL_CF_RECOMMENDED_CLUB_SUMMARY",   normalized: normalizeName("Recommended Club Summary") },
-  { envKey: "GHL_CF_DEMO_FOLLOWUP_STATUS",       normalized: normalizeName("Demo Follow-Up Status") },
-  { envKey: "GHL_CF_BUYER_INTEREST_LEVEL",       normalized: normalizeName("Buyer Interest Level") },
-  { envKey: "GHL_CF_SALES_REP_NAME",             normalized: normalizeName("Sales Rep Name") },
+  { envKey: "GHL_SWINGLOCKER_CF_SWING_LOCKER_URL",          normalized: normalizeName("Swing Locker URL") },
+  { envKey: "GHL_SWINGLOCKER_CF_LATEST_DEMO_SESSION_ID",     normalized: normalizeName("Latest Demo Session ID") },
+  { envKey: "GHL_SWINGLOCKER_CF_LATEST_DEMO_DATE",           normalized: normalizeName("Latest Demo Date") },
+  { envKey: "GHL_SWINGLOCKER_CF_RECOMMENDED_CLUB_SUMMARY",   normalized: normalizeName("Recommended Club Summary") },
+  { envKey: "GHL_SWINGLOCKER_CF_DEMO_FOLLOWUP_STATUS",       normalized: normalizeName("Demo Follow-Up Status") },
+  { envKey: "GHL_SWINGLOCKER_CF_BUYER_INTEREST_LEVEL",       normalized: normalizeName("Buyer Interest Level") },
+  { envKey: "GHL_SWINGLOCKER_CF_SALES_REP_NAME",             normalized: normalizeName("Sales Rep Name") },
   { envKey: "GHL_CF_DEMO_LOCATION",              normalized: normalizeName("Demo Location") },
 ];
 
@@ -53,9 +53,9 @@ export async function GET(req: NextRequest) {
   const deny = checkSecret(req);
   if (deny) return deny;
 
-  const locationId = process.env.GHL_LOCATION_ID;
+  const locationId = process.env.GHL_SWINGLOCKER_LOCATION_ID;
   if (!locationId) {
-    return NextResponse.json({ success: false, error: "Missing GHL_LOCATION_ID" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Missing GHL_SWINGLOCKER_LOCATION_ID" }, { status: 500 });
   }
 
   let data: GhlCustomFieldsResponse;

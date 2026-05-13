@@ -1,8 +1,8 @@
 import { ghlFetch, GhlDuplicateContactError } from "./client";
 
 const LOCATION_ID = () => {
-  const id = process.env.GHL_LOCATION_ID;
-  if (!id) throw new Error("Missing GHL_LOCATION_ID environment variable.");
+  const id = process.env.GHL_SWINGLOCKER_LOCATION_ID;
+  if (!id) throw new Error("Missing GHL_SWINGLOCKER_LOCATION_ID environment variable.");
   return id;
 };
 
