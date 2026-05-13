@@ -38,14 +38,6 @@ function SessionCard({ session }: { session: CustomerSessionSummary }) {
         </p>
         <div className="flex items-center gap-3 font-body text-sm text-slate-500">
           <span>{session.clubsTestedCount} club{session.clubsTestedCount !== 1 ? "s" : ""} tested</span>
-          {session.estimatedTotal != null && (
-            <>
-              <span className="text-slate-300">·</span>
-              <span className="font-semibold text-slate-700">
-                {fmtPrice(session.estimatedTotal)} est.
-              </span>
-            </>
-          )}
         </div>
       </div>
       <Link

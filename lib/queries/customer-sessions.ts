@@ -12,7 +12,10 @@ export interface CustomerSessionSummary {
 }
 
 export interface CustomerClub {
+  id: number;
   clubType: string | null;
+  brand: string | null;
+  model: string | null;
   clubSpeed: number | null;
   ballSpeed: number | null;
   spinRate: number | null;
@@ -112,7 +115,10 @@ export async function getCustomerSession(
       clubTests: {
         orderBy: { sortOrder: "asc" },
         select: {
+          id: true,
           clubType: true,
+          brand: true,
+          model: true,
           estimatedPrice: true,
           metrics: {
             select: {
@@ -131,7 +137,10 @@ export async function getCustomerSession(
   if (!row) return null;
 
   const clubs: CustomerClub[] = row.clubTests.map((ct) => ({
+    id: ct.id,
     clubType: ct.clubType,
+    brand: ct.brand,
+    model: ct.model,
     estimatedPrice: toNum(ct.estimatedPrice),
     clubSpeed: toNum(ct.metrics?.clubSpeed),
     ballSpeed: toNum(ct.metrics?.ballSpeed),

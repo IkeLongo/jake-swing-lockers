@@ -23,8 +23,9 @@ model GolfClient {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  demoSessions DemoSession[]
-  swingLockerOtps SwingLockerOtp[]
+  demoSessions     DemoSession[]
+  swingLockerOtps  SwingLockerOtp[]
+  purchaseRequests PurchaseRequest[]
 }
 
 model DemoSession {
@@ -54,6 +55,7 @@ model DemoSession {
   clubTests     DemoClubTest[]
   ghlSyncEvents GhlSyncEvent[]
   importBatches ImportBatch[]
+  purchaseRequests PurchaseRequest[]
 
   @@index([clientId])
   @@index([journeyStage])
@@ -79,6 +81,7 @@ model DemoClubTest {
 
   demoSession DemoSession      @relation(fields: [demoSessionId], references: [id])
   metrics     ClubTestMetrics?
+  purchaseRequestItems PurchaseRequestItem[]
 
   @@index([demoSessionId])
 }
@@ -287,4 +290,58 @@ model ImportClubSummary {
   batch ImportBatch @relation(fields: [importBatchId], references: [id])
 
   @@index([importBatchId])
+}
+
+// ── Purchase Requests ─────────────────────────────────────────────────────────
+// Captures customer purchase intent from the Swing Locker session detail page.
+// NOT ecommerce or checkout. This is sales workflow initiation / lead qualification.
+//
+// Status lifecycle:
+//   pending → contacted → completed | cancelled
+//
+// GHL integration fields are present but unused in V1.
+// Future: sync ghlOpportunityId to a "Purchase Interest" pipeline stage,
+//         tag contact golf-demo:purchase-intent, notify assigned sales rep.
+
+model PurchaseRequest {
+  id             Int       @id @default(autoincrement())
+  golfClientId   Int
+  demoSessionId  Int
+  // pending | contacted | completed | cancelled
+  status         String    @default("pending")
+  notes          String?   @db.Text
+
+  // GHL-ready fields — unused in V1, plug in later cleanly
+  ghlSyncStatus    String?
+  ghlLastSyncedAt  DateTime?
+  ghlSyncError     String?   @db.Text
+  ghlOpportunityId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  golfClient   GolfClient            @relation(fields: [golfClientId], references: [id])
+  demoSession  DemoSession           @relation(fields: [demoSessionId], references: [id])
+  items        PurchaseRequestItem[]
+
+  @@index([golfClientId])
+  @@index([demoSessionId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PurchaseRequestItem {
+  id                Int      @id @default(autoincrement())
+  purchaseRequestId Int
+  demoClubTestId    Int
+  // Denormalized snapshot at time of request — survives staff edits to club data
+  clubType          String?
+  estimatedPrice    Decimal? @db.Decimal(10, 2)
+  createdAt         DateTime @default(now())
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  demoClubTest    DemoClubTest    @relation(fields: [demoClubTestId], references: [id])
+
+  @@index([purchaseRequestId])
+  @@index([demoClubTestId])
 }

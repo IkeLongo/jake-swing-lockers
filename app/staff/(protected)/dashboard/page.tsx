@@ -24,6 +24,14 @@ const features = [
     status: "active" as const,
   },
   {
+    href: "/staff/purchase-requests",
+    label: "Purchase Requests",
+    description:
+      "View and manage customer purchase interest submissions from Swing Locker sessions.",
+    icon: "🛒",
+    status: "active" as const,
+  },
+  {
     href: "#",
     label: "TrackMan API Ingestion",
     description:

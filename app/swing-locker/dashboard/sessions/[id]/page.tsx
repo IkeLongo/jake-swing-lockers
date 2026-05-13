@@ -9,6 +9,11 @@ import {
   getCustomerSession,
   type CustomerClub,
 } from "@/lib/queries/customer-sessions";
+import { getExistingPurchaseRequest } from "@/lib/queries/purchase-requests";
+import {
+  PurchaseRequestTrigger,
+  type ModalClub,
+} from "./_components/PurchaseRequestTrigger";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -148,8 +153,11 @@ export default async function SessionDetailPage({
   const sessionId = parseInt(rawId, 10);
   if (isNaN(sessionId)) notFound();
 
-  // ── Load session (ownership + finalized-only enforced in query) ────────────
-  const session = await getCustomerSession(golfClientId, sessionId);
+  // ── Load session + check for existing purchase request (parallel) ─────────
+  const [session, existingRequest] = await Promise.all([
+    getCustomerSession(golfClientId, sessionId),
+    getExistingPurchaseRequest(golfClientId, sessionId),
+  ]);
   if (!session) notFound();
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -226,6 +234,29 @@ export default async function SessionDetailPage({
               {fmtPrice(session.estimatedTotal)}
             </p>
           </div>
+        )}
+
+        {/* Purchase request CTA */}
+        {session.clubs.length > 0 && (
+          existingRequest ? (
+            <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-5 py-3.5 flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+              <p className="font-body text-sm font-semibold text-slate-600">
+                Purchase request submitted
+              </p>
+            </div>
+          ) : (
+            <PurchaseRequestTrigger
+              sessionId={session.id}
+              clubs={session.clubs.map<ModalClub>((c) => ({
+                id: c.id,
+                clubType: c.clubType,
+                brand: c.brand,
+                model: c.model,
+                estimatedPrice: c.estimatedPrice,
+              }))}
+            />
+          )
         )}
       </div>
     </main>
