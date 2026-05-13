@@ -78,6 +78,12 @@ export default async function StaffImportsPage() {
       {/* ── Page header ─────────────────────────────────────────────────────── */}
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
+          <Link
+            href="/staff/dashboard"
+            className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+          >
+            ← Back to Dashboard
+          </Link>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
             Demo Sessions
           </h1>

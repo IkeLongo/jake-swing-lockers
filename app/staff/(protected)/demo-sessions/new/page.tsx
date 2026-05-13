@@ -12,10 +12,10 @@ export default function NewDemoSessionPage() {
     <>
       <div className="mb-8">
         <Link
-          href="/staff/imports"
+          href="/staff/dashboard"
           className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
         >
-          ← Back to Sessions
+          ← Back to Dashboard
         </Link>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
           Create Demo Session

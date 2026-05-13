@@ -27,6 +27,7 @@ export default function StaffProtectedLayout({
           <div className="flex items-center gap-1 sm:gap-4">
             <nav className="hidden sm:flex items-center gap-1">
               <NavLink href="/staff/dashboard">Dashboard</NavLink>
+              <NavLink href="/staff/clients">Clients</NavLink>
               <NavLink href="/staff/imports">Demo Imports</NavLink>
             </nav>
             <LogoutButton />
