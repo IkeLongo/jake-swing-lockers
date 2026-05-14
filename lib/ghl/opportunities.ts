@@ -118,6 +118,7 @@ export async function upsertGolfDemoOpportunity(
     await updateGolfDemoOpportunity(existingOpportunityId, {
       name: input.name,
       pipelineStageId: STAGE_DEMO_SUBMITTED(),
+      monetaryValue: input.monetaryValue,
     });
     return existingOpportunityId;
   }
@@ -127,6 +128,7 @@ export async function upsertGolfDemoOpportunity(
     await updateGolfDemoOpportunity(existing.id, {
       name: input.name,
       pipelineStageId: STAGE_DEMO_SUBMITTED(),
+      monetaryValue: input.monetaryValue,
     });
     return existing.id;
   }

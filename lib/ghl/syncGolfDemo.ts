@@ -97,6 +97,13 @@ export async function syncGolfDemoToGHL(
 
     const demoClubCount = demoPairs.length;
 
+    // ── 4b. Calculate estimated opportunity value from demo club prices ────────
+    const priceSum = demoPairs
+      .filter((t) => t.estimatedPrice != null)
+      .reduce((acc, t) => acc + t.estimatedPrice!.toNumber(), 0);
+    const monetaryValue: number | undefined =
+      priceSum > 0 ? Math.round(priceSum * 100) / 100 : undefined;
+
     // ── 5. Update GHL contact custom fields ─────────────────────────────────
     const customFields: { id: string; value: string }[] = [];
 
@@ -132,6 +139,7 @@ export async function syncGolfDemoToGHL(
       {
         name: `${oppName} - Golf Demo`.trim(),
         contactId: resolvedGhlContactId,
+        monetaryValue,
       },
       session.ghlOpportunityId
     );

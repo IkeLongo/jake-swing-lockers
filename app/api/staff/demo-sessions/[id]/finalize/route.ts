@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
+import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
 
 // ── POST /api/staff/demo-sessions/[id]/finalize ───────────────────────────────
 //
@@ -127,6 +128,30 @@ export async function POST(
   // ── Transactional write ──────────────────────────────────────────────────────
   const isRefinalize = session.status === "finalized";
 
+  // ── Re-finalization guard: block if purchase requests reference club tests ────
+  //
+  // Re-finalization deletes and recreates DemoClubTest rows. If PurchaseRequestItem
+  // rows reference those rows via demoClubTestId (no cascade), Prisma throws P2003.
+  // Block early with a 409 rather than letting the transaction fail mid-way.
+  //
+  // TODO (future): implement versioned/soft-deactivated club tests so re-finalization
+  // can coexist with historical purchase requests without blocking.
+  if (isRefinalize) {
+    const purchaseRequestCount = await db.purchaseRequest.count({
+      where: { demoSessionId: sessionId },
+    });
+    if (purchaseRequestCount > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This session already has purchase requests tied to finalized club tests. " +
+            "Re-finalization is blocked to preserve purchase request history.",
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   try {
     await db.$transaction(async (tx) => {
       // For re-finalization: delete existing DemoClubTest rows (and their metrics)
@@ -203,6 +228,23 @@ export async function POST(
     return NextResponse.json(
       { error: "Failed to finalize session. Please try again." },
       { status: 500 },
+    );
+  }
+
+  // Trigger CRM sync after finalize/re-finalize succeeds.
+  // Finalization must remain successful even if external GHL sync fails.
+  try {
+    const ghlSync = await syncGolfDemoToGHL(sessionId);
+    if (!ghlSync.success) {
+      console.warn(
+        "[POST /api/staff/demo-sessions/[id]/finalize] GHL sync failed:",
+        ghlSync.error,
+      );
+    }
+  } catch (err) {
+    console.error(
+      "[POST /api/staff/demo-sessions/[id]/finalize] Unexpected GHL sync error:",
+      err,
     );
   }
 
