@@ -158,7 +158,7 @@ export function PurchaseRequestTrigger({ sessionId, clubs }: PurchaseRequestTrig
             {step === "success" ? (
               // ── Success state ─────────────────────────────────────────────
               <div className="text-center py-6">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-500">
                   <span className="text-2xl">✓</span>
                 </div>
                 <p className="font-subheading text-base font-semibold text-slate-900 mb-2">

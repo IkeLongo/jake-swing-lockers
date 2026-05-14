@@ -5,6 +5,7 @@ import {
   createPurchaseRequest,
 } from "@/lib/queries/purchase-requests";
 import { db } from "@/lib/db";
+import { deliverPurchaseRequestEmails } from "@/lib/ghl/deliverPurchaseRequestEmails";
 
 export async function POST(req: NextRequest) {
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -98,6 +99,11 @@ export async function POST(req: NextRequest) {
   }));
 
   const result = await createPurchaseRequest(golfClientId, demoSessionId, items, notesStr);
+
+  // ── Send confirmation emails ────────────────────────────────────────────────
+  // Failures are caught and logged inside the helper — purchase request creation
+  // always succeeds regardless of email delivery outcome.
+  await deliverPurchaseRequestEmails(result.id);
 
   return NextResponse.json({ id: result.id }, { status: 201 });
 }
