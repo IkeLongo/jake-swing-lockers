@@ -5,6 +5,7 @@ import {
   upsertRiverCityContact,
   addRiverCityTags,
 } from "./providers/riverCityGhl";
+import { updateGolfDemoOpportunity, STAGE_SWING_LOCKER_SENT } from "./opportunities";
 
 // ── Result shape ──────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ export async function sendSwingLockerAccess(
     where: { id: demoSessionId },
     select: {
       id: true,
+      ghlOpportunityId: true,
       client: {
         select: {
           id: true,
@@ -88,6 +90,20 @@ export async function sendSwingLockerAccess(
     const emailTag =
       process.env.GHL_TAG_SWING_LOCKER_ACCESS_EMAIL ?? "golf-demo:locker-sent";
     await addTagsToContact(resolvedGhlContactId, [emailTag]);
+
+    // ── 4b. Move GHL opportunity to Swing Locker Sent stage ──────────────────
+    if (session.ghlOpportunityId) {
+      try {
+        await updateGolfDemoOpportunity(session.ghlOpportunityId, {
+          pipelineStageId: STAGE_SWING_LOCKER_SENT(),
+        });
+      } catch (stageErr) {
+        console.warn(
+          "[sendSwingLockerAccess] Failed to move opportunity to Swing Locker Sent stage:",
+          stageErr
+        );
+      }
+    }
 
     // ── 5. Mark invite as sent ────────────────────────────────────────────────
     await db.demoSession.update({

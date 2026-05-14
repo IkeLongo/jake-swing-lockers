@@ -8,6 +8,13 @@ import {
   createSwingLockerSessionPayload,
   signSwingLockerSessionToken,
 } from "@/lib/auth/swing-locker-session";
+import {
+  updateGolfDemoOpportunity,
+  getOpportunityById,
+  STAGE_DEMO_SUBMITTED,
+  STAGE_SWING_LOCKER_SENT,
+  STAGE_LOCKER_OPENED,
+} from "@/lib/ghl/opportunities";
 
 // Session lifetime: 24 hours (must match createSwingLockerSessionPayload default)
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -122,7 +129,51 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
     const token = signSwingLockerSessionToken(payload);
 
-    // ── 10c. Build response and set HTTP-only cookie ──────────────────────────
+    // ── 10c. Move GHL opportunity to Locker Opened stage ──────────────────────
+    // After successful OTP verification and session creation, check if the client
+    // has a finalized demo session with a linked GHL opportunity. If the
+    // opportunity is in Demo Submitted or Swing Locker Sent stage, move it to
+    // Locker Opened. Do NOT regress opportunities already in later stages.
+    // Failure here does not block login.
+    try {
+      const recentSession = await db.demoSession.findFirst({
+        where: {
+          clientId: client.id,
+          status: "finalized",
+          ghlOpportunityId: { not: null },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, ghlOpportunityId: true },
+      });
+
+      if (recentSession?.ghlOpportunityId) {
+        const opp = await getOpportunityById(recentSession.ghlOpportunityId);
+        if (opp) {
+          const demoSubmittedId = STAGE_DEMO_SUBMITTED();
+          const swingLockerSentId = STAGE_SWING_LOCKER_SENT();
+          const lockerOpenedId = STAGE_LOCKER_OPENED();
+
+          // Only move forward from Demo Submitted or Swing Locker Sent stages.
+          // Do not regress opportunities already in Locker Opened or later sales stages.
+          if (
+            opp.pipelineStageId === demoSubmittedId ||
+            opp.pipelineStageId === swingLockerSentId
+          ) {
+            await updateGolfDemoOpportunity(recentSession.ghlOpportunityId, {
+              pipelineStageId: lockerOpenedId,
+            });
+          }
+        }
+      }
+    } catch (stageErr) {
+      // Log but do not fail login
+      console.warn(
+        "[swing-locker-auth/verify-code] Failed to move opportunity to Locker Opened:",
+        stageErr
+      );
+    }
+
+    // ── 10d. Build response and set HTTP-only cookie ──────────────────────────
     const res = NextResponse.json({
       success: true,
       message: "Verification successful.",

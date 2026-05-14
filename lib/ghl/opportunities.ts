@@ -10,9 +10,19 @@ const PIPELINE_ID = () => {
   if (!id) throw new Error("Missing GHL_SWINGLOCKER_PIPELINE_ID environment variable.");
   return id;
 };
-const STAGE_DEMO_SUBMITTED = () => {
+export const STAGE_DEMO_SUBMITTED = () => {
   const id = process.env.GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID;
   if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID environment variable.");
+  return id;
+};
+export const STAGE_SWING_LOCKER_SENT = () => {
+  const id = process.env.GHL_SWINGLOCKER_STAGE_SWING_LOCKER_SENT_ID;
+  if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_SWING_LOCKER_SENT_ID environment variable.");
+  return id;
+};
+export const STAGE_LOCKER_OPENED = () => {
+  const id = process.env.GHL_SWINGLOCKER_STAGE_LOCKER_OPENED_ID;
+  if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_LOCKER_OPENED_ID environment variable.");
   return id;
 };
 
@@ -57,6 +67,23 @@ export async function findOpenOpportunityForContact(
     `/opportunities/search?${params.toString()}`
   );
   return res.opportunities?.[0] ?? null;
+}
+
+/**
+ * Fetch a specific opportunity by ID.
+ * Used to check current stage before deciding whether to move stages.
+ */
+export async function getOpportunityById(
+  opportunityId: string
+): Promise<GhlOpportunity | null> {
+  try {
+    const res = await ghlFetch<{ opportunity: GhlOpportunity }>(
+      `/opportunities/${opportunityId}`
+    );
+    return res.opportunity ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Create / Update ───────────────────────────────────────────────────────────
