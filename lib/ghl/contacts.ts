@@ -45,7 +45,6 @@ export interface ContactResolution {
 async function lookupContactByEmail(
   email: string
 ): Promise<GhlContact | null> {
-  console.log("[GHL Contacts] Searching by email:", email);
   const params = new URLSearchParams({
     locationId: LOCATION_ID(),
     email,
@@ -64,7 +63,6 @@ async function lookupContactByEmail(
 async function lookupContactByPhone(
   phone: string
 ): Promise<GhlContact | null> {
-  console.log("[GHL Contacts] Searching by phone:", phone);
   const params = new URLSearchParams({
     locationId: LOCATION_ID(),
     phone,
@@ -118,14 +116,12 @@ export async function upsertContact(
 
   // ── Fast path: we already know the GHL contact ID ────────────────────────
   if (existingGhlContactId) {
-    console.log("[GHL Contacts] Updating known contact:", existingGhlContactId);
     try {
       const res = await ghlFetch<ContactUpdateResponse>(
         `/contacts/${existingGhlContactId}`,
         { method: "PUT", body: JSON.stringify(updatePayload) }
       );
       const id = res.contact.id;
-      console.log("[GHL Contacts] Contact resolved:", id);
       return { id };
     } catch (err) {
       // If the cached ID is stale (contact deleted in GHL), fall through to
@@ -147,14 +143,11 @@ export async function upsertContact(
   if (input.email) {
     const found = await lookupContactByEmail(input.email);
     if (found) {
-      console.log("[GHL Contacts] Found contact by email, updating:", found.id);
       const res = await ghlFetch<ContactUpdateResponse>(
         `/contacts/${found.id}`,
         { method: "PUT", body: JSON.stringify(updatePayload) }
       );
-      const id = res.contact.id;
-      console.log("[GHL Contacts] Contact resolved:", id);
-      return { id };
+      return { id: res.contact.id };
     }
   }
 
@@ -162,27 +155,21 @@ export async function upsertContact(
   if (input.phone) {
     const found = await lookupContactByPhone(input.phone);
     if (found) {
-      console.log("[GHL Contacts] Found contact by phone, updating:", found.id);
       const res = await ghlFetch<ContactUpdateResponse>(
         `/contacts/${found.id}`,
         { method: "PUT", body: JSON.stringify(updatePayload) }
       );
-      const id = res.contact.id;
-      console.log("[GHL Contacts] Contact resolved:", id);
-      return { id };
+      return { id: res.contact.id };
     }
   }
 
   // ── Create — GHL dedup may reject with an existing contact ID ─────────────
-  console.log("[GHL Contacts] No contact found — creating/upserting contact");
   try {
     const res = await ghlFetch<ContactCreateResponse>("/contacts", {
       method: "POST",
       body: JSON.stringify(createPayload),
     });
-    const id = res.contact.id;
-    console.log("[GHL Contacts] Contact resolved:", id);
-    return { id };
+    return { id: res.contact.id };
   } catch (err) {
     if (err instanceof GhlDuplicateContactError) {
       console.log("[GHL Contacts] Duplicate resolved using existing contact", {

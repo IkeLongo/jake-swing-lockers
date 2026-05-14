@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { normalizeIdentifier } from "@/lib/auth/normalize";
 import { generateOtp, hashOtp } from "@/lib/auth/otp";
 import { deliverSwingLockerOtp } from "@/lib/ghl/deliverSwingLockerOtp";
+import { deliverSwingLockerOtpEmail } from "@/lib/ghl/deliverSwingLockerOtpEmail";
 import { phoneSearchCandidates } from "@/lib/auth/phoneSearchCandidates";
 
 // Generic response sent for every outcome — never reveals account existence.
@@ -13,6 +14,8 @@ const GENERIC_SUCCESS = {
 
 // OTP validity window: 10 minutes
 const OTP_TTL_MS = 10 * 60 * 1000;
+// Minimum gap between OTP requests per client — prevents rapid-fire spam
+const RESEND_COOLDOWN_MS = 60 * 1000;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 1. Parse body ──────────────────────────────────────────────────────────
@@ -45,26 +48,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 3. Normalize identifier ────────────────────────────────────────────────
   const { type: identifierType } = normalizeIdentifier(rawIdentifier);
 
+  console.log("[request-code] identifier parsed:", {
+    raw: rawIdentifier,
+    identifierType,
+    ...(identifierType === "email"
+      ? { emailCandidate: rawIdentifier.trim().toLowerCase() }
+      : { phoneCandidates: phoneSearchCandidates(rawIdentifier) }),
+  });
+
   // ── 4. Look up GolfClient ──────────────────────────────────────────────────
   try {
     let whereClause: { email: string } | { phone: { in: string[] } };
-    let debugCandidates: { email?: string; phoneCandidates?: string[] };
 
     if (identifierType === "email") {
-      const emailCandidate = rawIdentifier.trim().toLowerCase();
-      whereClause = { email: emailCandidate };
-      debugCandidates = { email: emailCandidate };
+      whereClause = { email: rawIdentifier.trim().toLowerCase() };
     } else {
-      const phoneCandidates = phoneSearchCandidates(rawIdentifier);
-      whereClause = { phone: { in: phoneCandidates } };
-      debugCandidates = { phoneCandidates };
+      whereClause = { phone: { in: phoneSearchCandidates(rawIdentifier) } };
     }
-
-    console.log("[request-code] lookup candidates:", {
-      raw: rawIdentifier,
-      identifierType,
-      ...debugCandidates,
-    });
 
     const client = await db.golfClient.findFirst({
       where: whereClause,
@@ -73,19 +73,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Unknown client — return generic response, no OTP created
     if (!client) {
-      console.log("[request-code] skipping SMS delivery — reason: missing client (not found for identifier)");
+      console.log("[request-code] client not found for identifier — returning generic success");
       return NextResponse.json(GENERIC_SUCCESS);
     }
 
     console.log("[request-code] client matched:", {
       id: client.id,
+      hasEmail: !!client.email,
       hasPhone: !!client.phone,
-      phone: client.phone,
-      email: client.email,
-      GHL_SMS_PROVIDER_MODE: process.env.GHL_SMS_PROVIDER_MODE,
     });
 
-    // ── 5. Invalidate old unused OTPs for this client ──────────────────────
+    // ── 5. Resend cooldown ───────────────────────────────────────────────────
+    // Prevent rapid-fire OTP generation — silently accept if one was recently sent.
+    const recentOtp = await db.swingLockerOtp.findFirst({
+      where: {
+        golfClientId: client.id,
+        createdAt: { gt: new Date(Date.now() - RESEND_COOLDOWN_MS) },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (recentOtp) {
+      console.log("[request-code] resend cooldown active — skipping OTP generation");
+      return NextResponse.json(GENERIC_SUCCESS);
+    }
+
+    // ── 6. Invalidate old unused OTPs for this client ────────────────────────
     await db.swingLockerOtp.updateMany({
       where: {
         golfClientId: client.id,
@@ -95,7 +108,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       data: { usedAt: new Date() },
     });
 
-    // ── 6. Generate new OTP ────────────────────────────────────────────────
+    // ── 7. Generate new OTP ──────────────────────────────────────────────────
     const plainCode = generateOtp();
     const codeHash = hashOtp(plainCode);
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
@@ -109,30 +122,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
     });
 
-    // ── 7. Dev-only logging (never runs in production) ─────────────────────
+    // ── 8. Dev-only logging ────────────────────────────────────────────────
     if (process.env.NODE_ENV !== "production") {
-      console.log(
-        `[SwingLockerOTP] Code for ${rawIdentifier}: ${plainCode}`,
-      );
+      console.log(`[SwingLockerOTP] Code for ${rawIdentifier}: ${plainCode}`);
     }
 
-    // ── 8. Deliver OTP via RiverCity GHL SMS ──────────────────────────────────
-    // Runs when: GHL_SMS_PROVIDER_MODE === "rivercity_temp" AND client has a phone.
-    // Failure is best-effort — never changes the public response.
-    if (
-      process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" &&
-      client.phone
-    ) {
-      console.log("[request-code] calling deliverSwingLockerOtp");
-      void deliverSwingLockerOtp(client, plainCode).catch((err) => {
-        console.error("[request-code] Unhandled OTP delivery error:", err);
+    // ── 9. Deliver OTP — channel matches the identifier type used at login ───
+    // Phone input  → SMS only
+    // Email input  → Email only
+    // No cross-channel fallback in V1.
+    if (identifierType === "phone") {
+      console.log("[request-code] calling SMS OTP delivery", {
+        hasSmsMode: process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp",
+        hasPhone: !!client.phone,
       });
+      if (process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" && client.phone) {
+        void deliverSwingLockerOtp(client, plainCode).catch((err) => {
+          console.error("[request-code] Unhandled OTP SMS delivery error:", err);
+        });
+      }
     } else {
-      console.log("[request-code] skipping SMS delivery — reason:", {
-        smsMode: process.env.GHL_SMS_PROVIDER_MODE,
-        modeMismatch: process.env.GHL_SMS_PROVIDER_MODE !== "rivercity_temp",
-        missingPhone: !client.phone,
+      // identifierType === "email"
+      console.log("[request-code] calling email OTP delivery", {
+        hasEmail: !!client.email,
       });
+      if (client.email) {
+        void deliverSwingLockerOtpEmail(
+          {
+            id: client.id,
+            firstName: client.firstName,
+            lastName: client.lastName,
+            email: client.email,
+            phone: client.phone,
+          },
+          plainCode
+        ).catch((err) => {
+          console.error("[request-code] Unhandled OTP email delivery error:", err);
+        });
+      }
     }
 
     return NextResponse.json(GENERIC_SUCCESS);

@@ -183,14 +183,16 @@ model StaffOtp {
 // SwingLockerOtp is single-use and expires in 10 minutes.
 
 model SwingLockerOtp {
-  id            Int       @id @default(autoincrement())
-  golfClientId  Int
+  id             Int       @id @default(autoincrement())
+  golfClientId   Int
   // SHA-256 hash of the 6-digit numeric code — raw code is never stored
-  codeHash      String
-  expiresAt     DateTime
+  codeHash       String
+  expiresAt      DateTime
   // Set when the OTP is consumed — used to enforce single-use
-  usedAt        DateTime?
-  createdAt     DateTime  @default(now())
+  usedAt         DateTime?
+  // Incremented on each failed verify attempt; OTP is invalidated after max reached
+  failedAttempts Int       @default(0)
+  createdAt      DateTime  @default(now())
 
   client GolfClient @relation(fields: [golfClientId], references: [id])
 

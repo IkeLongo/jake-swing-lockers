@@ -58,10 +58,7 @@ export async function upsertRiverCityContact(
       `/contacts/lookup?${params.toString()}`
     );
     const found = res.contacts?.[0];
-    if (found) {
-      console.log("[RiverCity] Found existing contact by phone:", found.id);
-      return found.id;
-    }
+    if (found) return found.id;
   } catch {
     // lookup unavailable — fall through to create
   }
@@ -76,13 +73,9 @@ export async function upsertRiverCityContact(
       method: "POST",
       body: JSON.stringify(payload),
     });
-    console.log("[RiverCity] Created contact:", res.contact.id);
     return res.contact.id;
   } catch (err) {
-    if (err instanceof GhlDuplicateContactError) {
-      console.log("[RiverCity] Duplicate resolved:", err.contactId);
-      return err.contactId;
-    }
+    if (err instanceof GhlDuplicateContactError) return err.contactId;
     throw err;
   }
 }

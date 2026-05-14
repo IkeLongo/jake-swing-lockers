@@ -57,25 +57,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 4. Normalize identifier ────────────────────────────────────────────────
   const { type: identifierType } = normalizeIdentifier(rawIdentifier);
 
-  // Build lookup where clause with phone candidates (tolerates any stored format)
   let whereClause: { email: string } | { phone: { in: string[] } };
-  let debugCandidates: { email?: string; phoneCandidates?: string[] };
-
   if (identifierType === "email") {
-    const emailCandidate = rawIdentifier.trim().toLowerCase();
-    whereClause = { email: emailCandidate };
-    debugCandidates = { email: emailCandidate };
+    whereClause = { email: rawIdentifier.trim().toLowerCase() };
   } else {
-    const candidates = phoneSearchCandidates(rawIdentifier);
-    whereClause = { phone: { in: candidates } };
-    debugCandidates = { phoneCandidates: candidates };
+    whereClause = { phone: { in: phoneSearchCandidates(rawIdentifier) } };
   }
-
-  console.log("[verify-code] lookup candidates:", {
-    raw: rawIdentifier,
-    identifierType,
-    ...debugCandidates,
-  });
 
   try {
     // ── 5. Find GolfClient ───────────────────────────────────────────────────
@@ -83,8 +70,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       where: whereClause,
       select: { id: true },
     });
-
-    console.log("[verify-code] client match:", client ? { id: client.id } : "not found");
 
     // ── 6. Unknown client — generic failure ──────────────────────────────────
     if (!client) {
@@ -99,13 +84,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         expiresAt: { gt: new Date() },
       },
       orderBy: { createdAt: "desc" },
-      select: { id: true, codeHash: true, expiresAt: true },
+      select: { id: true, codeHash: true, expiresAt: true, failedAttempts: true },
     });
-
-    console.log("[verify-code] OTP lookup:", otp
-      ? { found: true, id: otp.id, expiresAt: otp.expiresAt }
-      : { found: false }
-    );
 
     if (!otp) {
       return NextResponse.json(INVALID_RESPONSE, { status: 401 });
@@ -113,10 +93,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // ── 8. Verify code (timing-safe) ─────────────────────────────────────────
     const isValid = verifyOtpHash(rawCode, otp.codeHash);
-    console.log("[verify-code] hash comparison:", isValid ? "match" : "mismatch");
 
-    // ── 9. Invalid code — generic failure ────────────────────────────────────
+    // ── 9. Invalid code ───────────────────────────────────────────────────────
     if (!isValid) {
+      // Increment failed attempts; invalidate OTP after 5 failures
+      const MAX_FAILED_ATTEMPTS = 5;
+      const newCount = otp.failedAttempts + 1;
+      await db.swingLockerOtp.update({
+        where: { id: otp.id },
+        data: {
+          failedAttempts: { increment: 1 },
+          ...(newCount >= MAX_FAILED_ATTEMPTS ? { usedAt: new Date() } : {}),
+        },
+      });
       return NextResponse.json(INVALID_RESPONSE, { status: 401 });
     }
 

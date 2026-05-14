@@ -84,9 +84,6 @@ export async function deliverSwingLockerOtp(
       },
     });
 
-    console.log(
-      `[deliverSwingLockerOtp] SMS delivered to contactId=${contactId} for golfClientId=${client.id}`
-    );
     return { delivered: true };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
