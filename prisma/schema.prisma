@@ -112,14 +112,14 @@ model ClubTestMetrics {
 
 model GhlSyncEvent {
   id            Int      @id @default(autoincrement())
-  demoSessionId Int
+  demoSessionId Int?
   ghlContactId  String?
   eventType     String
   status        String   @default("pending")
   message       String?  @db.Text
   createdAt     DateTime @default(now())
 
-  demoSession DemoSession @relation(fields: [demoSessionId], references: [id])
+  demoSession DemoSession? @relation(fields: [demoSessionId], references: [id])
 
   @@index([demoSessionId])
   @@index([status])

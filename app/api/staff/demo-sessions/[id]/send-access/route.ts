@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
+import { sendSwingLockerAccess } from "@/lib/ghl/sendSwingLockerAccess";
 
 export async function POST(
   req: NextRequest,
@@ -51,10 +52,7 @@ export async function POST(
     );
   }
 
-  // 6. Mark as pending
-  // Future: background job reads accessInviteStatus = "pending" rows,
-  // sends GHL message linking to /swing-locker/login, sets status = "sent",
-  // accessInviteSentAt = now(), creates GhlSyncEvent { eventType: "access_invite_sent" }
+  // 6. Mark as pending (in-flight indicator)
   await db.demoSession.update({
     where: { id },
     data: {
@@ -63,6 +61,15 @@ export async function POST(
       accessInviteError: null,
     },
   });
+
+  // 7. Sync to GHL and apply access invite tag
+  const result = await sendSwingLockerAccess(id);
+  if (!result.success) {
+    return NextResponse.json(
+      { success: false, error: result.error },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json({ success: true });
 }

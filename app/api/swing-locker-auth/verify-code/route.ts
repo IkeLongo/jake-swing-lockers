@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { normalizeIdentifier } from "@/lib/auth/normalize";
 import { verifyOtpHash } from "@/lib/auth/otp";
+import { phoneSearchCandidates } from "@/lib/auth/phoneSearchCandidates";
 import {
   SWING_LOCKER_SESSION_COOKIE,
   createSwingLockerSessionPayload,
@@ -54,18 +55,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const rawIdentifier = (body as Record<string, string>).identifier;
 
   // ── 4. Normalize identifier ────────────────────────────────────────────────
-  const { value: normalizedValue, type: identifierType } =
-    normalizeIdentifier(rawIdentifier);
+  const { type: identifierType } = normalizeIdentifier(rawIdentifier);
+
+  // Build lookup where clause with phone candidates (tolerates any stored format)
+  let whereClause: { email: string } | { phone: { in: string[] } };
+  let debugCandidates: { email?: string; phoneCandidates?: string[] };
+
+  if (identifierType === "email") {
+    const emailCandidate = rawIdentifier.trim().toLowerCase();
+    whereClause = { email: emailCandidate };
+    debugCandidates = { email: emailCandidate };
+  } else {
+    const candidates = phoneSearchCandidates(rawIdentifier);
+    whereClause = { phone: { in: candidates } };
+    debugCandidates = { phoneCandidates: candidates };
+  }
+
+  console.log("[verify-code] lookup candidates:", {
+    raw: rawIdentifier,
+    identifierType,
+    ...debugCandidates,
+  });
 
   try {
     // ── 5. Find GolfClient ───────────────────────────────────────────────────
     const client = await db.golfClient.findFirst({
-      where:
-        identifierType === "email"
-          ? { email: normalizedValue }
-          : { phone: normalizedValue },
+      where: whereClause,
       select: { id: true },
     });
+
+    console.log("[verify-code] client match:", client ? { id: client.id } : "not found");
 
     // ── 6. Unknown client — generic failure ──────────────────────────────────
     if (!client) {
@@ -80,8 +99,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         expiresAt: { gt: new Date() },
       },
       orderBy: { createdAt: "desc" },
-      select: { id: true, codeHash: true },
+      select: { id: true, codeHash: true, expiresAt: true },
     });
+
+    console.log("[verify-code] OTP lookup:", otp
+      ? { found: true, id: otp.id, expiresAt: otp.expiresAt }
+      : { found: false }
+    );
 
     if (!otp) {
       return NextResponse.json(INVALID_RESPONSE, { status: 401 });
@@ -89,6 +113,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // ── 8. Verify code (timing-safe) ─────────────────────────────────────────
     const isValid = verifyOtpHash(rawCode, otp.codeHash);
+    console.log("[verify-code] hash comparison:", isValid ? "match" : "mismatch");
 
     // ── 9. Invalid code — generic failure ────────────────────────────────────
     if (!isValid) {

@@ -107,22 +107,40 @@ export async function upsertContact(
 ): Promise<ContactResolution> {
   const locationId = LOCATION_ID();
 
-  const payload: Record<string, string> = { locationId };
-  if (input.firstName) payload.firstName = input.firstName;
-  if (input.lastName) payload.lastName = input.lastName;
-  if (input.email) payload.email = input.email;
-  if (input.phone) payload.phone = input.phone;
+  // GHL rejects `locationId` on PUT contact update — only include it for POST create.
+  const updatePayload: Record<string, string> = {};
+  if (input.firstName) updatePayload.firstName = input.firstName;
+  if (input.lastName) updatePayload.lastName = input.lastName;
+  if (input.email) updatePayload.email = input.email;
+  if (input.phone) updatePayload.phone = input.phone;
+
+  const createPayload: Record<string, string> = { locationId, ...updatePayload };
 
   // ── Fast path: we already know the GHL contact ID ────────────────────────
   if (existingGhlContactId) {
     console.log("[GHL Contacts] Updating known contact:", existingGhlContactId);
-    const res = await ghlFetch<ContactUpdateResponse>(
-      `/contacts/${existingGhlContactId}`,
-      { method: "PUT", body: JSON.stringify(payload) }
-    );
-    const id = res.contact.id;
-    console.log("[GHL Contacts] Contact resolved:", id);
-    return { id };
+    try {
+      const res = await ghlFetch<ContactUpdateResponse>(
+        `/contacts/${existingGhlContactId}`,
+        { method: "PUT", body: JSON.stringify(updatePayload) }
+      );
+      const id = res.contact.id;
+      console.log("[GHL Contacts] Contact resolved:", id);
+      return { id };
+    } catch (err) {
+      // If the cached ID is stale (contact deleted in GHL), fall through to
+      // email/phone lookup rather than hard-failing.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("404")) {
+        console.warn(
+          "[GHL Contacts] Cached contact ID not found in GHL, falling back to lookup:",
+          existingGhlContactId
+        );
+        // fall through to email/phone lookup below
+      } else {
+        throw err;
+      }
+    }
   }
 
   // ── Lookup by email ───────────────────────────────────────────────────────
@@ -132,7 +150,7 @@ export async function upsertContact(
       console.log("[GHL Contacts] Found contact by email, updating:", found.id);
       const res = await ghlFetch<ContactUpdateResponse>(
         `/contacts/${found.id}`,
-        { method: "PUT", body: JSON.stringify(payload) }
+        { method: "PUT", body: JSON.stringify(updatePayload) }
       );
       const id = res.contact.id;
       console.log("[GHL Contacts] Contact resolved:", id);
@@ -147,7 +165,7 @@ export async function upsertContact(
       console.log("[GHL Contacts] Found contact by phone, updating:", found.id);
       const res = await ghlFetch<ContactUpdateResponse>(
         `/contacts/${found.id}`,
-        { method: "PUT", body: JSON.stringify(payload) }
+        { method: "PUT", body: JSON.stringify(updatePayload) }
       );
       const id = res.contact.id;
       console.log("[GHL Contacts] Contact resolved:", id);
@@ -160,7 +178,7 @@ export async function upsertContact(
   try {
     const res = await ghlFetch<ContactCreateResponse>("/contacts", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(createPayload),
     });
     const id = res.contact.id;
     console.log("[GHL Contacts] Contact resolved:", id);

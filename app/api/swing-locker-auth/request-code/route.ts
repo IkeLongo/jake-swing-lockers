@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { normalizeIdentifier } from "@/lib/auth/normalize";
 import { generateOtp, hashOtp } from "@/lib/auth/otp";
+import { deliverSwingLockerOtp } from "@/lib/ghl/deliverSwingLockerOtp";
+import { phoneSearchCandidates } from "@/lib/auth/phoneSearchCandidates";
 
 // Generic response sent for every outcome — never reveals account existence.
 const GENERIC_SUCCESS = {
@@ -41,23 +43,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const rawIdentifier = (body as Record<string, string>).identifier;
 
   // ── 3. Normalize identifier ────────────────────────────────────────────────
-  const { value: normalizedValue, type: identifierType } =
-    normalizeIdentifier(rawIdentifier);
+  const { type: identifierType } = normalizeIdentifier(rawIdentifier);
 
   // ── 4. Look up GolfClient ──────────────────────────────────────────────────
   try {
+    let whereClause: { email: string } | { phone: { in: string[] } };
+    let debugCandidates: { email?: string; phoneCandidates?: string[] };
+
+    if (identifierType === "email") {
+      const emailCandidate = rawIdentifier.trim().toLowerCase();
+      whereClause = { email: emailCandidate };
+      debugCandidates = { email: emailCandidate };
+    } else {
+      const phoneCandidates = phoneSearchCandidates(rawIdentifier);
+      whereClause = { phone: { in: phoneCandidates } };
+      debugCandidates = { phoneCandidates };
+    }
+
+    console.log("[request-code] lookup candidates:", {
+      raw: rawIdentifier,
+      identifierType,
+      ...debugCandidates,
+    });
+
     const client = await db.golfClient.findFirst({
-      where:
-        identifierType === "email"
-          ? { email: normalizedValue }
-          : { phone: normalizedValue },
-      select: { id: true },
+      where: whereClause,
+      select: { id: true, firstName: true, lastName: true, email: true, phone: true },
     });
 
     // Unknown client — return generic response, no OTP created
     if (!client) {
+      console.log("[request-code] skipping SMS delivery — reason: missing client (not found for identifier)");
       return NextResponse.json(GENERIC_SUCCESS);
     }
+
+    console.log("[request-code] client matched:", {
+      id: client.id,
+      hasPhone: !!client.phone,
+      phone: client.phone,
+      email: client.email,
+      GHL_SMS_PROVIDER_MODE: process.env.GHL_SMS_PROVIDER_MODE,
+    });
 
     // ── 5. Invalidate old unused OTPs for this client ──────────────────────
     await db.swingLockerOtp.updateMany({
@@ -86,11 +112,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // ── 7. Dev-only logging (never runs in production) ─────────────────────
     if (process.env.NODE_ENV !== "production") {
       console.log(
-        `[SwingLockerOTP] Code for ${rawIdentifier} (normalized: ${normalizedValue}): ${plainCode}`,
+        `[SwingLockerOTP] Code for ${rawIdentifier}: ${plainCode}`,
       );
     }
 
-    // TODO: deliver OTP via GoHighLevel email/SMS based on identifierType
+    // ── 8. Deliver OTP via RiverCity GHL SMS ──────────────────────────────────
+    // Runs when: GHL_SMS_PROVIDER_MODE === "rivercity_temp" AND client has a phone.
+    // Failure is best-effort — never changes the public response.
+    if (
+      process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" &&
+      client.phone
+    ) {
+      console.log("[request-code] calling deliverSwingLockerOtp");
+      void deliverSwingLockerOtp(client, plainCode).catch((err) => {
+        console.error("[request-code] Unhandled OTP delivery error:", err);
+      });
+    } else {
+      console.log("[request-code] skipping SMS delivery — reason:", {
+        smsMode: process.env.GHL_SMS_PROVIDER_MODE,
+        modeMismatch: process.env.GHL_SMS_PROVIDER_MODE !== "rivercity_temp",
+        missingPhone: !client.phone,
+      });
+    }
 
     return NextResponse.json(GENERIC_SUCCESS);
   } catch (err) {

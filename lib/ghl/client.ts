@@ -82,3 +82,58 @@ export async function ghlFetch<T>(
 export function normalizeName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
+
+// ── Multi-account fetch factory ───────────────────────────────────────────────
+
+export type GhlFetchFn = <T>(path: string, options?: RequestInit) => Promise<T>;
+
+/**
+ * Create a ghlFetch-compatible function bound to a specific API token.
+ * Use this to call a GHL subaccount other than the default SwingLocker account.
+ *
+ * The returned function preserves GhlDuplicateContactError detection.
+ */
+export function makeGhlFetch(token: string): GhlFetchFn {
+  return async function<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const url = `${GHL_BASE}${path}`;
+
+    const res = await fetch(url, {
+      method: "GET",
+      ...options,
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Version": GHL_VERSION,
+        "Content-Type": "application/json",
+        ...(options.headers ?? {}),
+      },
+    });
+
+    if (!res.ok) {
+      let parsed: Record<string, unknown> | null = null;
+      let rawBody = "";
+      try {
+        rawBody = await res.text();
+        parsed = JSON.parse(rawBody) as Record<string, unknown>;
+      } catch {
+        // ignore parse failures
+      }
+
+      if (
+        res.status === 400 &&
+        typeof parsed?.message === "string" &&
+        parsed.message.includes("does not allow duplicated contacts") &&
+        typeof (parsed?.meta as Record<string, unknown> | undefined)?.contactId === "string"
+      ) {
+        const meta = parsed.meta as Record<string, unknown>;
+        throw new GhlDuplicateContactError(
+          meta.contactId as string,
+          typeof meta.matchingField === "string" ? meta.matchingField : undefined
+        );
+      }
+
+      throw new Error(`GHL API error: ${res.status} ${res.statusText} — ${rawBody}`);
+    }
+
+    return res.json() as Promise<T>;
+  };
+}
