@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ghlFetch } from "./client";
-import { upsertContact } from "./contacts";
-import { renderSwingLockerOtpEmail } from "@/lib/email/renderSwingLockerOtpEmail";
+import { syncGolfClientContact } from "./syncGolfClientContact";
+import { renderOtpEmail } from "@/lib/email/renderOtpEmail";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,19 +56,30 @@ export async function deliverSwingLockerOtpEmail(
   });
 
   try {
-    // ── 1. Upsert SwingLocker contact ─────────────────────────────────────────
-    const { id: contactId } = await upsertContact({
-      firstName: client.firstName,
-      lastName: client.lastName,
-      email: client.email,
-      phone: client.phone ?? null,
+    // ── 1. Sync SwingLocker contact (upsert + golf-demo:client tag) ───────────
+    await syncGolfClientContact(client.id);
+
+    const synced = await db.golfClient.findUnique({
+      where: { id: client.id },
+      select: { ghlContactId: true },
     });
 
-    console.log("[deliverSwingLockerOtpEmail] contact upserted:", { contactId });
+    if (!synced?.ghlContactId) {
+      return {
+        delivered: false,
+        error: "SwingLocker GHL contact could not be resolved for this client.",
+      };
+    }
+
+    const contactId = synced.ghlContactId;
+    console.log("[deliverSwingLockerOtpEmail] contact synced:", { contactId });
 
     // ── 2. Build email content ────────────────────────────────────────────────
-    const { subject, html, text: plainText } = renderSwingLockerOtpEmail({
+    const { subject, html, text: plainText } = renderOtpEmail({
       code: plainCode,
+      title: "Your Swing Locker verification code",
+      introText:
+        "Use the verification code below to finish signing in to your Swing Locker account.",
       firstName: client.firstName,
     });
 

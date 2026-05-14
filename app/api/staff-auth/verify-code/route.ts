@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { normalizeIdentifier } from "@/lib/auth/normalize";
+import { phoneSearchCandidates } from "@/lib/auth/phoneSearchCandidates";
 import { verifyOtpHash } from "@/lib/auth/otp";
 import {
   STAFF_SESSION_COOKIE,
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       where: {
         ...(identifierType === "email"
           ? { email: normalizedValue }
-          : { phone: normalizedValue }),
+          : { phone: { in: phoneSearchCandidates(rawIdentifier) } }),
         isActive: true,
       },
       select: { id: true },
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         expiresAt: { gt: new Date() },
       },
       orderBy: { createdAt: "desc" },
-      select: { id: true, codeHash: true },
+      select: { id: true, codeHash: true, failedAttempts: true },
     });
 
     if (!otp) {
@@ -95,8 +96,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // ── 8. Verify code (timing-safe) ─────────────────────────────────────────
     const isValid = verifyOtpHash(rawCode, otp.codeHash);
 
-    // ── 9. Invalid code — generic failure ────────────────────────────────────
+    // ── 9. Invalid code — increment attempt counter, invalidate at max ────────
     if (!isValid) {
+      const MAX_ATTEMPTS = 5;
+      const newFailedAttempts = otp.failedAttempts + 1;
+
+      await db.staffOtp.update({
+        where: { id: otp.id },
+        data: {
+          failedAttempts: newFailedAttempts,
+          ...(newFailedAttempts >= MAX_ATTEMPTS ? { usedAt: new Date() } : {}),
+        },
+      });
+
       return NextResponse.json(INVALID_RESPONSE, { status: 401 });
     }
 

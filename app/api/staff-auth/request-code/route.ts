@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { normalizeIdentifier } from "@/lib/auth/normalize";
+import { phoneSearchCandidates } from "@/lib/auth/phoneSearchCandidates";
 import { generateOtp, hashOtp } from "@/lib/auth/otp";
+import {
+  deliverStaffOtpSms,
+  deliverStaffOtpEmail,
+} from "@/lib/ghl/deliverStaffOtp";
 
 // Generic response sent for every outcome that isn't an outright bad request.
 // Never reveals whether the identifier corresponds to a real staff account.
@@ -12,6 +17,9 @@ const GENERIC_SUCCESS = {
 
 // OTP validity window: 10 minutes
 const OTP_TTL_MS = 10 * 60 * 1000;
+
+// Minimum gap between OTP requests for the same user
+const RESEND_COOLDOWN_MS = 60 * 1000;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 1. Parse body ──────────────────────────────────────────────────────────
@@ -51,10 +59,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       where: {
         ...(identifierType === "email"
           ? { email: normalizedValue }
-          : { phone: normalizedValue }),
+          : { phone: { in: phoneSearchCandidates(rawIdentifier) } }),
         isActive: true,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+      },
     });
 
     // Unknown or inactive account — return generic response, no OTP created
@@ -62,7 +76,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(GENERIC_SUCCESS);
     }
 
-    // ── 6. Invalidate old unused OTPs for this user ────────────────────────
+    // ── 6. Resend cooldown ─────────────────────────────────────────────────
+    const recentOtp = await db.staffOtp.findFirst({
+      where: {
+        staffUserId: staffUser.id,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+        createdAt: { gt: new Date(Date.now() - RESEND_COOLDOWN_MS) },
+      },
+      select: { id: true },
+    });
+
+    if (recentOtp) {
+      // Return generic success — never reveal cooldown state publicly
+      return NextResponse.json(GENERIC_SUCCESS);
+    }
+
+    // ── 7. Invalidate old unused OTPs for this user ────────────────────────
     await db.staffOtp.updateMany({
       where: {
         staffUserId: staffUser.id,
@@ -72,7 +102,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       data: { usedAt: new Date() },
     });
 
-    // ── 7. Generate new OTP ────────────────────────────────────────────────
+    // ── 8. Generate new OTP ────────────────────────────────────────────────
     const plainCode = generateOtp();
     const codeHash = hashOtp(plainCode);
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
@@ -86,21 +116,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
     });
 
-    // ── 8. Dev-only logging (never runs in production) ─────────────────────
+    // ── 9. Dev-only logging (never runs in production) ─────────────────────
     if (process.env.NODE_ENV !== "production") {
       console.log(
-        `[OTP] Code for ${rawIdentifier} (normalized: ${normalizedValue}): ${plainCode}`,
+        `[staff-OTP] Code for ${rawIdentifier} (normalized: ${normalizedValue}): ${plainCode}`,
       );
     }
 
-    // TODO: deliver OTP via GoHighLevel email/SMS based on identifierType
+    // ── 10. Deliver OTP ────────────────────────────────────────────────────
+    if (identifierType === "phone") {
+      if (
+        process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" &&
+        staffUser.phone
+      ) {
+        void deliverStaffOtpSms(staffUser, plainCode).catch((err) => {
+          console.error("[staff request-code] SMS delivery threw unexpectedly:", err);
+        });
+      }
+    } else {
+      if (staffUser.email) {
+        void deliverStaffOtpEmail(staffUser, plainCode).catch((err) => {
+          console.error("[staff request-code] Email delivery threw unexpectedly:", err);
+        });
+      }
+    }
 
     return NextResponse.json(GENERIC_SUCCESS);
   } catch (err) {
-    console.error("[request-code] Unexpected error:", err);
+    console.error("[staff request-code] Unexpected error:", err);
     return NextResponse.json(
       { success: false, message: "An unexpected error occurred." },
       { status: 500 },
     );
   }
 }
+

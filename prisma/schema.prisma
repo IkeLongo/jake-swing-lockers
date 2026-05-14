@@ -139,29 +139,38 @@ model GhlSyncEvent {
 // stored as HTTP-only cookies. StaffOtp is single-use and expires in 10 minutes.
 
 model StaffUser {
-  id        Int       @id @default(autoincrement())
+  id        Int        @id @default(autoincrement())
   // At least one of email or phone must be present (enforced at app level in V1)
-  email     String?   @unique
-  phone     String?   @unique
+  email     String?    @unique
+  phone     String?    @unique
   name      String?
-  role      String    @default("sales_rep")
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  // App DB is source of truth for permissions — GHL tags mirror this for segmentation only
+  role      StaffRole  @default(sales_rep)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // GHL sync — Swing Locker subaccount only. RiverCity contact IDs are never stored.
+  ghlContactId    String?   @unique
+  ghlSyncStatus   String?
+  ghlSyncError    String?   @db.Text
+  ghlLastSyncedAt DateTime?
 
   otps          StaffOtp[]
   importBatches ImportBatch[]
 }
 
 model StaffOtp {
-  id          Int       @id @default(autoincrement())
-  staffUserId Int
+  id             Int       @id @default(autoincrement())
+  staffUserId    Int
   // SHA-256 hash of the 6-digit numeric code — raw code is never stored
-  codeHash    String
-  expiresAt   DateTime
+  codeHash       String
+  expiresAt      DateTime
   // Set when the OTP is consumed — used to enforce single-use
-  usedAt      DateTime?
-  createdAt   DateTime  @default(now())
+  usedAt         DateTime?
+  // Incremented on each failed verify attempt; OTP is invalidated after max reached
+  failedAttempts Int       @default(0)
+  createdAt      DateTime  @default(now())
 
   staff StaffUser @relation(fields: [staffUserId], references: [id])
 
@@ -353,4 +362,14 @@ model PurchaseRequestItem {
 
   @@index([purchaseRequestId])
   @@index([demoClubTestId])
+}
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+// Staff user role — controls app permissions and is mirrored to GHL tags for
+// communication segmentation. GHL tags are never consulted for app authorization.
+enum StaffRole {
+  admin
+  sales_rep
+  support
 }

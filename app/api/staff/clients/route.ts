@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
+import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
 
 // ── GET /api/staff/clients ────────────────────────────────────────────────────
 // Returns all GolfClient records with demo session counts and last demo date.
@@ -136,6 +137,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const client = await db.golfClient.create({
     data: { firstName, lastName, email, phone },
     select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true },
+  });
+
+  void syncGolfClientContact(client.id).catch((err) => {
+    console.error("[GolfClient Sync] POST failed:", err);
   });
 
   return NextResponse.json({ success: true, client }, { status: 201 });

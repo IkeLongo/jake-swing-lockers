@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
+import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
 
 // ── PATCH /api/staff/clients/[id] ─────────────────────────────────────────────
 // Update a GolfClient's profile fields.
@@ -72,6 +73,10 @@ export async function PATCH(
     where: { id },
     data: patch,
     select: { id: true, firstName: true, lastName: true, email: true, phone: true, updatedAt: true },
+  });
+
+  void syncGolfClientContact(id).catch((err) => {
+    console.error("[GolfClient Sync] PATCH failed:", err);
   });
 
   return NextResponse.json({ success: true, client: updated });

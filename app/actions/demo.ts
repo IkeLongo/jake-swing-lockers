@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import { demoFormSchema, type ActionResult, type ClubTabValues } from "@/lib/validations/demo";
 import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
+import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
 
 export async function createDemoSession(
   rawData: unknown
@@ -134,6 +135,12 @@ export async function createDemoSession(
       const msg = ghlErr instanceof Error ? ghlErr.message : String(ghlErr);
       ghlSync = { success: false, error: msg };
     }
+
+    // Apply golf-demo:client tag and persist ghlContactId on the GolfClient record.
+    // syncGolfDemoToGHL already upserts the contact; this adds the identity tag.
+    void syncGolfClientContact(client.id).catch((err) => {
+      console.error("[GolfClient Sync] createDemoSession failed:", err);
+    });
 
     return {
       success: true,

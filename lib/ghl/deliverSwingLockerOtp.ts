@@ -4,6 +4,8 @@ import {
   addRiverCityTags,
   sendRiverCitySms,
 } from "./providers/riverCityGhl";
+import { syncGolfClientContact } from "./syncGolfClientContact";
+import { TAG_RC_TEMP_SMS, TAG_RC_TEMP_CLIENT } from "./tags";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,33 +49,26 @@ export async function deliverSwingLockerOtp(
   }
 
   try {
-    // ── 1. Upsert temp RiverCity contact ─────────────────────────────────────
+    // ── 1. Non-blocking SwingLocker sync — ensures golf-demo:client tag ─────────
+    void syncGolfClientContact(client.id).catch((err) => {
+      console.error("[deliverSwingLockerOtp] SwingLocker sync failed (non-blocking):", err);
+    });
+
+    // ── 2. Upsert temp RiverCity contact ─────────────────────────────────────
     const contactId = await upsertRiverCityContact({
       firstName: client.firstName,
       lastName: client.lastName,
       phone: client.phone,
     });
 
-    // ── 2. Apply cleanup tag ─────────────────────────────────────────────────
-    const cleanupTag =
-      process.env.GHL_TAG_RIVERCITY_TEMP_SMS ?? "golf-demo:temp-sms-contact";
-    await addRiverCityTags(contactId, [cleanupTag]);
-
-    // ── 3. Apply OTP tracking tag (best-effort) ───────────────────────────────
-    const otpTag =
-      process.env.GHL_TAG_RIVERCITY_SWING_LOCKER_OTP_SMS ?? "golf-demo:otp-sms";
-    try {
-      await addRiverCityTags(contactId, [otpTag]);
-    } catch {
-      // Tracking tag is non-critical — do not fail delivery on tag errors
-      console.warn("[deliverSwingLockerOtp] OTP tracking tag failed (ignored)");
-    }
+    // ── 3. Apply identity + cleanup tags ─────────────────────────────────────
+    await addRiverCityTags(contactId, [TAG_RC_TEMP_SMS, TAG_RC_TEMP_CLIENT]);
 
     // ── 4. Send SMS ───────────────────────────────────────────────────────────
     const message = `Your Swing Locker verification code is ${plainCode}. It expires in 10 minutes.`;
     await sendRiverCitySms(contactId, message);
 
-    // ── 5. Log success ────────────────────────────────────────────────────────
+    // ── 5. Log success ─────────────────────────────────────────────────────────
     await db.ghlSyncEvent.create({
       data: {
         demoSessionId: null,
