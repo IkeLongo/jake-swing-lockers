@@ -50,11 +50,6 @@ export async function deliverSwingLockerOtpEmail(
   client: OtpEmailDeliveryClient,
   plainCode: string
 ): Promise<DeliverSwingLockerOtpEmailResult> {
-  console.log("[deliverSwingLockerOtpEmail] started:", {
-    golfClientId: client.id,
-    targetEmail: client.email,
-  });
-
   try {
     // ── 1. Sync SwingLocker contact (upsert + golf-demo:client tag) ───────────
     await syncGolfClientContact(client.id);
@@ -72,7 +67,6 @@ export async function deliverSwingLockerOtpEmail(
     }
 
     const contactId = synced.ghlContactId;
-    console.log("[deliverSwingLockerOtpEmail] contact synced:", { contactId });
 
     // ── 2. Build email content ────────────────────────────────────────────────
     const { subject, html, text: plainText } = renderOtpEmail({
@@ -85,13 +79,6 @@ export async function deliverSwingLockerOtpEmail(
 
     // ── 3. Send via GHL Conversations API ─────────────────────────────────────
     const locationId = getLocationId();
-
-    console.log("[deliverSwingLockerOtpEmail] calling GHL Conversations API:", {
-      contactId,
-      locationId,
-      emailTo: client.email,
-      subject,
-    });
 
     await ghlFetch<unknown>("/conversations/messages", {
       method: "POST",
@@ -107,8 +94,6 @@ export async function deliverSwingLockerOtpEmail(
     });
 
     // ── 4. Log success ────────────────────────────────────────────────────────
-    console.log("[deliverSwingLockerOtpEmail] GHL API call succeeded, logging event");
-
     await db.ghlSyncEvent.create({
       data: {
         demoSessionId: null,
@@ -117,11 +102,6 @@ export async function deliverSwingLockerOtpEmail(
         status: "success",
         message: `OTP email sent via SwingLocker contact ${contactId} for golfClientId=${client.id}`,
       },
-    });
-
-    console.log("[deliverSwingLockerOtpEmail] delivered successfully:", {
-      golfClientId: client.id,
-      contactId,
     });
 
     return { delivered: true };

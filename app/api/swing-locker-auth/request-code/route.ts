@@ -48,14 +48,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 3. Normalize identifier ────────────────────────────────────────────────
   const { type: identifierType } = normalizeIdentifier(rawIdentifier);
 
-  console.log("[request-code] identifier parsed:", {
-    raw: rawIdentifier,
-    identifierType,
-    ...(identifierType === "email"
-      ? { emailCandidate: rawIdentifier.trim().toLowerCase() }
-      : { phoneCandidates: phoneSearchCandidates(rawIdentifier) }),
-  });
-
   // ── 4. Look up GolfClient ──────────────────────────────────────────────────
   try {
     let whereClause: { email: string } | { phone: { in: string[] } };
@@ -73,15 +65,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Unknown client — return generic response, no OTP created
     if (!client) {
-      console.log("[request-code] client not found for identifier — returning generic success");
       return NextResponse.json(GENERIC_SUCCESS);
     }
-
-    console.log("[request-code] client matched:", {
-      id: client.id,
-      hasEmail: !!client.email,
-      hasPhone: !!client.phone,
-    });
 
     // ── 5. Resend cooldown ───────────────────────────────────────────────────
     // Prevent rapid-fire OTP generation — silently accept if one was recently sent.
@@ -94,7 +79,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       select: { id: true },
     });
     if (recentOtp) {
-      console.log("[request-code] resend cooldown active — skipping OTP generation");
       return NextResponse.json(GENERIC_SUCCESS);
     }
 
@@ -132,10 +116,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Email input  → Email only
     // No cross-channel fallback in V1.
     if (identifierType === "phone") {
-      console.log("[request-code] calling SMS OTP delivery", {
-        hasSmsMode: process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp",
-        hasPhone: !!client.phone,
-      });
       if (process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" && client.phone) {
         void deliverSwingLockerOtp(client, plainCode).catch((err) => {
           console.error("[request-code] Unhandled OTP SMS delivery error:", err);
@@ -143,9 +123,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     } else {
       // identifierType === "email"
-      console.log("[request-code] calling email OTP delivery", {
-        hasEmail: !!client.email,
-      });
       if (client.email) {
         void deliverSwingLockerOtpEmail(
           {
