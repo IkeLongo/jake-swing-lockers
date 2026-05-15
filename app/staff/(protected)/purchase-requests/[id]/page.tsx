@@ -5,6 +5,11 @@ import {
   getPurchaseRequestDetail,
   type PurchaseRequestDetailItem,
 } from "@/lib/queries/purchase-requests";
+import {
+  PURCHASE_REQUEST_STATUS_STYLES,
+  getPurchaseRequestStatusLabel,
+  toCanonicalPurchaseRequestStatus,
+} from "@/lib/purchase-request-status";
 import { StatusUpdateForm } from "./_components/StatusUpdateForm";
 
 export const metadata: Metadata = {
@@ -51,13 +56,6 @@ const SESSION_STATUS_STYLES: Record<string, string> = {
   reviewing: "bg-yellow-100 text-yellow-700",
   finalized: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
-};
-
-const REQUEST_STATUS_STYLES: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-700",
-  contacted: "bg-blue-100 text-blue-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  cancelled: "bg-slate-100 text-slate-500",
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -160,6 +158,7 @@ export default async function PurchaseRequestDetailPage({
   if (!request) notFound();
 
   const { client, demoSession, items, estimatedSubtotal } = request;
+  const canonicalStatus = toCanonicalPurchaseRequestStatus(request.status);
   const clientName =
     [client.firstName, client.lastName].filter(Boolean).join(" ") ||
     client.email ||
@@ -190,10 +189,12 @@ export default async function PurchaseRequestDetailPage({
         <div className="flex items-center gap-3">
           <span
             className={`rounded-lg px-3 py-1 text-xs font-semibold font-body ${
-              REQUEST_STATUS_STYLES[request.status] ?? "bg-slate-100 text-slate-500"
+              canonicalStatus
+                ? PURCHASE_REQUEST_STATUS_STYLES[canonicalStatus]
+                : "bg-slate-100 text-slate-500"
             }`}
           >
-            {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+            {getPurchaseRequestStatusLabel(request.status)}
           </span>
         </div>
       </div>

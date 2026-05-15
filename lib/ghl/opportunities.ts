@@ -25,6 +25,21 @@ export const STAGE_LOCKER_OPENED = () => {
   if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_LOCKER_OPENED_ID environment variable.");
   return id;
 };
+export const STAGE_CONSIDERING_PURCHASE = () => {
+  const id = process.env.GHL_SWINGLOCKER_STAGE_CONSIDERING_PURCHASE_ID;
+  if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_CONSIDERING_PURCHASE_ID environment variable.");
+  return id;
+};
+export const STAGE_PURCHASED = () => {
+  const id = process.env.GHL_SWINGLOCKER_STAGE_PURCHASED_ID;
+  if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_PURCHASED_ID environment variable.");
+  return id;
+};
+export const STAGE_CLOSED_NO_PURCHASE = () => {
+  const id = process.env.GHL_SWINGLOCKER_STAGE_CLOSED_NO_PURCHASE_ID;
+  if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_CLOSED_NO_PURCHASE_ID environment variable.");
+  return id;
+};
 
 // ── GHL Opportunity shapes (minimal) ─────────────────────────────────────────
 

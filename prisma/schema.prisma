@@ -315,7 +315,7 @@ model ImportClubSummary {
 // NOT ecommerce or checkout. This is sales workflow initiation / lead qualification.
 //
 // Status lifecycle:
-//   pending → contacted → completed | cancelled
+//   new_request → reviewing → quote_sent → purchased | fulfilled | closed_lost
 //
 // GHL integration fields are present but unused in V1.
 // Future: sync ghlOpportunityId to a "Purchase Interest" pipeline stage,
@@ -325,8 +325,8 @@ model PurchaseRequest {
   id             Int       @id @default(autoincrement())
   golfClientId   Int
   demoSessionId  Int
-  // pending | contacted | completed | cancelled
-  status         String    @default("pending")
+  // new_request | reviewing | quote_sent | purchased | fulfilled | closed_lost
+  status         String    @default("new_request")
   notes          String?   @db.Text
 
   // GHL-ready fields — unused in V1, plug in later cleanly

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { type PurchaseRequestStatus } from "@/lib/purchase-request-status";
 
 // ── Return shapes ─────────────────────────────────────────────────────────────
 
@@ -185,7 +186,7 @@ export async function createPurchaseRequest(
       data: {
         golfClientId,
         demoSessionId,
-        status: "pending",
+        status: "new_request",
         notes: notes ?? null,
         items: {
           create: items.map((item) => ({
@@ -250,7 +251,7 @@ export async function listAllPurchaseRequests(): Promise<PurchaseRequestSummary[
  */
 export async function updatePurchaseRequestStatus(
   id: number,
-  status: string
+  status: PurchaseRequestStatus
 ): Promise<{ id: number; status: string } | null> {
   try {
     const row = await db.purchaseRequest.update({

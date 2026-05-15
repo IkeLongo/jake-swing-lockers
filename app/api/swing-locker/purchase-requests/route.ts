@@ -3,9 +3,18 @@ import { getSwingLockerSessionFromRequest } from "@/lib/auth/requireSwingLockerS
 import {
   getExistingPurchaseRequest,
   createPurchaseRequest,
+  getPurchaseRequestDetail,
 } from "@/lib/queries/purchase-requests";
 import { db } from "@/lib/db";
 import { deliverPurchaseRequestEmails } from "@/lib/ghl/deliverPurchaseRequestEmails";
+import {
+  updateGolfDemoOpportunity,
+  getOpportunityById,
+  STAGE_DEMO_SUBMITTED,
+  STAGE_SWING_LOCKER_SENT,
+  STAGE_LOCKER_OPENED,
+  STAGE_CONSIDERING_PURCHASE,
+} from "@/lib/ghl/opportunities";
 
 export async function POST(req: NextRequest) {
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -104,6 +113,81 @@ export async function POST(req: NextRequest) {
   // Failures are caught and logged inside the helper — purchase request creation
   // always succeeds regardless of email delivery outcome.
   await deliverPurchaseRequestEmails(result.id);
+
+  // ── Move GHL opportunity to Considering Purchase stage ─────────────────────────
+  // After successful request creation and email delivery, check if the session has
+  // a linked GHL opportunity. If so, move it to Considering Purchase stage with the
+  // purchase request subtotal as the opportunity monetary value.
+  // Failure here does not block the purchase request.
+  try {
+    const sessionWithOpp = await db.demoSession.findUnique({
+      where: { id: demoSessionId },
+      select: { ghlOpportunityId: true },
+    });
+
+    if (sessionWithOpp?.ghlOpportunityId) {
+      const opp = await getOpportunityById(sessionWithOpp.ghlOpportunityId);
+      if (opp) {
+        // Stages that block moving forward to Considering Purchase.
+        // Skip if already in final stages (Purchased, Closed, etc).
+        const stagesToSkip = [
+          process.env.GHL_SWINGLOCKER_STAGE_NEEDS_ANOTHER_FITTING_ID,
+          process.env.GHL_SWINGLOCKER_STAGE_PURCHASED_ID,
+          process.env.GHL_SWINGLOCKER_STAGE_CLOSED_NO_PURCHASE_ID,
+          process.env.GHL_SWINGLOCKER_STAGE_LONG_TERM_NURTURE_ID,
+        ].filter((id): id is string => !!id);
+
+        // If already in a skip stage, do not move
+        if (!stagesToSkip.includes(opp.pipelineStageId)) {
+          // Allowed: Demo Submitted, Swing Locker Sent, Locker Opened,
+          // Engaged / In Conversation, or already Considering Purchase
+          const detail = await getPurchaseRequestDetail(result.id);
+          const monetaryValue = detail?.estimatedSubtotal ?? undefined;
+          const consideringPurchaseId = STAGE_CONSIDERING_PURCHASE();
+
+          await updateGolfDemoOpportunity(sessionWithOpp.ghlOpportunityId, {
+            pipelineStageId: consideringPurchaseId,
+            monetaryValue,
+          });
+
+          // Update purchase request with GHL sync status
+          await db.purchaseRequest.update({
+            where: { id: result.id },
+            data: {
+              ghlOpportunityId: sessionWithOpp.ghlOpportunityId,
+              ghlSyncStatus: "synced",
+              ghlLastSyncedAt: new Date(),
+              ghlSyncError: null,
+            },
+          });
+        }
+      }
+    }
+  } catch (stageErr) {
+    // Log but do not fail the purchase request
+    const errorMessage =
+      stageErr instanceof Error ? stageErr.message : String(stageErr);
+    console.warn(
+      "[POST /api/swing-locker/purchase-requests] Failed to move opportunity to Considering Purchase:",
+      errorMessage
+    );
+
+    // Mark purchase request with GHL error
+    try {
+      await db.purchaseRequest.update({
+        where: { id: result.id },
+        data: {
+          ghlSyncStatus: "failed",
+          ghlSyncError: errorMessage,
+        },
+      });
+    } catch (updateErr) {
+      console.error(
+        "[POST /api/swing-locker/purchase-requests] Failed to log GHL error on purchase request:",
+        updateErr
+      );
+    }
+  }
 
   return NextResponse.json({ id: result.id }, { status: 201 });
 }
