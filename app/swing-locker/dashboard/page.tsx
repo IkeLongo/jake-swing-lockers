@@ -11,12 +11,32 @@ import type { CustomerSessionSummary } from "@/lib/queries/customer-sessions";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
+const ISO_DATE_PREFIX = /^(\d{4})-(\d{2})-(\d{2})/;
+
+function formatSessionDateOnly(date: Date | string): string {
+  const raw = typeof date === "string" ? date : date.toISOString();
+  const match = ISO_DATE_PREFIX.exec(raw);
+
+  if (!match) {
+    return new Date(date).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  // Parse explicit Y/M/D parts so calendar dates don't shift across browser timezones.
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
-  });
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
 function fmtPrice(cents: number): string {
@@ -34,7 +54,7 @@ function SessionCard({ session }: { session: CustomerSessionSummary }) {
     <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-col gap-1">
         <p className="font-heading text-base font-semibold text-slate-900">
-          {fmtDate(session.demoDate)}
+          {formatSessionDateOnly(session.demoDate)}
         </p>
         <div className="flex items-center gap-3 font-body text-sm text-slate-500">
           <span>{session.clubsTestedCount} club{session.clubsTestedCount !== 1 ? "s" : ""} tested</span>

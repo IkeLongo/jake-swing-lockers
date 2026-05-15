@@ -18,6 +18,10 @@ export interface PurchaseRequestSummary {
   clientName: string;
   demoDate: Date;
   itemCount: number;
+  dateDebug?: {
+    rawDemoDateFromDb: string;
+    serializedDemoDateForClient?: string;
+  };
 }
 
 export interface ExistingPurchaseRequest {
@@ -340,6 +344,7 @@ export async function createPurchaseRequest(
  * Includes denormalized client name and session date for the staff table.
  */
 export async function listAllPurchaseRequests(): Promise<PurchaseRequestSummary[]> {
+  const debugDatesEnabled = process.env.NEXT_PUBLIC_DEBUG_DATES === "true";
   const rows = await db.purchaseRequest.findMany({
     orderBy: { createdAt: "desc" },
     select: {
@@ -364,6 +369,15 @@ export async function listAllPurchaseRequests(): Promise<PurchaseRequestSummary[
     const clientName =
       parts.length > 0 ? parts.join(" ") : (row.golfClient.email ?? `Client #${row.golfClientId}`);
 
+    const rawDemoDateFromDb = row.demoSession.demoDate.toISOString();
+
+    if (debugDatesEnabled && process.env.NODE_ENV !== "production") {
+      console.debug("[date-debug][query] purchase request row", {
+        requestId: row.id,
+        rawDemoDateFromDb,
+      });
+    }
+
     return {
       id: row.id,
       status: row.status,
@@ -374,6 +388,7 @@ export async function listAllPurchaseRequests(): Promise<PurchaseRequestSummary[
       clientName,
       demoDate: row.demoSession.demoDate,
       itemCount: row._count.items,
+      ...(debugDatesEnabled ? { dateDebug: { rawDemoDateFromDb } } : {}),
     };
   });
 }

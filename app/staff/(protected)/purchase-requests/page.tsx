@@ -9,7 +9,31 @@ export const metadata: Metadata = {
 };
 
 export default async function PurchaseRequestsPage() {
+  const debugDatesEnabled = process.env.NEXT_PUBLIC_DEBUG_DATES === "true";
   const requests = await listAllPurchaseRequests();
+  const requestsForClient = requests.map((request) => {
+    const serializedDemoDateForClient = new Date(request.demoDate).toISOString();
+
+    if (debugDatesEnabled && process.env.NODE_ENV !== "production") {
+      console.debug("[date-debug][server->client] purchase request row", {
+        requestId: request.id,
+        rawDemoDateFromDb: request.dateDebug?.rawDemoDateFromDb ?? null,
+        serializedDemoDateForClient,
+      });
+    }
+
+    return {
+      ...request,
+      ...(debugDatesEnabled
+        ? {
+            dateDebug: {
+              ...(request.dateDebug ?? { rawDemoDateFromDb: serializedDemoDateForClient }),
+              serializedDemoDateForClient,
+            },
+          }
+        : {}),
+    };
+  });
 
   return (
     <>
@@ -30,7 +54,7 @@ export default async function PurchaseRequestsPage() {
       </div>
 
       {/* ── Table ───────────────────────────────────────────────────────────── */}
-      <PurchaseRequestsTable initialRequests={requests} />
+      <PurchaseRequestsTable initialRequests={requestsForClient} />
     </>
   );
 }

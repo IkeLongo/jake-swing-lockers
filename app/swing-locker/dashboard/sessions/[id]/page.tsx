@@ -17,12 +17,32 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
+const ISO_DATE_PREFIX = /^(\d{4})-(\d{2})-(\d{2})/;
+
+function formatSessionDateOnly(date: Date | string): string {
+  const raw = typeof date === "string" ? date : date.toISOString();
+  const match = ISO_DATE_PREFIX.exec(raw);
+
+  if (!match) {
+    return new Date(date).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  // Parse explicit Y/M/D parts so calendar dates don't shift across browser timezones.
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
-  });
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
 function fmtPrice(value: number): string {
@@ -183,7 +203,7 @@ export default async function SessionDetailPage({
             Demo Session
           </h1>
           <p className="mt-1 font-body text-sm text-slate-500">
-            {fmtDate(session.demoDate)}
+            {formatSessionDateOnly(session.demoDate)}
           </p>
         </div>
 
