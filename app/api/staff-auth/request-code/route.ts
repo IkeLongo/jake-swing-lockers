@@ -154,17 +154,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         staffUser.phone
       ) {
         console.log("[staff request-code] SMS delivery starting", { staffUserId: staffUser.id });
-        void deliverStaffOtpSms(staffUser, plainCode)
-          .then(() => {
-            console.log("[staff request-code] SMS delivery resolved", { staffUserId: staffUser.id });
-          })
-          .catch((err) => {
-            console.error("[staff request-code] SMS delivery rejected", {
-              staffUserId: staffUser.id,
-              deliveryChannel: "sms",
-              error: err instanceof Error ? err.message : String(err),
-            });
+        try {
+          const result = await deliverStaffOtpSms(staffUser, plainCode);
+          console.log("[staff request-code] SMS delivery resolved", {
+            staffUserId: staffUser.id,
+            delivered: result.delivered,
           });
+        } catch (err) {
+          console.error("[staff request-code] SMS delivery rejected", {
+            staffUserId: staffUser.id,
+            deliveryChannel: "sms",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } else {
         console.log("[staff request-code] SMS delivery skipped", {
           staffUserId: staffUser.id,
@@ -175,17 +177,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } else {
       if (staffUser.email) {
         console.log("[staff request-code] email delivery starting", { staffUserId: staffUser.id });
-        void deliverStaffOtpEmail(staffUser, plainCode)
-          .then(() => {
-            console.log("[staff request-code] email delivery resolved", { staffUserId: staffUser.id });
-          })
-          .catch((err) => {
-            console.error("[staff request-code] email delivery rejected", {
-              staffUserId: staffUser.id,
-              deliveryChannel: "email",
-              error: err instanceof Error ? err.message : String(err),
-            });
+        try {
+          const result = await deliverStaffOtpEmail(staffUser, plainCode);
+          console.log("[staff request-code] email delivery resolved", {
+            staffUserId: staffUser.id,
+            delivered: result.delivered,
           });
+        } catch (err) {
+          console.error("[staff request-code] email delivery rejected", {
+            staffUserId: staffUser.id,
+            deliveryChannel: "email",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } else {
         console.log("[staff request-code] email delivery skipped", {
           staffUserId: staffUser.id,

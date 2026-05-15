@@ -144,17 +144,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (identifierType === "phone") {
       if (process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" && client.phone) {
         console.log("[swing-locker request-code] SMS delivery starting", { clientId: client.id });
-        void deliverSwingLockerOtp(client, plainCode)
-          .then(() => {
-            console.log("[swing-locker request-code] SMS delivery resolved", { clientId: client.id });
-          })
-          .catch((err) => {
-            console.error("[swing-locker request-code] SMS delivery rejected", {
-              clientId: client.id,
-              deliveryChannel: "sms",
-              error: err instanceof Error ? err.message : String(err),
-            });
+        try {
+          const result = await deliverSwingLockerOtp(client, plainCode);
+          console.log("[swing-locker request-code] SMS delivery resolved", {
+            clientId: client.id,
+            delivered: result.delivered,
           });
+        } catch (err) {
+          console.error("[swing-locker request-code] SMS delivery rejected", {
+            clientId: client.id,
+            deliveryChannel: "sms",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } else {
         console.log("[swing-locker request-code] SMS delivery skipped", {
           clientId: client.id,
@@ -166,26 +168,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // identifierType === "email"
       if (client.email) {
         console.log("[swing-locker request-code] email delivery starting", { clientId: client.id });
-        void deliverSwingLockerOtpEmail(
-          {
-            id: client.id,
-            firstName: client.firstName,
-            lastName: client.lastName,
-            email: client.email,
-            phone: client.phone,
-          },
-          plainCode
-        )
-          .then(() => {
-            console.log("[swing-locker request-code] email delivery resolved", { clientId: client.id });
-          })
-          .catch((err) => {
-            console.error("[swing-locker request-code] email delivery rejected", {
-              clientId: client.id,
-              deliveryChannel: "email",
-              error: err instanceof Error ? err.message : String(err),
-            });
+        try {
+          const result = await deliverSwingLockerOtpEmail(
+            {
+              id: client.id,
+              firstName: client.firstName,
+              lastName: client.lastName,
+              email: client.email,
+              phone: client.phone,
+            },
+            plainCode
+          );
+          console.log("[swing-locker request-code] email delivery resolved", {
+            clientId: client.id,
+            delivered: result.delivered,
           });
+        } catch (err) {
+          console.error("[swing-locker request-code] email delivery rejected", {
+            clientId: client.id,
+            deliveryChannel: "email",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } else {
         console.log("[swing-locker request-code] email delivery skipped", {
           clientId: client.id,
