@@ -9,6 +9,7 @@ export default async function StaffProtectedLayout({
 }) {
   // ── Load admin status for optional badge ────────────────────────────────────
   let isAdmin = false;
+  let staffName: string | null = null;
   try {
     const cookieStore = await cookies();
     const sessionCookie = cookieStore.get("staff_session")?.value;
@@ -20,9 +21,10 @@ export default async function StaffProtectedLayout({
       if (sessionResult.valid) {
         const staff = await db.staffUser.findUnique({
           where: { id: sessionResult.payload.staffUserId },
-          select: { role: true },
+          select: { role: true, name: true },
         });
         isAdmin = staff?.role === "admin";
+        staffName = staff?.name ?? null;
       }
     }
   } catch {
@@ -31,7 +33,7 @@ export default async function StaffProtectedLayout({
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <ProtectedNavbar isAdmin={isAdmin} />
+      <ProtectedNavbar isAdmin={isAdmin} staffName={staffName} />
 
       {/* ── Page content ────────────────────────────────────────────────────── */}
       <main className="flex-1 mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
