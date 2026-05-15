@@ -16,6 +16,14 @@ const features = [
     status: "active" as const,
   },
   {
+    href: "/staff/clients",
+    label: "Clients",
+    description:
+      "View and manage client profiles, contact details, and related demo sessions.",
+    icon: "👥",
+    status: "active" as const,
+  },
+  {
     href: "/staff/imports",
     label: "Demo Sessions",
     description:
