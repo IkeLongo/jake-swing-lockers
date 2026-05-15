@@ -48,8 +48,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 3. Normalize identifier ────────────────────────────────────────────────
   const { type: identifierType } = normalizeIdentifier(rawIdentifier);
 
-  console.log("[swing-locker request-code] started", { identifierType });
-
   // ── 4. Look up GolfClient ──────────────────────────────────────────────────
   try {
     let whereClause: { email: string } | { phone: { in: string[] } };
@@ -67,15 +65,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Unknown client — return generic response, no OTP created
     if (!client) {
-      console.log("[swing-locker request-code] client not found", { identifierType });
       return NextResponse.json(GENERIC_SUCCESS);
     }
-
-    console.log("[swing-locker request-code] client found", {
-      clientId: client.id,
-      hasEmail: Boolean(client.email),
-      hasPhone: Boolean(client.phone),
-    });
 
     // ── 5. Resend cooldown ───────────────────────────────────────────────────
     // Prevent rapid-fire OTP generation — silently accept if one was recently sent.
@@ -88,7 +79,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       select: { id: true },
     });
     if (recentOtp) {
-      console.log("[swing-locker request-code] cooldown active", { clientId: client.id });
       return NextResponse.json(GENERIC_SUCCESS);
     }
 
@@ -125,31 +115,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Phone input  → SMS only
     // Email input  → Email only
     // No cross-channel fallback in V1.
-    const deliveryChannel = identifierType === "phone" ? "sms" : "email";
-    console.log("[swing-locker request-code] delivery decision", {
-      clientId: client.id,
-      identifierType,
-      deliveryChannel,
-      hasEmail: Boolean(client.email),
-      hasPhone: Boolean(client.phone),
-      smsProviderMode: process.env.GHL_SMS_PROVIDER_MODE ?? null,
-      envPresent: {
-        GHL_SWINGLOCKER_LOCATION_ID: Boolean(process.env.GHL_SWINGLOCKER_LOCATION_ID),
-        GHL_SWINGLOCKER_PRIVATE_TOKEN: Boolean(process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN),
-        GHL_RIVERCITY_LOCATION_ID: Boolean(process.env.GHL_RIVERCITY_LOCATION_ID),
-        GHL_RIVERCITY_PRIVATE_TOKEN: Boolean(process.env.GHL_RIVERCITY_PRIVATE_TOKEN),
-      },
-    });
-
     if (identifierType === "phone") {
       if (process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" && client.phone) {
-        console.log("[swing-locker request-code] SMS delivery starting", { clientId: client.id });
         try {
-          const result = await deliverSwingLockerOtp(client, plainCode);
-          console.log("[swing-locker request-code] SMS delivery resolved", {
-            clientId: client.id,
-            delivered: result.delivered,
-          });
+          await deliverSwingLockerOtp(client, plainCode);
         } catch (err) {
           console.error("[swing-locker request-code] SMS delivery rejected", {
             clientId: client.id,
@@ -157,19 +126,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-      } else {
-        console.log("[swing-locker request-code] SMS delivery skipped", {
-          clientId: client.id,
-          smsProviderMode: process.env.GHL_SMS_PROVIDER_MODE ?? null,
-          hasPhone: Boolean(client.phone),
-        });
       }
     } else {
       // identifierType === "email"
       if (client.email) {
-        console.log("[swing-locker request-code] email delivery starting", { clientId: client.id });
         try {
-          const result = await deliverSwingLockerOtpEmail(
+          await deliverSwingLockerOtpEmail(
             {
               id: client.id,
               firstName: client.firstName,
@@ -179,10 +141,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             },
             plainCode
           );
-          console.log("[swing-locker request-code] email delivery resolved", {
-            clientId: client.id,
-            delivered: result.delivered,
-          });
         } catch (err) {
           console.error("[swing-locker request-code] email delivery rejected", {
             clientId: client.id,
@@ -190,11 +148,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-      } else {
-        console.log("[swing-locker request-code] email delivery skipped", {
-          clientId: client.id,
-          hasEmail: Boolean(client.email),
-        });
       }
     }
 

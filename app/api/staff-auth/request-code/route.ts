@@ -52,7 +52,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 3. Normalize identifier ────────────────────────────────────────────────
   const { value: normalizedValue, type: identifierType } =
     normalizeIdentifier(rawIdentifier);
-  console.log("[staff request-code] started", { identifierType });
   // ── 4 + 5. Look up active StaffUser ───────────────────────────────────────
   try {
     const staffUser = await db.staffUser.findFirst({
@@ -73,15 +72,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Unknown or inactive account — return generic response, no OTP created
     if (!staffUser) {
-      console.log("[staff request-code] staff user not found", { identifierType });
       return NextResponse.json(GENERIC_SUCCESS);
     }
-
-    console.log("[staff request-code] staff user found", {
-      staffUserId: staffUser.id,
-      hasEmail: Boolean(staffUser.email),
-      hasPhone: Boolean(staffUser.phone),
-    });
 
     // ── 6. Resend cooldown ─────────────────────────────────────────────────
     const recentOtp = await db.staffOtp.findFirst({
@@ -95,7 +87,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
 
     if (recentOtp) {
-      console.log("[staff request-code] cooldown active", { staffUserId: staffUser.id });
       // Return generic success — never reveal cooldown state publicly
       return NextResponse.json(GENERIC_SUCCESS);
     }
@@ -132,34 +123,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── 10. Deliver OTP ────────────────────────────────────────────────────
-    const deliveryChannel = identifierType === "phone" ? "sms" : "email";
-    console.log("[staff request-code] delivery decision", {
-      staffUserId: staffUser.id,
-      identifierType,
-      deliveryChannel,
-      hasEmail: Boolean(staffUser.email),
-      hasPhone: Boolean(staffUser.phone),
-      smsProviderMode: process.env.GHL_SMS_PROVIDER_MODE ?? null,
-      envPresent: {
-        GHL_SWINGLOCKER_LOCATION_ID: Boolean(process.env.GHL_SWINGLOCKER_LOCATION_ID),
-        GHL_SWINGLOCKER_PRIVATE_TOKEN: Boolean(process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN),
-        GHL_RIVERCITY_LOCATION_ID: Boolean(process.env.GHL_RIVERCITY_LOCATION_ID),
-        GHL_RIVERCITY_PRIVATE_TOKEN: Boolean(process.env.GHL_RIVERCITY_PRIVATE_TOKEN),
-      },
-    });
-
     if (identifierType === "phone") {
       if (
         process.env.GHL_SMS_PROVIDER_MODE === "rivercity_temp" &&
         staffUser.phone
       ) {
-        console.log("[staff request-code] SMS delivery starting", { staffUserId: staffUser.id });
         try {
-          const result = await deliverStaffOtpSms(staffUser, plainCode);
-          console.log("[staff request-code] SMS delivery resolved", {
-            staffUserId: staffUser.id,
-            delivered: result.delivered,
-          });
+          await deliverStaffOtpSms(staffUser, plainCode);
         } catch (err) {
           console.error("[staff request-code] SMS delivery rejected", {
             staffUserId: staffUser.id,
@@ -167,22 +137,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-      } else {
-        console.log("[staff request-code] SMS delivery skipped", {
-          staffUserId: staffUser.id,
-          smsProviderMode: process.env.GHL_SMS_PROVIDER_MODE ?? null,
-          hasPhone: Boolean(staffUser.phone),
-        });
       }
     } else {
       if (staffUser.email) {
-        console.log("[staff request-code] email delivery starting", { staffUserId: staffUser.id });
         try {
-          const result = await deliverStaffOtpEmail(staffUser, plainCode);
-          console.log("[staff request-code] email delivery resolved", {
-            staffUserId: staffUser.id,
-            delivered: result.delivered,
-          });
+          await deliverStaffOtpEmail(staffUser, plainCode);
         } catch (err) {
           console.error("[staff request-code] email delivery rejected", {
             staffUserId: staffUser.id,
@@ -190,11 +149,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-      } else {
-        console.log("[staff request-code] email delivery skipped", {
-          staffUserId: staffUser.id,
-          hasEmail: Boolean(staffUser.email),
-        });
       }
     }
 
