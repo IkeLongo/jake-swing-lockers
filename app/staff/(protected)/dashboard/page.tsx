@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { db } from "@/lib/db";
+import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
+import type { NextRequest } from "next/server";
 
 export const metadata: Metadata = {
   title: "Dashboard — Jake Swing Lockers Staff",
   robots: { index: false, follow: false },
 };
 
-const features = [
+const baseFeatures = [
   {
     href: "/staff/demo-sessions/new",
     label: "Upload Demo Session",
@@ -14,6 +19,7 @@ const features = [
       "Create a client, set the demo date, and upload a TrackMan XLSX file to generate club averages.",
     icon: "📥",
     status: "active" as const,
+    adminOnly: false,
   },
   {
     href: "/staff/clients",
@@ -22,6 +28,7 @@ const features = [
       "View and manage client profiles, contact details, and related demo sessions.",
     icon: "👥",
     status: "active" as const,
+    adminOnly: false,
   },
   {
     href: "/staff/imports",
@@ -30,6 +37,7 @@ const features = [
       "View all demo sessions, review club averages, and finalize imports for clients.",
     icon: "🔍",
     status: "active" as const,
+    adminOnly: false,
   },
   {
     href: "/staff/purchase-requests",
@@ -38,6 +46,16 @@ const features = [
       "View and manage customer purchase interest submissions from Swing Locker sessions.",
     icon: "🛒",
     status: "active" as const,
+    adminOnly: false,
+  },
+  {
+    href: "/staff/admin",
+    label: "Staff Members",
+    description:
+      "View, create, and manage staff accounts and dashboard access roles.",
+    icon: "👤",
+    status: "active" as const,
+    adminOnly: true,
   },
   {
     href: "#",
@@ -46,6 +64,7 @@ const features = [
       "Directly pull session data from the TrackMan cloud API. Eliminates manual CSV exports.",
     icon: "📡",
     status: "coming-soon" as const,
+    adminOnly: false,
   },
   {
     href: "#",
@@ -54,10 +73,45 @@ const features = [
       "Auto-generate and publish a personalized Swing Locker page for the client from approved session data.",
     icon: "🔒",
     status: "coming-soon" as const,
+    adminOnly: false,
   },
 ];
 
-export default function StaffDashboardPage() {
+export default async function StaffDashboardPage() {
+  // ── Load current staff user role ───────────────────────────────────────────
+  // We need to manually get the session cookie and verify it since we're in a
+  // server component and can't use getStaffSessionFromRequest directly.
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("staff_session")?.value;
+
+  if (!sessionCookie) {
+    redirect("/staff/login");
+  }
+
+  // Import here to avoid circular dependencies
+  const { verifyStaffSessionToken } = await import("@/lib/auth/session");
+  const sessionResult = verifyStaffSessionToken(sessionCookie);
+
+  if (!sessionResult.valid) {
+    redirect("/staff/login");
+  }
+
+  // Load the staff user to get their role
+  const staffUser = await db.staffUser.findUnique({
+    where: { id: sessionResult.payload.staffUserId },
+    select: { role: true, isActive: true },
+  });
+
+  if (!staffUser?.isActive) {
+    redirect("/staff/login");
+  }
+
+  const isAdmin = staffUser.role === "admin";
+
+  // Filter features based on admin status
+  const features = baseFeatures.filter(
+    (f) => !f.adminOnly || (f.adminOnly && isAdmin)
+  );
   return (
     <>
       {/* ── Page header ─────────────────────────────────────────────────────── */}
@@ -87,12 +141,14 @@ function FeatureCard({
   description,
   icon,
   status,
+  adminOnly,
 }: {
   href: string;
   label: string;
   description: string;
   icon: string;
   status: "active" | "coming-soon";
+  adminOnly?: boolean;
 }) {
   const isActive = status === "active";
 
