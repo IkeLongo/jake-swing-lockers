@@ -13,6 +13,7 @@ export interface RenderPurchaseRequestInternalEmailOptions {
   purchaseRequestId: number;
   demoSessionId: number;
   submittedAt: Date;
+  updatedAt?: Date;
   client: {
     firstName: string | null;
     lastName: string | null;
@@ -22,6 +23,7 @@ export interface RenderPurchaseRequestInternalEmailOptions {
   items: PurchaseRequestInternalEmailItem[];
   estimatedSubtotal: number | null;
   notes: string | null;
+  mode?: "submitted" | "updated";
 }
 
 export interface RenderedPurchaseRequestInternalEmail {
@@ -72,16 +74,31 @@ function formatDate(date: Date): string {
 export function renderPurchaseRequestInternalEmail(
   options: RenderPurchaseRequestInternalEmailOptions
 ): RenderedPurchaseRequestInternalEmail {
-  const { purchaseRequestId, demoSessionId, submittedAt, client, items, estimatedSubtotal, notes } =
+  const {
+    purchaseRequestId,
+    demoSessionId,
+    submittedAt,
+    updatedAt,
+    client,
+    items,
+    estimatedSubtotal,
+    notes,
+    mode = "submitted",
+  } =
     options;
   const adminPath = `/staff/purchase-requests/${purchaseRequestId}`;
   const adminUrl = getAppUrl(adminPath);
+  const isUpdated = mode === "updated";
 
   const clientName =
     [client.firstName, client.lastName].filter(Boolean).join(" ") || "Unknown";
 
-  const subject = `New purchase request — ${clientName} (#${purchaseRequestId})`;
-  const previewText = `${clientName} submitted a purchase request with ${items.length} item${items.length !== 1 ? "s" : ""}.`;
+  const subject = isUpdated
+    ? `Updated purchase request — ${clientName} (#${purchaseRequestId})`
+    : `New purchase request — ${clientName} (#${purchaseRequestId})`;
+  const previewText = isUpdated
+    ? `${clientName} updated a purchase request with ${items.length} item${items.length !== 1 ? "s" : ""}.`
+    : `${clientName} submitted a purchase request with ${items.length} item${items.length !== 1 ? "s" : ""}.`;
 
   // ── Plain text ─────────────────────────────────────────────────────────────
   const itemLines = items.map((item) => {
@@ -91,7 +108,7 @@ export function renderPurchaseRequestInternalEmail(
   });
 
   const text = [
-    "INTERNAL — New Purchase Request",
+    isUpdated ? "INTERNAL — Updated Purchase Request" : "INTERNAL — New Purchase Request",
     "",
     `Customer:     ${clientName}`,
     `Email:        ${client.email ?? "—"}`,
@@ -100,6 +117,7 @@ export function renderPurchaseRequestInternalEmail(
     `Request #:    ${purchaseRequestId}`,
     `Session #:    ${demoSessionId}`,
     `Submitted:    ${formatDate(submittedAt)}`,
+    ...(isUpdated && updatedAt ? [`Updated:      ${formatDate(updatedAt)}`] : []),
     "",
     "Requested Items:",
     ...itemLines,
@@ -210,7 +228,7 @@ export function renderPurchaseRequestInternalEmail(
           <tr>
             <td style="padding:6px 32px 0 32px;">
               <h1 style="margin:0; font-size:20px; font-weight:700; color:#111827; line-height:1.3;">
-                New Purchase Request
+                ${isUpdated ? "Updated Purchase Request" : "New Purchase Request"}
               </h1>
             </td>
           </tr>
@@ -251,6 +269,12 @@ export function renderPurchaseRequestInternalEmail(
                   <td style="padding:3px 16px 3px 0; font-size:13px; color:#6b7280; white-space:nowrap;">Submitted</td>
                   <td style="padding:3px 0; font-size:13px; color:#111827;">${escapeHtml(formatDate(submittedAt))}</td>
                 </tr>
+                ${isUpdated && updatedAt
+                  ? `<tr>
+                  <td style="padding:3px 16px 3px 0; font-size:13px; color:#6b7280; white-space:nowrap;">Updated</td>
+                  <td style="padding:3px 0; font-size:13px; color:#111827;">${escapeHtml(formatDate(updatedAt))}</td>
+                </tr>`
+                  : ""}
               </table>
             </td>
           </tr>

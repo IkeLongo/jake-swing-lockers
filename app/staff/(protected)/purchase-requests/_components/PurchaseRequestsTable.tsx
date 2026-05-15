@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { PurchaseRequestSummary } from "@/lib/queries/purchase-requests";
 import {
+  PURCHASE_REQUEST_STATUS_STYLES,
   PURCHASE_REQUEST_STATUSES,
   PURCHASE_REQUEST_STATUS_LABELS,
-  PURCHASE_REQUEST_STATUS_STYLES,
-  type PurchaseRequestStatus,
+  getPurchaseRequestStatusLabel,
   toCanonicalPurchaseRequestStatus,
+  type PurchaseRequestStatus,
 } from "@/lib/purchase-request-status";
 
 interface Props {
@@ -25,24 +27,50 @@ function fmtDate(date: Date | string, utc = false): string {
 }
 
 export function PurchaseRequestsTable({ initialRequests }: Props) {
+  const router = useRouter();
   const [requests, setRequests] = useState(initialRequests);
-  const [updating, setUpdating] = useState<number | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
-  async function handleStatusChange(id: number, newStatus: PurchaseRequestStatus) {
-    setUpdating(id);
+  async function handleStatusChange(
+    requestId: number,
+    newStatus: PurchaseRequestStatus
+  ) {
+    const request = requests.find((r) => r.id === requestId);
+    if (!request) return;
+
+    const currentStatus = toCanonicalPurchaseRequestStatus(request.status);
+    if (newStatus === currentStatus) return;
+
+    setUpdatingId(requestId);
+    setStatusError(null);
+
     try {
-      const res = await fetch(`/api/staff/purchase-requests/${id}`, {
+      const res = await fetch(`/api/staff/purchase-requests/${requestId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
-      if (res.ok) {
-        setRequests((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, status: newStatus } : r))
-        );
+
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!res.ok) {
+        setStatusError(data.error ?? "Failed to update status.");
+        return;
       }
+
+      setRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId ? { ...r, status: newStatus } : r
+        )
+      );
+      router.refresh();
+    } catch {
+      setStatusError("Network error while updating status.");
     } finally {
-      setUpdating(null);
+      setUpdatingId(null);
     }
   }
 
@@ -57,7 +85,13 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex flex-col gap-3">
+      {statusError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5">
+          <p className="font-body text-xs text-red-600">{statusError}</p>
+        </div>
+      )}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full text-sm font-body">
           <thead>
@@ -98,20 +132,25 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
                       toCanonicalPurchaseRequestStatus(req.status) ?? "new_request";
 
                     return (
-                  <select
-                    value={canonicalStatus}
-                    disabled={updating === req.id}
-                    onChange={(e) => handleStatusChange(req.id, e.target.value as PurchaseRequestStatus)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold border-0 cursor-pointer focus:ring-1 focus:ring-emerald-400 focus:outline-none disabled:opacity-50 ${
-                      PURCHASE_REQUEST_STATUS_STYLES[canonicalStatus]
-                    }`}
-                  >
-                    {PURCHASE_REQUEST_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {PURCHASE_REQUEST_STATUS_LABELS[s]}
-                      </option>
-                    ))}
-                  </select>
+                      <select
+                        value={canonicalStatus}
+                        disabled={updatingId === req.id}
+                        onChange={(e) => {
+                          handleStatusChange(
+                            req.id,
+                            e.target.value as PurchaseRequestStatus
+                          );
+                        }}
+                        className={`rounded-lg px-2.5 py-1 text-xs font-semibold border border-transparent cursor-pointer focus:ring-2 focus:ring-emerald-400 focus:outline-none disabled:opacity-50 transition-colors font-body ${
+                          PURCHASE_REQUEST_STATUS_STYLES[canonicalStatus]
+                        }`}
+                      >
+                        {PURCHASE_REQUEST_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {PURCHASE_REQUEST_STATUS_LABELS[s]}
+                          </option>
+                        ))}
+                      </select>
                     );
                   })()}
                 </td>
@@ -131,6 +170,7 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   );
 }

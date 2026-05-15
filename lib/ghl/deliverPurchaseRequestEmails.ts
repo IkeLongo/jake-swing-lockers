@@ -48,7 +48,8 @@ function getInternalNotifyEmail(): string {
  * Returns a result summary suitable for logging.
  */
 export async function deliverPurchaseRequestEmails(
-  purchaseRequestId: number
+  purchaseRequestId: number,
+  mode: "submitted" | "updated" = "submitted"
 ): Promise<DeliverPurchaseRequestEmailsResult> {
   const result: DeliverPurchaseRequestEmailsResult = {
     customerDelivered: false,
@@ -95,6 +96,7 @@ export async function deliverPurchaseRequestEmails(
         items: emailItems,
         estimatedSubtotal: detail.estimatedSubtotal,
         notes: detail.notes,
+        mode,
       });
 
       await ghlFetch<unknown>("/conversations/messages", {
@@ -138,10 +140,12 @@ export async function deliverPurchaseRequestEmails(
       purchaseRequestId: detail.id,
       demoSessionId: detail.demoSessionId,
       submittedAt: detail.createdAt,
+      updatedAt: detail.updatedAt,
       client: detail.client,
       items: emailItems,
       estimatedSubtotal: detail.estimatedSubtotal,
       notes: detail.notes,
+      mode,
     });
 
     await ghlFetch<unknown>("/conversations/messages", {

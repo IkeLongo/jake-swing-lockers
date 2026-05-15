@@ -15,6 +15,7 @@ import {
   STAGE_LOCKER_OPENED,
   STAGE_CONSIDERING_PURCHASE,
 } from "@/lib/ghl/opportunities";
+import { isDuplicatePurchaseRequest } from "@/lib/purchase-request-workflow";
 
 export async function POST(req: NextRequest) {
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
 
   // ── Duplicate guard ─────────────────────────────────────────────────────────
   const existing = await getExistingPurchaseRequest(golfClientId, demoSessionId);
-  if (existing) {
+  if (isDuplicatePurchaseRequest(existing)) {
     return NextResponse.json(
       { error: "A purchase request already exists for this session", id: existing.id },
       { status: 409 }

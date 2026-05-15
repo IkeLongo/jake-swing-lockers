@@ -10,7 +10,7 @@ import {
   getPurchaseRequestStatusLabel,
   toCanonicalPurchaseRequestStatus,
 } from "@/lib/purchase-request-status";
-import { StatusUpdateForm } from "./_components/StatusUpdateForm";
+import { PurchaseRequestEditForm } from "./_components/PurchaseRequestEditForm";
 
 export const metadata: Metadata = {
   title: "Purchase Request — Jake Swing Lockers Staff",
@@ -284,12 +284,18 @@ export default async function PurchaseRequestDetailPage({
           )}
         </SectionCard>
 
-        {/* ── Status Management ─────────────────────────────────────────────── */}
-        <SectionCard title="Update Status">
+        {/* ── Edit request ──────────────────────────────────────────────────── */}
+        <SectionCard title="Edit Request">
           <p className="font-body text-xs text-slate-500 mb-3">
-            Change the request status to reflect your follow-up progress.
+            Update requested clubs, notes, and status from this detail view.
           </p>
-          <StatusUpdateForm requestId={request.id} initialStatus={request.status} />
+          <PurchaseRequestEditForm
+            requestId={request.id}
+            initialStatus={request.status}
+            initialNotes={request.notes}
+            initialSelectedClubIds={request.items.map((item) => item.demoClubTestId)}
+            availableClubs={request.availableClubs}
+          />
         </SectionCard>
       </div>
     </>

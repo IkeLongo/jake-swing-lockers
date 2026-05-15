@@ -1,5 +1,10 @@
 import { db } from "@/lib/db";
 import { type PurchaseRequestStatus } from "@/lib/purchase-request-status";
+import { isPurchaseRequestLockedStatus } from "@/lib/purchase-request-status";
+import {
+  buildPurchaseRequestClubSnapshots,
+  getUniqueClubIdsPreservingOrder,
+} from "@/lib/purchase-request-workflow";
 
 // ── Return shapes ─────────────────────────────────────────────────────────────
 
@@ -38,11 +43,20 @@ export interface PurchaseRequestDetailItem {
   totalDistance: number | null;
 }
 
+export interface PurchaseRequestEditableClub {
+  id: number;
+  clubType: string | null;
+  brand: string | null;
+  model: string | null;
+  estimatedPrice: number | null;
+}
+
 export interface PurchaseRequestDetail {
   id: number;
   status: string;
   notes: string | null;
   createdAt: Date;
+  updatedAt: Date;
   golfClientId: number;
   demoSessionId: number;
   client: {
@@ -56,8 +70,27 @@ export interface PurchaseRequestDetail {
     status: string;
   };
   items: PurchaseRequestDetailItem[];
+  availableClubs: PurchaseRequestEditableClub[];
   estimatedSubtotal: number | null;
 }
+
+export interface ReplacePurchaseRequestItemsInput {
+  demoClubTestIds: number[];
+  notes: string | null;
+  status?: PurchaseRequestStatus;
+}
+
+export type ReplacePurchaseRequestItemsResult =
+  | {
+      ok: true;
+      id: number;
+      status: string;
+    }
+  | {
+      ok: false;
+      reason: "not_found" | "locked" | "invalid_clubs";
+      message: string;
+    };
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
@@ -76,13 +109,27 @@ export async function getPurchaseRequestDetail(
       status: true,
       notes: true,
       createdAt: true,
+      updatedAt: true,
       golfClientId: true,
       demoSessionId: true,
       golfClient: {
         select: { firstName: true, lastName: true, email: true, phone: true },
       },
       demoSession: {
-        select: { demoDate: true, status: true },
+        select: {
+          demoDate: true,
+          status: true,
+          clubTests: {
+            orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+            select: {
+              id: true,
+              clubType: true,
+              brand: true,
+              model: true,
+              estimatedPrice: true,
+            },
+          },
+        },
       },
       items: {
         orderBy: { id: "asc" },
@@ -136,18 +183,104 @@ export async function getPurchaseRequestDetail(
     ? prices.reduce((sum, p) => sum + p, 0)
     : null;
 
+  const availableClubs: PurchaseRequestEditableClub[] = row.demoSession.clubTests.map((club) => ({
+    id: club.id,
+    clubType: club.clubType,
+    brand: club.brand,
+    model: club.model,
+    estimatedPrice: club.estimatedPrice != null ? Number(club.estimatedPrice) : null,
+  }));
+
   return {
     id: row.id,
     status: row.status,
     notes: row.notes,
     createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
     golfClientId: row.golfClientId,
     demoSessionId: row.demoSessionId,
     client: row.golfClient,
     demoSession: row.demoSession,
     items,
+    availableClubs,
     estimatedSubtotal,
   };
+}
+
+/**
+ * Replaces all purchase request items and updates notes (and optional status)
+ * in a single transaction. Item IDs are validated against the request's
+ * existing demoSessionId.
+ */
+export async function replacePurchaseRequestItems(
+  id: number,
+  input: ReplacePurchaseRequestItemsInput
+): Promise<ReplacePurchaseRequestItemsResult> {
+  const uniqueIds = getUniqueClubIdsPreservingOrder(input.demoClubTestIds);
+
+  return db.$transaction(async (tx) => {
+    const existing = await tx.purchaseRequest.findUnique({
+      where: { id },
+      select: { id: true, status: true, demoSessionId: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        reason: "not_found",
+        message: "Purchase request not found",
+      };
+    }
+
+    if (isPurchaseRequestLockedStatus(existing.status)) {
+      return {
+        ok: false,
+        reason: "locked",
+        message: "This purchase request is locked and can no longer be edited.",
+      };
+    }
+
+    const clubs = await tx.demoClubTest.findMany({
+      where: {
+        id: { in: uniqueIds },
+        demoSessionId: existing.demoSessionId,
+      },
+      select: {
+        id: true,
+        clubType: true,
+        estimatedPrice: true,
+      },
+    });
+
+    if (clubs.length !== uniqueIds.length) {
+      return {
+        ok: false,
+        reason: "invalid_clubs",
+        message: "One or more selected clubs are invalid for this request's session.",
+      };
+    }
+
+    const snapshots = buildPurchaseRequestClubSnapshots(uniqueIds, clubs);
+
+    const updated = await tx.purchaseRequest.update({
+      where: { id },
+      data: {
+        notes: input.notes,
+        ...(input.status ? { status: input.status } : {}),
+        items: {
+          deleteMany: {},
+          create: snapshots,
+        },
+      },
+      select: { id: true, status: true },
+    });
+
+    return {
+      ok: true,
+      id: updated.id,
+      status: updated.status,
+    };
+  });
 }
 
 /**

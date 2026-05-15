@@ -12,6 +12,7 @@ export interface RenderPurchaseRequestCustomerEmailOptions {
   items: PurchaseRequestCustomerEmailItem[];
   estimatedSubtotal: number | null;
   notes: string | null;
+  mode?: "submitted" | "updated";
 }
 
 export interface RenderedPurchaseRequestCustomerEmail {
@@ -51,11 +52,16 @@ function formatCurrency(amount: number): string {
 export function renderPurchaseRequestCustomerEmail(
   options: RenderPurchaseRequestCustomerEmailOptions
 ): RenderedPurchaseRequestCustomerEmail {
-  const { firstName, items, estimatedSubtotal, notes } = options;
+  const { firstName, items, estimatedSubtotal, notes, mode = "submitted" } = options;
 
   const greeting = firstName ? `Hi ${firstName},` : "Hi,";
-  const subject = "Your Swing Locker purchase request has been submitted";
-  const previewText = "Your purchase interest request has been received by JL Golf Sales.";
+  const isUpdated = mode === "updated";
+  const subject = isUpdated
+    ? "Your Swing Locker purchase request has been updated"
+    : "Your Swing Locker purchase request has been submitted";
+  const previewText = isUpdated
+    ? "Your purchase request has been updated by JL Golf Sales."
+    : "Your purchase interest request has been received by JL Golf Sales.";
 
   // ── Plain text ─────────────────────────────────────────────────────────────
   const itemLines = items.map((item) => {
@@ -67,7 +73,9 @@ export function renderPurchaseRequestCustomerEmail(
   const text = [
     greeting,
     "",
-    "Thank you for submitting your purchase interest through Swing Locker. Your request has been received and forwarded to JL Golf Sales for review.",
+    isUpdated
+      ? "Your purchase request has been updated by JL Golf Sales. The latest request details are included below."
+      : "Thank you for submitting your purchase interest through Swing Locker. Your request has been received and forwarded to JL Golf Sales for review.",
     "",
     "Requested Items:",
     ...itemLines,
@@ -171,7 +179,9 @@ export function renderPurchaseRequestCustomerEmail(
               </p>
 
               <p style="margin:0 0 24px 0; font-size:15px; line-height:1.6; color:#374151;">
-                Thank you for submitting your purchase interest through Swing Locker. Your request has been received and forwarded to JL Golf Sales for review.
+                ${isUpdated
+                  ? "Your purchase request has been updated by JL Golf Sales. The latest request details are included below."
+                  : "Thank you for submitting your purchase interest through Swing Locker. Your request has been received and forwarded to JL Golf Sales for review."}
               </p>
 
               <!-- Items table -->

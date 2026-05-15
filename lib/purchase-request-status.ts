@@ -9,6 +9,18 @@ export const PURCHASE_REQUEST_STATUSES = [
 
 export type PurchaseRequestStatus = (typeof PURCHASE_REQUEST_STATUSES)[number];
 
+export const PURCHASE_REQUEST_EDITABLE_STATUSES = [
+  "new_request",
+  "reviewing",
+  "quote_sent",
+] as const;
+
+export const PURCHASE_REQUEST_LOCKED_STATUSES = [
+  "purchased",
+  "fulfilled",
+  "closed_lost",
+] as const;
+
 export const LEGACY_PURCHASE_REQUEST_STATUS_MAP = {
   pending: "new_request",
   contacted: "reviewing",
@@ -54,4 +66,20 @@ export function getPurchaseRequestStatusLabel(status: string): string {
   const canonical = toCanonicalPurchaseRequestStatus(status);
   if (!canonical) return status;
   return PURCHASE_REQUEST_STATUS_LABELS[canonical];
+}
+
+export function isPurchaseRequestEditableStatus(status: string): boolean {
+  const canonical = toCanonicalPurchaseRequestStatus(status);
+  return (
+    canonical != null &&
+    (PURCHASE_REQUEST_EDITABLE_STATUSES as readonly string[]).includes(canonical)
+  );
+}
+
+export function isPurchaseRequestLockedStatus(status: string): boolean {
+  const canonical = toCanonicalPurchaseRequestStatus(status);
+  return (
+    canonical != null &&
+    (PURCHASE_REQUEST_LOCKED_STATUSES as readonly string[]).includes(canonical)
+  );
 }
