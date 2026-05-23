@@ -267,8 +267,10 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           <table className="w-full min-w-[1700px] text-sm font-body">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
                 <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
                 <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Club</th>
+                <th className="min-w-[180px] whitespace-nowrap px-5 py-3 font-subheading">Tags</th>
                 <th className="min-w-[130px] whitespace-nowrap px-5 py-3 font-subheading text-right">Est. Price</th>
                 <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Shots</th>
                 <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Club Speed</th>
@@ -277,9 +279,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                 <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Height</th>
                 <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Carry</th>
                 <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Total</th>
-                <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading text-center">Edited</th>
-                <th className="min-w-[180px] whitespace-nowrap px-5 py-3 font-subheading">Tags</th>
-                <th className="min-w-[120px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -297,6 +296,15 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                         : "hover:bg-slate-50/60"
                     }`}
                   >
+                    {/* Actions */}
+                    <td className="whitespace-nowrap px-5 py-4">
+                      <button
+                        onClick={() => setEditingId(s.id)}
+                        className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+                      >
+                        Edit
+                      </button>
+                    </td>
                     {/* Include toggle */}
                     <td className="whitespace-nowrap px-5 py-4 text-center">
                       <button
@@ -337,6 +345,18 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                           {s.clubName}
                         </span>
                       )}
+                    </td>
+                    {/* Tags — unique tags found across all shots for this club */}
+                    <td className="px-5 py-4 text-sm">
+                      {(() => {
+                        const clubKey = s.originalClubName ?? "Unassigned";
+                        const tags = tagsPerClub?.[clubKey] ?? [];
+                        return tags.length > 0 ? (
+                          <span className="text-slate-700">{tags.join(", ")}</span>
+                        ) : (
+                          <span className="text-slate-300 text-xs">None</span>
+                        );
+                      })()}
                     </td>
                     {/* Est. Price */}
                     <td className="whitespace-nowrap px-5 py-4 text-right text-slate-700">
@@ -385,35 +405,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                       total={s.shotCount}
                       unit="yrd"
                     />
-                    <td className="whitespace-nowrap px-5 py-4 text-center">
-                      {s.isManuallyEdited ? (
-                        <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 border border-blue-200">
-                          Edited
-                        </span>
-                      ) : (
-                        <span className="text-slate-300 text-xs">—</span>
-                      )}
-                    </td>
-                    {/* Tags — unique tags found across all shots for this club */}
-                    <td className="px-5 py-4 text-sm">
-                      {(() => {
-                        const clubKey = s.originalClubName ?? "Unassigned";
-                        const tags = tagsPerClub?.[clubKey] ?? [];
-                        return tags.length > 0 ? (
-                          <span className="text-slate-700">{tags.join(", ")}</span>
-                        ) : (
-                          <span className="text-slate-300 text-xs">None</span>
-                        );
-                      })()}
-                    </td>
-                    <td className="whitespace-nowrap px-5 py-4">
-                      <button
-                        onClick={() => setEditingId(s.id)}
-                        className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors"
-                      >
-                        Edit
-                      </button>
-                    </td>
                   </tr>
                 );
               })}
