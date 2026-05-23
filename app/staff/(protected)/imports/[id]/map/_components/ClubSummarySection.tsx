@@ -437,14 +437,14 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       )}
       {/* ── Club summary table ──────────────────────────────────────────────── */}
       {hasSummaries && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
+        <div className="overflow-x-auto overflow-y-auto max-h-[650px] rounded-xl border border-slate-200 bg-white shadow-xs">
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
             <table className="w-full min-w-[1950px] text-sm font-body">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-slate-50">
                 <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <th className="w-10 px-3 py-3 font-subheading" />
                   <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
@@ -486,6 +486,11 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                           candidate.linkedToSummaryId === s.id) &&
                         !parentIds.has(candidate.id),
                     );
+                    // Parent of this row, if it is a linked child
+                    const parentSummary =
+                      s.linkedToSummaryId !== null
+                        ? (summaries.find((p) => p.id === s.linkedToSummaryId) ?? null)
+                        : null;
                     return (
                     <SortableRow
                       key={s.id}
@@ -494,6 +499,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                       onEdit={() => setEditingId(s.id)}
                       onToggleInclude={(current) => handleToggleInclude(s.id, current)}
                       isParent={parentIds.has(s.id)}
+                      parentSummary={parentSummary}
                       currentChildId={currentChildId}
                       compareOptions={compareOptions}
                       onLinkChange={(newChildId) => handleLinkChange(s.id, newChildId)}
@@ -672,6 +678,8 @@ interface SortableRowProps {
   onEdit: () => void;
   onToggleInclude: (currentIncluded: boolean) => void;
   isParent: boolean;
+  /** If this row is a linked child, the parent summary it points to. */
+  parentSummary: SerializedClubSummary | null;
   /** ID of the child summary currently linked to this row (null if none). */
   currentChildId: number | null;
   /** Summaries eligible to become this row's comparison child. */
@@ -686,6 +694,7 @@ function SortableRow({
   onEdit,
   onToggleInclude,
   isParent,
+  parentSummary,
   currentChildId,
   compareOptions,
   onLinkChange,
@@ -790,7 +799,15 @@ function SortableRow({
            Child rows (isChild) cannot also be parents, so they show no dropdown. */}
       <td className="whitespace-nowrap px-5 py-4">
         {isChild ? (
-          <span className="text-xs text-slate-400">—</span>
+          <span className="text-xs text-slate-500">
+            {parentSummary
+              ? `Linked to ${parentSummary.clubName} — ${
+                  parentSummary.tags.length > 0
+                    ? parentSummary.tags.join(", ")
+                    : "None"
+                }`
+              : "Linked to unknown club"}
+          </span>
         ) : (
           <select
             disabled={isLinking}

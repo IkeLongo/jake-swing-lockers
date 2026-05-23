@@ -73,6 +73,7 @@ export function EditClubSummaryModal({
   const [estimatedPrice, setEstimatedPrice] = useState(
     numToString(summary.estimatedPrice),
   );
+  const [tags, setTags] = useState(summary.tags.join(", "));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +103,10 @@ export function EditClubSummaryModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             clubName: clubName.trim(),
+            tags:
+              tags.trim() === ""
+                ? []
+                : tags.split(",").map((t) => t.trim()).filter(Boolean),
             avgClubSpeed: avgClubSpeed === "" ? null : avgClubSpeed,
             avgBallSpeed: avgBallSpeed === "" ? null : avgBallSpeed,
             avgSpinRate: avgSpinRate === "" ? null : avgSpinRate,
@@ -215,6 +220,17 @@ export function EditClubSummaryModal({
             onChange={setClubName}
             disabled={saving}
             hint="Used for display. Changing this does not affect the original source data."
+          />
+
+          {/* Tags */}
+          <ModalField
+            label="Tags"
+            id="tags"
+            type="text"
+            value={tags}
+            onChange={setTags}
+            disabled={saving}
+            hint="Separate multiple tags with commas. Example: Xxio 10, Mens14"
           />
 
           <div className="grid grid-cols-2 gap-3">

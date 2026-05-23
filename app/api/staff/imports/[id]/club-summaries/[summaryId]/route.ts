@@ -16,6 +16,7 @@ type EditableNumericField = (typeof EDITABLE_NUMERIC_FIELDS)[number];
 
 interface PatchBody {
   clubName?: unknown;
+  tags?: unknown;
   avgClubSpeed?: unknown;
   avgBallSpeed?: unknown;
   avgSpinRate?: unknown;
@@ -118,6 +119,19 @@ export async function PATCH(
   }
   // Only mark as manually edited when content fields changed
   if (markEdited) {
+    update.isManuallyEdited = true;
+  }
+
+  // tags: JSON array of strings — client sends a pre-normalized string[]
+  if ("tags" in body) {
+    const raw = body.tags;
+    if (!Array.isArray(raw) || !raw.every((t) => typeof t === "string")) {
+      return NextResponse.json(
+        { error: "tags must be an array of strings." },
+        { status: 422 },
+      );
+    }
+    update.tags = raw;
     update.isManuallyEdited = true;
   }
 
