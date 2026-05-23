@@ -90,13 +90,35 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setSummaries((prev) => {
-        const oldIndex = prev.findIndex((s) => s.id === active.id);
-        const newIndex = prev.findIndex((s) => s.id === over.id);
-        return arrayMove(prev, oldIndex, newIndex);
-      });
-    }
+    if (!over || active.id === over.id) return;
+
+    setSummaries((prev) => {
+      // IDs of rows that are children (linked to a parent).
+      // They will be pulled into their parent's block and skipped in the main pass.
+      const childIds = new Set(
+        prev.filter((s) => s.linkedToSummaryId !== null).map((s) => s.id),
+      );
+
+      // Build blocks in current row order.
+      // Each block is either [parentRow, childRow] or [standaloneRow].
+      // Children are always appended after their parent so the parent-first
+      // order is enforced on every reorder.
+      const blocks: (typeof prev)[] = [];
+      for (const row of prev) {
+        if (childIds.has(row.id)) continue; // already captured inside parent's block
+        const child = prev.find((c) => c.linkedToSummaryId === row.id) ?? null;
+        blocks.push(child ? [row, child] : [row]);
+      }
+
+      // Find which block contains the dragged row and which contains the drop target.
+      const activeIdx = blocks.findIndex((b) => b.some((r) => r.id === active.id));
+      const overIdx = blocks.findIndex((b) => b.some((r) => r.id === over.id));
+
+      if (activeIdx === -1 || overIdx === -1 || activeIdx === overIdx) return prev;
+
+      // Move the whole block to the new position, then flatten back to a flat row list.
+      return arrayMove(blocks, activeIdx, overIdx).flat();
+    });
   }
 
   async function handleGenerate() {
