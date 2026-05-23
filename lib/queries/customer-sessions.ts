@@ -74,6 +74,7 @@ export async function getCustomerSessions(
       demoDate: true,
       status: true,
       clubTests: {
+        where: { clubRole: "demo" },
         select: { estimatedPrice: true },
       },
     },
@@ -113,6 +114,7 @@ export async function getCustomerSession(
       demoDate: true,
       notes: true,
       clubTests: {
+        where: { clubRole: "demo" },
         orderBy: { sortOrder: "asc" },
         select: {
           id: true,

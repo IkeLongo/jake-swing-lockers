@@ -304,12 +304,19 @@ model ImportClubSummary {
   tags             Json      @default("[]")
   // Optional price set during review; copied into DemoClubTest.estimatedPrice on finalization
   estimatedPrice   Decimal?  @db.Decimal(10, 2)
+  // Comparison link — null = standalone demo club; non-null = this row is a "current" comparison
+  // club that will pair with the linked parent summary on finalization.
+  // One child per parent (enforced at API level). Setting this auto-sets includeInReport = false.
+  linkedToSummaryId  Int?
+  linkedTo           ImportClubSummary?  @relation("ClubSummaryLink", fields: [linkedToSummaryId], references: [id], onDelete: SetNull)
+  linkedBy           ImportClubSummary[] @relation("ClubSummaryLink")
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   batch ImportBatch @relation(fields: [importBatchId], references: [id])
 
   @@index([importBatchId])
+  @@index([linkedToSummaryId])
 }
 
 // ── Purchase Requests ─────────────────────────────────────────────────────────

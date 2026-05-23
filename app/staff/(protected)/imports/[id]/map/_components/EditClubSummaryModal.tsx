@@ -28,6 +28,8 @@ export interface SerializedClubSummary {
   includeInReport: boolean;
   /** Optional price entered during review; copied into DemoClubTest on finalization. */
   estimatedPrice: number | null;
+  /** Non-null when this summary is a "current" comparison child linked to another summary (its parent). */
+  linkedToSummaryId: number | null;
 }
 
 interface Props {
@@ -151,6 +153,7 @@ export function EditClubSummaryModal({
         isManuallyEdited: Boolean(s.isManuallyEdited),
         includeInReport: s.includeInReport === undefined ? true : Boolean(s.includeInReport),
         estimatedPrice: toN(s.estimatedPrice),
+        linkedToSummaryId: s.linkedToSummaryId === null || s.linkedToSummaryId === undefined ? null : Number(s.linkedToSummaryId),
       });
 
       onClose();

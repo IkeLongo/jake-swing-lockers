@@ -24,6 +24,7 @@ interface PatchBody {
   avgTotal?: unknown;
   includeInReport?: unknown;
   estimatedPrice?: unknown;
+  linkedToSummaryId?: unknown;
 }
 
 export async function PATCH(
@@ -136,6 +137,61 @@ export async function PATCH(
       update.estimatedPrice = n;
     }
   }
+  // linkedToSummaryId: null = unlink; positive integer = link to another summary in this batch.
+  // Linking auto-sets includeInReport = false. Does NOT set isManuallyEdited.
+  if ("linkedToSummaryId" in body) {
+    const raw = body.linkedToSummaryId;
+    if (raw === null || raw === undefined) {
+      // Unlink
+      update.linkedToSummaryId = null;
+    } else {
+      const targetId = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+      if (!Number.isInteger(targetId) || targetId <= 0) {
+        return NextResponse.json(
+          { error: "linkedToSummaryId must be a positive integer or null." },
+          { status: 422 },
+        );
+      }
+      if (targetId === summaryIdNum) {
+        return NextResponse.json(
+          { error: "A summary cannot link to itself." },
+          { status: 422 },
+        );
+      }
+      // Validate target exists in the same batch and is itself not a child
+      const target = await db.importClubSummary.findFirst({
+        where: { id: targetId, importBatchId: batchId },
+        select: { id: true, linkedToSummaryId: true },
+      });
+      if (!target) {
+        return NextResponse.json(
+          { error: "Target summary not found in this batch." },
+          { status: 422 },
+        );
+      }
+      if (target.linkedToSummaryId !== null) {
+        return NextResponse.json(
+          { error: "Cannot link to a summary that is already a comparison child (no chaining)." },
+          { status: 422 },
+        );
+      }
+      // Enforce one child per parent
+      const existingChild = await db.importClubSummary.findFirst({
+        where: { linkedToSummaryId: targetId, id: { not: summaryIdNum } },
+        select: { id: true },
+      });
+      if (existingChild) {
+        return NextResponse.json(
+          { error: "Another summary is already linked to that parent. Only one comparison child per parent is allowed." },
+          { status: 422 },
+        );
+      }
+      update.linkedToSummaryId = targetId;
+      // Auto-exclude child from report (it will be finalized as a comparison club, not a standalone)
+      update.includeInReport = false;
+    }
+  }
+
   // ── Persist ─────────────────────────────────────────────────────────────────
   const updated = await db.importClubSummary.update({
     where: { id: summaryIdNum },

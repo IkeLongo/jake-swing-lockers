@@ -109,13 +109,20 @@ export async function POST(
     );
   }
 
-  // ── Load included club summaries ─────────────────────────────────────────────
-  const summaries = await db.importClubSummary.findMany({
-    where: { importBatchId: batchId, includeInReport: true },
+  // ── Load included club summaries (two-pass: parents + children) ─────────────
+  // Parent summaries: includeInReport === true AND not a comparison child
+  const parentSummaries = await db.importClubSummary.findMany({
+    where: { importBatchId: batchId, includeInReport: true, linkedToSummaryId: null },
     orderBy: { clubName: "asc" },
   });
 
-  if (summaries.length === 0) {
+  // Comparison children: any summary linked to a parent (regardless of includeInReport)
+  const childSummaries = await db.importClubSummary.findMany({
+    where: { importBatchId: batchId, linkedToSummaryId: { not: null } },
+    orderBy: { clubName: "asc" },
+  });
+
+  if (parentSummaries.length === 0) {
     return NextResponse.json(
       {
         error:
@@ -172,8 +179,11 @@ export async function POST(
         }
       }
 
-      for (let i = 0; i < summaries.length; i++) {
-        const s = summaries[i]!;
+      // Pass 1: create parent DemoClubTests (clubRole = "demo")
+      // summaryIdToPairIndex maps each parent's DB id → its sequential pairIndex
+      const summaryIdToPairIndex = new Map<number, number>();
+      for (let i = 0; i < parentSummaries.length; i++) {
+        const s = parentSummaries[i]!;
 
         // Round Decimal spinRate to Int for ClubTestMetrics
         const spinRateInt =
@@ -189,7 +199,7 @@ export async function POST(
             estimatedPrice: s.estimatedPrice ?? null,
             sortOrder: i,
             clubRole: "demo",
-            pairIndex: 0,
+            pairIndex: i, // sequential — fixes historical pairIndex: 0 bug
             isRecommended: false,
           },
           select: { id: true },
@@ -204,9 +214,53 @@ export async function POST(
             spinRate: spinRateInt,
             carryDistance: s.avgCarry,
             totalDistance: s.avgTotal,
-            // smashFactor, launchAngle, dispersion: not in ImportClubSummary V1
-            // avgMaxHeight: no matching column in ClubTestMetrics V1 — skipped
-            // TODO: add maxHeight to ClubTestMetrics when schema is extended
+          },
+        });
+
+        summaryIdToPairIndex.set(s.id, i);
+      }
+
+      // Pass 2: create comparison DemoClubTests (clubRole = "current")
+      // Children inherit pairIndex from their linked parent so the locker
+      // ComparisonCard groups them correctly via pairMap.
+      let childSortOrder = parentSummaries.length;
+      for (const s of childSummaries) {
+        const parentPairIndex = summaryIdToPairIndex.get(s.linkedToSummaryId!);
+        if (parentPairIndex === undefined) continue; // parent was excluded — skip child
+
+        const tagsArray = Array.isArray(s.tags) ? (s.tags as string[]) : [];
+        // Build a descriptive label: "Club Name - Tag1, Tag2" or just "Club Name"
+        const comparisonLabel =
+          tagsArray.length > 0
+            ? `${s.clubName} - ${tagsArray.join(", ")}`
+            : s.clubName;
+
+        const spinRateInt =
+          s.avgSpinRate !== null
+            ? Math.round(s.avgSpinRate.toNumber())
+            : null;
+
+        const clubTest = await tx.demoClubTest.create({
+          data: {
+            demoSessionId: sessionId,
+            clubType: comparisonLabel,
+            estimatedPrice: s.estimatedPrice ?? null,
+            sortOrder: childSortOrder++,
+            clubRole: "current", // V1 assumption: comparison clubs are labelled "current"
+            pairIndex: parentPairIndex, // pairs with parent on locker page
+            isRecommended: false,
+          },
+          select: { id: true },
+        });
+
+        await tx.clubTestMetrics.create({
+          data: {
+            clubTestId: clubTest.id,
+            clubSpeed: s.avgClubSpeed,
+            ballSpeed: s.avgBallSpeed,
+            spinRate: spinRateInt,
+            carryDistance: s.avgCarry,
+            totalDistance: s.avgTotal,
           },
         });
       }

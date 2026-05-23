@@ -61,6 +61,9 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   // IDs currently awaiting a PATCH toggle response
   const [toggling, setToggling] = useState<Set<number>>(new Set());
   const [toggleError, setToggleError] = useState<string | null>(null);
+  // IDs currently awaiting a PATCH link response
+  const [linking, setLinking] = useState<Set<number>>(new Set());
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
@@ -73,6 +76,12 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   const hasSummaries = summaries.length > 0;
   const editingSummary = summaries.find((s) => s.id === editingId) ?? null;
   const hasUnassigned = summaries.some((s) => s.clubName === "Unassigned");
+  // Set of summary IDs that already have a comparison child linked to them
+  const parentIds = new Set(
+    summaries
+      .filter((s) => s.linkedToSummaryId !== null)
+      .map((s) => s.linkedToSummaryId!),
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -138,6 +147,10 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           includeInReport: s.includeInReport === undefined ? true : Boolean(s.includeInReport),
           estimatedPrice: toN(s.estimatedPrice),
           tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
+          linkedToSummaryId:
+            s.linkedToSummaryId === null || s.linkedToSummaryId === undefined
+              ? null
+              : Number(s.linkedToSummaryId),
         }),
       );
 
@@ -146,6 +159,127 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       setGenerateError("Network error — please try again.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  // parentId: the row whose "Compare To" dropdown changed.
+  // newChildId: the newly selected comparison club (null = unlink).
+  //
+  // Relationship direction: the CHILD row stores linkedToSummaryId pointing at
+  // the parent. So we PATCH the child row, not the parent row.
+  //   Old child (if any) → PATCH { linkedToSummaryId: null }
+  //   New child (if any) → PATCH { linkedToSummaryId: parentId }
+  async function handleLinkChange(parentId: number, newChildId: number | null) {
+    setLinkError(null);
+
+    // Find the row currently linked to this parent (if any)
+    const oldChild = summaries.find((s) => s.linkedToSummaryId === parentId) ?? null;
+
+    if (oldChild?.id === newChildId) return; // no change
+
+    // Optimistic update
+    setSummaries((prev) =>
+      prev.map((s) => {
+        if (oldChild && s.id === oldChild.id) {
+          // Unlink old child — leave includeInReport as-is (user re-enables manually)
+          return { ...s, linkedToSummaryId: null };
+        }
+        if (newChildId !== null && s.id === newChildId) {
+          // Link new child, force includeInReport = false
+          return { ...s, linkedToSummaryId: parentId, includeInReport: false };
+        }
+        return s;
+      }),
+    );
+    setLinking((prev) => new Set(prev).add(parentId));
+
+    try {
+      // Step 1: unlink old child (if any)
+      if (oldChild) {
+        const res = await fetch(
+          `/api/staff/imports/${batchId}/club-summaries/${oldChild.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ linkedToSummaryId: null }),
+          },
+        );
+        if (!res.ok) {
+          // Revert optimistic unlink
+          setSummaries((prev) =>
+            prev.map((s) =>
+              s.id === oldChild.id ? { ...s, linkedToSummaryId: parentId } : s,
+            ),
+          );
+          const json = (await res.json().catch(() => ({}))) as { error?: string };
+          setLinkError(json.error ?? "Failed to update comparison link.");
+          return;
+        }
+      }
+
+      // Step 2: link new child (if selected)
+      if (newChildId !== null) {
+        const res = await fetch(
+          `/api/staff/imports/${batchId}/club-summaries/${newChildId}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ linkedToSummaryId: parentId }),
+          },
+        );
+        if (!res.ok) {
+          // Revert both optimistic changes
+          setSummaries((prev) =>
+            prev.map((s) => {
+              if (oldChild && s.id === oldChild.id)
+                return { ...s, linkedToSummaryId: parentId };
+              if (s.id === newChildId) return { ...s, linkedToSummaryId: null };
+              return s;
+            }),
+          );
+          const json = (await res.json().catch(() => ({}))) as { error?: string };
+          setLinkError(json.error ?? "Failed to update comparison link.");
+          return;
+        }
+        // Sync server response for the newly linked child
+        const json = (await res.json().catch(() => null)) as {
+          summary?: { linkedToSummaryId?: number | null; includeInReport?: boolean };
+        } | null;
+        if (json?.summary) {
+          setSummaries((prev) =>
+            prev.map((s) =>
+              s.id === newChildId
+                ? {
+                    ...s,
+                    linkedToSummaryId: json!.summary!.linkedToSummaryId ?? null,
+                    includeInReport:
+                      json!.summary!.includeInReport ?? s.includeInReport,
+                  }
+                : s,
+            ),
+          );
+        }
+      }
+
+      if (finalized) setDirty(true);
+    } catch {
+      // Revert both optimistic changes on network error
+      setSummaries((prev) =>
+        prev.map((s) => {
+          if (oldChild && s.id === oldChild.id)
+            return { ...s, linkedToSummaryId: parentId };
+          if (newChildId !== null && s.id === newChildId)
+            return { ...s, linkedToSummaryId: null };
+          return s;
+        }),
+      );
+      setLinkError("Network error — please try again.");
+    } finally {
+      setLinking((prev) => {
+        const next = new Set(prev);
+        next.delete(parentId);
+        return next;
+      });
     }
   }
 
@@ -158,6 +292,11 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   }
 
   async function handleToggleInclude(id: number, currentIncluded: boolean) {
+    // Guard: linked children cannot be toggled — their includeInReport is
+    // controlled by the server when linkedToSummaryId is set/cleared.
+    const summary = summaries.find((s) => s.id === id);
+    if (summary?.linkedToSummaryId !== null && summary?.linkedToSummaryId !== undefined) return;
+
     const nextValue = !currentIncluded;
     setToggleError(null);
     // Optimistic update
@@ -290,7 +429,12 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           {toggleError}
         </div>
       )}
-
+      {/* ── Link error ───────────────────────────────────────────────────── */}
+      {linkError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body">
+          {linkError}
+        </div>
+      )}
       {/* ── Club summary table ──────────────────────────────────────────────── */}
       {hasSummaries && (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
@@ -299,7 +443,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <table className="w-full min-w-[1750px] text-sm font-body">
+            <table className="w-full min-w-[1950px] text-sm font-body">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <th className="w-10 px-3 py-3 font-subheading" />
@@ -307,6 +451,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                   <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
                   <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Club</th>
                   <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Tags</th>
+                  <th className="min-w-[180px] whitespace-nowrap px-5 py-3 font-subheading">Compare To</th>
                   <th className="min-w-[130px] whitespace-nowrap px-5 py-3 font-subheading text-right">Est. Price</th>
                   <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Shots</th>
                   <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Club Speed</th>
@@ -322,15 +467,40 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                   items={summaries.map((s) => s.id)}
                   strategy={verticalListSortingStrategy}
                 >
-                  {summaries.map((s) => (
+                  {summaries.map((s) => {
+                    // The child currently linked to this row (if any)
+                    const currentChild = summaries.find(
+                      (c) => c.linkedToSummaryId === s.id,
+                    );
+                    const currentChildId = currentChild?.id ?? null;
+
+                    // Potential children for this row's dropdown:
+                    //   - not self
+                    //   - not already someone else's child (linkedToSummaryId === null,
+                    //     OR linkedToSummaryId === s.id meaning it IS our current child)
+                    //   - not already acting as a parent themselves (can't be both)
+                    const compareOptions = summaries.filter(
+                      (candidate) =>
+                        candidate.id !== s.id &&
+                        (candidate.linkedToSummaryId === null ||
+                          candidate.linkedToSummaryId === s.id) &&
+                        !parentIds.has(candidate.id),
+                    );
+                    return (
                     <SortableRow
                       key={s.id}
                       summary={s}
                       isToggling={toggling.has(s.id)}
                       onEdit={() => setEditingId(s.id)}
                       onToggleInclude={(current) => handleToggleInclude(s.id, current)}
+                      isParent={parentIds.has(s.id)}
+                      currentChildId={currentChildId}
+                      compareOptions={compareOptions}
+                      onLinkChange={(newChildId) => handleLinkChange(s.id, newChildId)}
+                      isLinking={linking.has(s.id)}
                     />
-                  ))}
+                    );
+                  })}
                 </SortableContext>
               </tbody>
             </table>
@@ -501,13 +671,31 @@ interface SortableRowProps {
   isToggling: boolean;
   onEdit: () => void;
   onToggleInclude: (currentIncluded: boolean) => void;
+  isParent: boolean;
+  /** ID of the child summary currently linked to this row (null if none). */
+  currentChildId: number | null;
+  /** Summaries eligible to become this row's comparison child. */
+  compareOptions: SerializedClubSummary[];
+  onLinkChange: (newChildId: number | null) => void;
+  isLinking: boolean;
 }
 
-function SortableRow({ summary: s, isToggling, onEdit, onToggleInclude }: SortableRowProps) {
+function SortableRow({
+  summary: s,
+  isToggling,
+  onEdit,
+  onToggleInclude,
+  isParent,
+  currentChildId,
+  compareOptions,
+  onLinkChange,
+  isLinking,
+}: SortableRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: s.id });
 
   const isIncluded = s.includeInReport !== false;
+  const isChild = s.linkedToSummaryId !== null;
 
   return (
     <tr
@@ -517,9 +705,11 @@ function SortableRow({ summary: s, isToggling, onEdit, onToggleInclude }: Sortab
       className={`transition-colors ${
         isDragging
           ? "relative z-10 opacity-60 shadow-lg"
-          : !isIncluded
-            ? "bg-slate-200/60 opacity-50 grayscale"
-            : "hover:bg-slate-50/60"
+          : isChild
+            ? "bg-indigo-50/40"
+            : !isIncluded
+              ? "bg-slate-200/60 opacity-50 grayscale"
+              : "hover:bg-slate-50/60"
       }`}
     >
       {/* Drag handle */}
@@ -547,24 +737,36 @@ function SortableRow({ summary: s, isToggling, onEdit, onToggleInclude }: Sortab
       <td className="whitespace-nowrap px-5 py-4 text-center">
         <button
           role="switch"
-          aria-checked={isIncluded}
-          disabled={isToggling}
-          onClick={() => onToggleInclude(isIncluded)}
-          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-wait ${
-            isIncluded ? "bg-emerald-500" : "bg-slate-300"
+          aria-checked={!isChild && isIncluded}
+          disabled={isToggling || isChild}
+          onClick={() => {
+            if (!isChild) onToggleInclude(isIncluded);
+          }}
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+            isChild
+              ? "cursor-not-allowed bg-slate-200"
+              : isToggling
+                ? "cursor-wait bg-emerald-500"
+                : isIncluded
+                  ? "cursor-pointer bg-emerald-500"
+                  : "cursor-pointer bg-slate-300"
           }`}
         >
           <span
             className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-              isIncluded ? "translate-x-4" : "translate-x-0"
+              !isChild && isIncluded ? "translate-x-4" : "translate-x-0"
             }`}
           />
         </button>
-        {!isIncluded && (
+        {isChild ? (
+          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-500">
+            Linked comparison
+          </div>
+        ) : !isIncluded ? (
           <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             Excluded
           </div>
-        )}
+        ) : null}
       </td>
       {/* Club */}
       <td className="whitespace-nowrap px-5 py-4">
@@ -582,6 +784,32 @@ function SortableRow({ summary: s, isToggling, onEdit, onToggleInclude }: Sortab
           <span className="text-slate-700">{s.tags.join(", ")}</span>
         ) : (
           <span className="text-slate-300 text-xs">None</span>
+        )}
+      </td>
+      {/* Compare To — select which club should be linked as a comparison child.
+           Child rows (isChild) cannot also be parents, so they show no dropdown. */}
+      <td className="whitespace-nowrap px-5 py-4">
+        {isChild ? (
+          <span className="text-xs text-slate-400">—</span>
+        ) : (
+          <select
+            disabled={isLinking}
+            value={currentChildId ?? ""}
+            onChange={(e) =>
+              onLinkChange(
+                e.target.value === "" ? null : parseInt(e.target.value, 10),
+              )
+            }
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-indigo-400 focus:outline-none disabled:opacity-50"
+          >
+            <option value="">None</option>
+            {compareOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.clubName}
+                {opt.tags.length > 0 ? ` — ${opt.tags.join(", ")}` : ""}
+              </option>
+            ))}
+          </select>
         )}
       </td>
       {/* Est. Price */}
