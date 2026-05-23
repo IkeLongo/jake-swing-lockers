@@ -233,6 +233,26 @@ export function ParserDebugForm() {
                       </tr>
                     );
                   })}
+                  {/* Tags column — optional; not a TrackMan measurement field */}
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-slate-700 text-xs">
+                      Tags
+                    </td>
+                    <td className="px-4 py-2 tabular-nums text-slate-600">
+                      {result.tagsColumnIndex !== null ? result.tagsColumnIndex : "—"}
+                    </td>
+                    <td className="px-4 py-2">
+                      {result.tagsColumnIndex !== null ? (
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                          Found
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                          Not found
+                        </span>
+                      )}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -380,26 +400,35 @@ export function ParserDebugForm() {
                           {f}
                         </th>
                       ))}
+                      <th className="px-3 py-2 text-left font-mono">Tags</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {result.shotRowPreviews.map((row, i) => (
-                      <tr key={i} className="hover:bg-slate-50">
-                        <td className="px-3 py-1.5 text-slate-400 tabular-nums">
-                          {i + 1}
-                        </td>
-                        {FIELDS_OF_INTEREST.map((f) => (
-                          <td
-                            key={f}
-                            className={`px-3 py-1.5 tabular-nums ${
-                              row[f] ? "text-slate-700" : "text-slate-300"
-                            }`}
-                          >
-                            {row[f] ?? "—"}
+                    {result.shotRowPreviews.map((row, i) => {
+                      const tags = result.parsedShotTags[i] ?? [];
+                      return (
+                        <tr key={i} className="hover:bg-slate-50">
+                          <td className="px-3 py-1.5 text-slate-400 tabular-nums">
+                            {i + 1}
                           </td>
-                        ))}
-                      </tr>
-                    ))}
+                          {FIELDS_OF_INTEREST.map((f) => (
+                            <td
+                              key={f}
+                              className={`px-3 py-1.5 tabular-nums ${
+                                row[f] ? "text-slate-700" : "text-slate-300"
+                              }`}
+                            >
+                              {row[f] ?? "—"}
+                            </td>
+                          ))}
+                          <td className={`px-3 py-1.5 ${
+                            tags.length > 0 ? "text-slate-700" : "text-slate-300"
+                          }`}>
+                            {tags.length > 0 ? tags.join(", ") : "None"}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

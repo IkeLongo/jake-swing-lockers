@@ -42,6 +42,9 @@ const TM_DATA_START_INDEX = 7;        // row 8+
 // A row is classified as a unit row if any cell matches one of these strings.
 const UNIT_HINTS = ["mph", "rpm", "yd", "ft", "m", "deg", "%", "°"];
 
+// Tags column — optional; absence does not produce a warning.
+const TAGS_COLUMN = "Tags";
+
 // ── Response type ─────────────────────────────────────────────────────────────
 
 export interface DebugParserResult {
@@ -73,6 +76,10 @@ export interface DebugParserResult {
   firstParsedRowRawArray: (string | null)[] | null;
   /** Mapped key→value object for the first parsed shot row */
   firstParsedRowRawData: Record<string, string | null> | null;
+  /** Column index of the Tags column in the detected headers, or null if not present */
+  tagsColumnIndex: number | null;
+  /** Parsed tags per shot preview row — parallel to shotRowPreviews; each entry is a string array */
+  parsedShotTags: string[][];
   warnings: string[];
 }
 
@@ -159,6 +166,9 @@ function debugCsv(buffer: Buffer, fileName: string): DebugParserResult {
   // For CSV the first row is the header
   const headers = raw[0]?.map((h) => (h !== null && h !== undefined ? String(h).trim() : "")) ?? [];
 
+  const shotRowPreviews = buildShotPreviews(raw, headers, 1, null, 10);
+  const tagsColIdx = headers.indexOf(TAGS_COLUMN);
+
   return {
     fileName,
     sheetNames: [sheetName],
@@ -174,7 +184,7 @@ function debugCsv(buffer: Buffer, fileName: string): DebugParserResult {
     detectedDataStartRowIndex: 1,
     detectedDataStartRowNumber: 2,
     fieldColumnIndexes: buildFieldColumnIndexes(headers),
-    shotRowPreviews: buildShotPreviews(raw, headers, 1, null, 10),
+    shotRowPreviews,
     unitMode: null,
     ignoredMetricUnitRowNumber: null,
     parserMode: "csv",
@@ -183,6 +193,8 @@ function debugCsv(buffer: Buffer, fileName: string): DebugParserResult {
     firstParsedRowRawData: raw[1]
       ? buildRowObject(raw[1], headers)
       : null,
+    tagsColumnIndex: tagsColIdx >= 0 ? tagsColIdx : null,
+    parsedShotTags: shotRowPreviews.map((row) => parseTagsCell(row[TAGS_COLUMN] ?? null)),
     warnings: [],
   };
 }
@@ -364,6 +376,10 @@ function debugXlsx(buffer: Buffer, fileName: string): DebugParserResult {
         )
       : [];
 
+  const tagsColIdx = detectedHeaders.indexOf(TAGS_COLUMN);
+  const tagsColumnIndex = tagsColIdx >= 0 ? tagsColIdx : null;
+  const parsedShotTags = shotRowPreviews.map((row) => parseTagsCell(row[TAGS_COLUMN] ?? null));
+
   // First parsed row metadata — helps verify the correct row is being used.
   const firstParsedRowIndex = detectedDataStartRowIndex;
   const firstParsedRowRawArray =
@@ -438,6 +454,8 @@ function debugXlsx(buffer: Buffer, fileName: string): DebugParserResult {
       firstParsedRowIndex !== null ? firstParsedRowIndex + 1 : null,
     firstParsedRowRawArray,
     firstParsedRowRawData,
+    tagsColumnIndex,
+    parsedShotTags,
     warnings,
   };
 }
@@ -502,4 +520,16 @@ function buildShotPreviews(
   }
 
   return results;
+}
+
+/**
+ * Normalise a raw Tags cell value into an array of trimmed, non-empty strings.
+ *
+ *   null / ""                             →  []
+ *   "VIP"                                 →  ["VIP"]
+ *   "VIP, Returning Customer, Needs Follow Up"  →  ["VIP", "Returning Customer", "Needs Follow Up"]
+ */
+function parseTagsCell(raw: string | null): string[] {
+  if (raw === null || raw.trim() === "") return [];
+  return raw.split(",").map((t) => t.trim()).filter((t) => t.length > 0);
 }

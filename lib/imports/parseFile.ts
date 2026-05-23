@@ -62,6 +62,13 @@ const TRACKMAN_FIELDS_OF_INTEREST = new Set([
   "Measurement.Total",
 ]);
 
+/**
+ * Optional Tags column — extracted alongside measurement fields but kept
+ * separate so it never interferes with TRACKMAN_FIELDS_OF_INTEREST filtering
+ * or the hasValue (non-empty row) check.
+ */
+const TRACKMAN_TAGS_COLUMN = "Tags";
+
 // Strings that indicate a row is a unit/conversion row, not a shot row.
 // Used only for dev-mode assertion.
 const UNIT_VALUE_PATTERN = /^(mph|rpm|yrd|yd|ft|m|deg|[°%])$/i;
@@ -72,6 +79,23 @@ const CONVERSION_FACTORS = new Set([
   "0.621371",
   "1.60934",
 ]);
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Normalise a raw Tags cell value into an array of trimmed, non-empty strings.
+ *
+ *   null / ""                                    → []
+ *   "VIP"                                        → ["VIP"]
+ *   "VIP, Returning Customer, Needs Follow Up"   → ["VIP", "Returning Customer", "Needs Follow Up"]
+ */
+export function parseTagsCell(raw: string | null): string[] {
+  if (raw === null || raw.trim() === "") return [];
+  return raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+}
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -214,15 +238,29 @@ function parseTrackManSheet(
 
     for (let col = 0; col < headers.length; col++) {
       const header = headers[col];
-      // Skip blank headers and columns not in the fields-of-interest list.
-      if (!header || !TRACKMAN_FIELDS_OF_INTEREST.has(header)) continue;
+      // Blank headers are always skipped.
+      if (!header) continue;
 
-      const cellVal = rowArr[col] ?? null;
-      const strVal =
-        cellVal !== null ? String(cellVal).trim() : null;
+      if (TRACKMAN_FIELDS_OF_INTEREST.has(header)) {
+        // Measurement field — extract string value and track row non-emptiness.
+        const cellVal = rowArr[col] ?? null;
+        const strVal =
+          cellVal !== null ? String(cellVal).trim() : null;
+        rowObj[header] = strVal === "" ? null : strVal;
+        if (strVal && strVal !== "") hasValue = true;
+      } else if (header === TRACKMAN_TAGS_COLUMN) {
+        // Tags field — parse into a string array.
+        // Tags alone do not count toward hasValue; measurement data determines row validity.
+        const cellVal = rowArr[col] ?? null;
+        const strVal = cellVal !== null ? String(cellVal).trim() : null;
+        rowObj["tags"] = parseTagsCell(strVal);
+      }
+      // All other columns are intentionally dropped.
+    }
 
-      rowObj[header] = strVal === "" ? null : strVal;
-      if (strVal && strVal !== "") hasValue = true;
+    // Ensure every parsed row has a tags field even when the column is absent.
+    if (!Array.isArray(rowObj["tags"])) {
+      rowObj["tags"] = [];
     }
 
     // Skip rows that are entirely empty.

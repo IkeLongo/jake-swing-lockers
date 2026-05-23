@@ -30,11 +30,16 @@ interface Props {
   sessionStatus?: string;
   /** True when the session is finalized but club summaries have been edited since. */
   needsRefinalization?: boolean;
+  /**
+   * Unique tags per club, keyed by the original Club.Type value from the import
+   * (or "Unassigned" for blank Club.Type rows). Derived server-side from ImportRow.rawData.
+   */
+  tagsPerClub?: Record<string, string[]>;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization }: Props) {
+export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization, tagsPerClub }: Props) {
   const [summaries, setSummaries] =
     useState<SerializedClubSummary[]>(initialSummaries);
   const [generating, setGenerating] = useState(false);
@@ -259,7 +264,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       {/* ── Club summary table ──────────────────────────────────────────────── */}
       {hasSummaries && (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
-          <table className="w-full min-w-[1500px] text-sm font-body">
+          <table className="w-full min-w-[1700px] text-sm font-body">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
@@ -273,6 +278,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                 <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Carry</th>
                 <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Total</th>
                 <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading text-center">Edited</th>
+                <th className="min-w-[180px] whitespace-nowrap px-5 py-3 font-subheading">Tags</th>
                 <th className="min-w-[120px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
               </tr>
             </thead>
@@ -387,6 +393,18 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                       ) : (
                         <span className="text-slate-300 text-xs">—</span>
                       )}
+                    </td>
+                    {/* Tags — unique tags found across all shots for this club */}
+                    <td className="px-5 py-4 text-sm">
+                      {(() => {
+                        const clubKey = s.originalClubName ?? "Unassigned";
+                        const tags = tagsPerClub?.[clubKey] ?? [];
+                        return tags.length > 0 ? (
+                          <span className="text-slate-700">{tags.join(", ")}</span>
+                        ) : (
+                          <span className="text-slate-300 text-xs">None</span>
+                        );
+                      })()}
                     </td>
                     <td className="whitespace-nowrap px-5 py-4">
                       <button

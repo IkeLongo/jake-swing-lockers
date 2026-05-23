@@ -35,7 +35,7 @@ export default async function ImportMapPage({
   const batchId = parseInt(id, 10);
   if (isNaN(batchId)) notFound();
 
-  const [batch, summariesRaw] = await Promise.all([
+  const [batch, summariesRaw, importRowsRaw] = await Promise.all([
     db.importBatch.findUnique({
       where: { id: batchId },
       select: {
@@ -71,6 +71,10 @@ export default async function ImportMapPage({
       where: { importBatchId: batchId },
       orderBy: [{ clubName: "asc" }],
     }),
+    db.importRow.findMany({
+      where: { importBatchId: batchId },
+      select: { rawData: true },
+    }),
   ]);
 
   if (!batch) notFound();
@@ -98,6 +102,24 @@ export default async function ImportMapPage({
     includeInReport: s.includeInReport,
     estimatedPrice: toNum(s.estimatedPrice),
   }));
+
+  // Aggregate unique tags per club from the raw row data.
+  // Uses the original Club.Type value (before any staff edits) as the grouping key,
+  // matching the originalClubName on each ImportClubSummary.
+  const tagsPerClub: Record<string, string[]> = {};
+  for (const { rawData } of importRowsRaw) {
+    const data = (rawData ?? {}) as Record<string, unknown>;
+    const rawClub =
+      typeof data["Club.Type"] === "string" ? data["Club.Type"].trim() : "";
+    const clubKey = rawClub === "" ? "Unassigned" : rawClub;
+    const tags = Array.isArray(data["tags"]) ? (data["tags"] as string[]) : [];
+    if (!tagsPerClub[clubKey]) tagsPerClub[clubKey] = [];
+    for (const tag of tags) {
+      if (typeof tag === "string" && !tagsPerClub[clubKey].includes(tag)) {
+        tagsPerClub[clubKey].push(tag);
+      }
+    }
+  }
 
   return (
     <>
@@ -177,6 +199,7 @@ export default async function ImportMapPage({
         sessionId={batch.demoSession?.id}
         sessionStatus={batch.demoSession?.status}
         needsRefinalization={batch.demoSession?.needsRefinalization ?? false}
+        tagsPerClub={tagsPerClub}
       />
 
     </>
