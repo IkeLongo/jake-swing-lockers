@@ -44,7 +44,7 @@ export async function syncGolfDemoToGHL(
   }
 
   const client = session.client;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = process.env.APP_BASE_URL ?? "https://jlgolfsales.rivercitycreatives.com";
   const lockerUrl = `${appUrl}/swing-locker/${session.lockerToken}`;
 
   // Track the resolved contact ID so the catch block can preserve it
