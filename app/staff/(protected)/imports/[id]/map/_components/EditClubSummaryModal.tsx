@@ -9,6 +9,8 @@ export interface SerializedClubSummary {
   importBatchId: number;
   originalClubName: string | null;
   clubName: string;
+  /** Tags for this Club+Tags group. Empty array when no tags. */
+  tags: string[];
   shotCount: number;
   avgClubSpeed: number | null;
   avgBallSpeed: number | null;
@@ -132,6 +134,7 @@ export function EditClubSummaryModal({
         importBatchId: Number(s.importBatchId),
         originalClubName: (s.originalClubName as string | null) ?? null,
         clubName: String(s.clubName),
+        tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
         shotCount: Number(s.shotCount),
         avgClubSpeed: toN(s.avgClubSpeed),
         avgBallSpeed: toN(s.avgBallSpeed),

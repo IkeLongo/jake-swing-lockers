@@ -121,6 +121,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             importBatchId: batch.id,
             originalClubName: s.originalClubName,
             clubName: s.clubName,
+            tags: s.tags,
             shotCount: s.shotCount,
             avgClubSpeed: s.avgClubSpeed,
             avgBallSpeed: s.avgBallSpeed,

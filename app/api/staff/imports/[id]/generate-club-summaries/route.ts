@@ -69,6 +69,7 @@ export async function POST(
         importBatchId: batchId,
         originalClubName: s.originalClubName,
         clubName: s.clubName,
+        tags: s.tags,
         shotCount: s.shotCount,
         avgClubSpeed: s.avgClubSpeed,
         avgBallSpeed: s.avgBallSpeed,

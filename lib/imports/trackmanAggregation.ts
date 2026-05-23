@@ -26,10 +26,12 @@ const METRIC_FIELDS = [
 
 type MetricField = (typeof METRIC_FIELDS)[number];
 
-/** Normalized summary for one club, ready to be inserted into ImportClubSummary. */
+/** Normalized summary for one club+tags group, ready to be inserted into ImportClubSummary. */
 export interface ClubSummaryInput {
   originalClubName: string | null;
   clubName: string;
+  /** Sorted, trimmed tag values for this group. Empty array when no tags present. */
+  tags: string[];
   shotCount: number;
 
   avgClubSpeed: number | null;
@@ -75,21 +77,26 @@ export function averageValidNumbers(values: number[]): number | null {
 // ── Aggregation ───────────────────────────────────────────────────────────────
 
 /**
- * Group shot rows by Club.Type and return per-club average summaries.
+ * Group shot rows by Club.Type + Tags and return per-group average summaries.
+ *
+ * Rows with the same club but different tags produce separate summary rows.
+ * Tags are normalized (trimmed, sorted) before grouping so that whitespace
+ * differences never create phantom groups.
  *
  * @param rows - Array of rawData objects from ImportRow (or any similar
  *               Record<string, unknown> from the parsed XLSX).
- * @returns Summaries sorted alphabetically by clubName, with "Unassigned" last.
+ * @returns Summaries sorted alphabetically by clubName then tags, with "Unassigned" last.
  */
 export function aggregateTrackManClubSummaries(
   rows: Record<string, unknown>[],
 ): ClubSummaryInput[] {
-  // Map from originalClubName (or "Unassigned") → accumulated metric arrays
+  // Map from composite key `${clubName}::${sortedTags.join("|")}` → accumulated data
   const groups = new Map<
     string,
     {
       originalClubName: string | null;
       clubName: string;
+      tags: string[];
       shotCount: number;
       values: Record<MetricField, number[]>;
     }
@@ -105,10 +112,21 @@ export function aggregateTrackManClubSummaries(
     const originalClubName = isUnassigned ? null : clubStr;
     const clubName = isUnassigned ? "Unassigned" : clubStr;
 
-    if (!groups.has(clubName)) {
-      groups.set(clubName, {
+    // Normalize tags: trim, filter blanks, sort for a stable group key
+    const rawTags = Array.isArray(row["tags"]) ? (row["tags"] as unknown[]) : [];
+    const normalizedTags = rawTags
+      .filter((t): t is string => typeof t === "string")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+      .sort();
+
+    const groupKey = `${clubName}::${normalizedTags.join("|")}`;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
         originalClubName,
         clubName,
+        tags: normalizedTags,
         shotCount: 0,
         values: {
           "Measurement.ClubSpeed": [],
@@ -121,7 +139,7 @@ export function aggregateTrackManClubSummaries(
       });
     }
 
-    const group = groups.get(clubName)!;
+    const group = groups.get(groupKey)!;
     group.shotCount += 1;
 
     for (const field of METRIC_FIELDS) {
@@ -140,6 +158,7 @@ export function aggregateTrackManClubSummaries(
     summaries.push({
       originalClubName: group.originalClubName,
       clubName: group.clubName,
+      tags: group.tags,
       shotCount: group.shotCount,
 
       avgClubSpeed: averageValidNumbers(v["Measurement.ClubSpeed"]),
@@ -158,11 +177,13 @@ export function aggregateTrackManClubSummaries(
     });
   }
 
-  // Sort: named clubs alphabetically, "Unassigned" always last
+  // Sort: named clubs alphabetically, then by tags; "Unassigned" always last
   summaries.sort((a, b) => {
     if (a.clubName === "Unassigned") return 1;
     if (b.clubName === "Unassigned") return -1;
-    return a.clubName.localeCompare(b.clubName);
+    const clubCmp = a.clubName.localeCompare(b.clubName);
+    if (clubCmp !== 0) return clubCmp;
+    return a.tags.join("|").localeCompare(b.tags.join("|"));
   });
 
   return summaries;

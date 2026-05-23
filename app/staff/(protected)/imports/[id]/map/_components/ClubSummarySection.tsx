@@ -2,6 +2,24 @@
 
 import { useState } from "react";
 import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
+import {
   EditClubSummaryModal,
   type SerializedClubSummary,
 } from "./EditClubSummaryModal";
@@ -30,16 +48,11 @@ interface Props {
   sessionStatus?: string;
   /** True when the session is finalized but club summaries have been edited since. */
   needsRefinalization?: boolean;
-  /**
-   * Unique tags per club, keyed by the original Club.Type value from the import
-   * (or "Unassigned" for blank Club.Type rows). Derived server-side from ImportRow.rawData.
-   */
-  tagsPerClub?: Record<string, string[]>;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization, tagsPerClub }: Props) {
+export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization }: Props) {
   const [summaries, setSummaries] =
     useState<SerializedClubSummary[]>(initialSummaries);
   const [generating, setGenerating] = useState(false);
@@ -60,6 +73,22 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   const hasSummaries = summaries.length > 0;
   const editingSummary = summaries.find((s) => s.id === editingId) ?? null;
   const hasUnassigned = summaries.some((s) => s.clubName === "Unassigned");
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setSummaries((prev) => {
+        const oldIndex = prev.findIndex((s) => s.id === active.id);
+        const newIndex = prev.findIndex((s) => s.id === over.id);
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+    }
+  }
 
   async function handleGenerate() {
     setGenerating(true);
@@ -108,6 +137,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           isManuallyEdited: Boolean(s.isManuallyEdited),
           includeInReport: s.includeInReport === undefined ? true : Boolean(s.includeInReport),
           estimatedPrice: toN(s.estimatedPrice),
+          tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
         }),
       );
 
@@ -264,152 +294,47 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       {/* ── Club summary table ──────────────────────────────────────────────── */}
       {hasSummaries && (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
-          <table className="w-full min-w-[1700px] text-sm font-body">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
-                <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
-                <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Club</th>
-                <th className="min-w-[180px] whitespace-nowrap px-5 py-3 font-subheading">Tags</th>
-                <th className="min-w-[130px] whitespace-nowrap px-5 py-3 font-subheading text-right">Est. Price</th>
-                <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Shots</th>
-                <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Club Speed</th>
-                <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Ball Speed</th>
-                <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Spin</th>
-                <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Height</th>
-                <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Carry</th>
-                <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {summaries.map((s) => {
-                // Treat null/undefined as true (included) — defensive guard
-                // against stale cache or missing field on old records.
-                const isIncluded = s.includeInReport !== false;
-                const isToggling = toggling.has(s.id);
-                return (
-                  <tr
-                    key={s.id}
-                    className={`transition-colors ${
-                      !isIncluded
-                        ? "bg-slate-200/60 opacity-50 grayscale"
-                        : "hover:bg-slate-50/60"
-                    }`}
-                  >
-                    {/* Actions */}
-                    <td className="whitespace-nowrap px-5 py-4">
-                      <button
-                        onClick={() => setEditingId(s.id)}
-                        className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors"
-                      >
-                        Edit
-                      </button>
-                    </td>
-                    {/* Include toggle */}
-                    <td className="whitespace-nowrap px-5 py-4 text-center">
-                      <button
-                        role="switch"
-                        aria-checked={isIncluded}
-                        disabled={isToggling}
-                        onClick={() =>
-                          handleToggleInclude(s.id, isIncluded)
-                        }
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-wait ${
-                          isIncluded
-                            ? "bg-emerald-500"
-                            : "bg-slate-300"
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-                            isIncluded
-                              ? "translate-x-4"
-                              : "translate-x-0"
-                          }`}
-                        />
-                      </button>
-                      {!isIncluded && (
-                        <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                          Excluded
-                        </div>
-                      )}
-                    </td>
-                    {/* Club */}
-                    <td className="whitespace-nowrap px-5 py-4">
-                      {s.clubName === "Unassigned" ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-yellow-300 bg-yellow-50 px-2 py-0.5 text-xs font-semibold text-yellow-700">
-                          ⚠ Unassigned
-                        </span>
-                      ) : (
-                        <span className="font-medium text-slate-800">
-                          {s.clubName}
-                        </span>
-                      )}
-                    </td>
-                    {/* Tags — unique tags found across all shots for this club */}
-                    <td className="px-5 py-4 text-sm">
-                      {(() => {
-                        const clubKey = s.originalClubName ?? "Unassigned";
-                        const tags = tagsPerClub?.[clubKey] ?? [];
-                        return tags.length > 0 ? (
-                          <span className="text-slate-700">{tags.join(", ")}</span>
-                        ) : (
-                          <span className="text-slate-300 text-xs">None</span>
-                        );
-                      })()}
-                    </td>
-                    {/* Est. Price */}
-                    <td className="whitespace-nowrap px-5 py-4 text-right text-slate-700">
-                      {s.estimatedPrice !== null && s.estimatedPrice !== undefined ? (
-                        <span className="font-medium">${s.estimatedPrice.toFixed(2)}</span>
-                      ) : (
-                        <span className="text-slate-300 text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-center text-slate-600">
-                      {s.shotCount}
-                    </td>
-                    <MetricCell
-                      value={fmt(s.avgClubSpeed)}
-                      valid={s.validClubSpeedCount}
-                      total={s.shotCount}
-                      unit="mph"
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <table className="w-full min-w-[1750px] text-sm font-body">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="w-10 px-3 py-3 font-subheading" />
+                  <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
+                  <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
+                  <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Club</th>
+                  <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Tags</th>
+                  <th className="min-w-[130px] whitespace-nowrap px-5 py-3 font-subheading text-right">Est. Price</th>
+                  <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Shots</th>
+                  <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Club Speed</th>
+                  <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Ball Speed</th>
+                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Spin</th>
+                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Height</th>
+                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Carry</th>
+                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                <SortableContext
+                  items={summaries.map((s) => s.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {summaries.map((s) => (
+                    <SortableRow
+                      key={s.id}
+                      summary={s}
+                      isToggling={toggling.has(s.id)}
+                      onEdit={() => setEditingId(s.id)}
+                      onToggleInclude={(current) => handleToggleInclude(s.id, current)}
                     />
-                    <MetricCell
-                      value={fmt(s.avgBallSpeed)}
-                      valid={s.validBallSpeedCount}
-                      total={s.shotCount}
-                      unit="mph"
-                    />
-                    <MetricCell
-                      value={fmtInt(s.avgSpinRate)}
-                      valid={s.validSpinRateCount}
-                      total={s.shotCount}
-                      unit="rpm"
-                    />
-                    <MetricCell
-                      value={fmt(s.avgMaxHeight)}
-                      valid={s.validMaxHeightCount}
-                      total={s.shotCount}
-                      unit="yrd"
-                    />
-                    <MetricCell
-                      value={fmt(s.avgCarry)}
-                      valid={s.validCarryCount}
-                      total={s.shotCount}
-                      unit="yrd"
-                    />
-                    <MetricCell
-                      value={fmt(s.avgTotal)}
-                      valid={s.validTotalCount}
-                      total={s.shotCount}
-                      unit="yrd"
-                    />
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  ))}
+                </SortableContext>
+              </tbody>
+            </table>
+          </DndContext>
         </div>
       )}
 
@@ -566,5 +491,117 @@ function MetricCell({
         </div>
       </div>
     </td>
+  );
+}
+
+// ── Sortable row ──────────────────────────────────────────────────────────────
+
+interface SortableRowProps {
+  summary: SerializedClubSummary;
+  isToggling: boolean;
+  onEdit: () => void;
+  onToggleInclude: (currentIncluded: boolean) => void;
+}
+
+function SortableRow({ summary: s, isToggling, onEdit, onToggleInclude }: SortableRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: s.id });
+
+  const isIncluded = s.includeInReport !== false;
+
+  return (
+    <tr
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...attributes}
+      className={`transition-colors ${
+        isDragging
+          ? "relative z-10 opacity-60 shadow-lg"
+          : !isIncluded
+            ? "bg-slate-200/60 opacity-50 grayscale"
+            : "hover:bg-slate-50/60"
+      }`}
+    >
+      {/* Drag handle */}
+      <td className="whitespace-nowrap px-3 py-4">
+        <button
+          {...listeners}
+          type="button"
+          tabIndex={-1}
+          aria-label="Drag to reorder"
+          className="cursor-grab active:cursor-grabbing touch-none text-slate-400 hover:text-slate-600"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      </td>
+      {/* Actions */}
+      <td className="whitespace-nowrap px-5 py-4">
+        <button
+          onClick={onEdit}
+          className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+        >
+          Edit
+        </button>
+      </td>
+      {/* Include toggle */}
+      <td className="whitespace-nowrap px-5 py-4 text-center">
+        <button
+          role="switch"
+          aria-checked={isIncluded}
+          disabled={isToggling}
+          onClick={() => onToggleInclude(isIncluded)}
+          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-wait ${
+            isIncluded ? "bg-emerald-500" : "bg-slate-300"
+          }`}
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+              isIncluded ? "translate-x-4" : "translate-x-0"
+            }`}
+          />
+        </button>
+        {!isIncluded && (
+          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            Excluded
+          </div>
+        )}
+      </td>
+      {/* Club */}
+      <td className="whitespace-nowrap px-5 py-4">
+        {s.clubName === "Unassigned" ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-yellow-300 bg-yellow-50 px-2 py-0.5 text-xs font-semibold text-yellow-700">
+            ⚠ Unassigned
+          </span>
+        ) : (
+          <span className="font-medium text-slate-800">{s.clubName}</span>
+        )}
+      </td>
+      {/* Tags — for this Club+Tags group */}
+      <td className="px-5 py-4 text-sm">
+        {s.tags.length > 0 ? (
+          <span className="text-slate-700">{s.tags.join(", ")}</span>
+        ) : (
+          <span className="text-slate-300 text-xs">None</span>
+        )}
+      </td>
+      {/* Est. Price */}
+      <td className="whitespace-nowrap px-5 py-4 text-right text-slate-700">
+        {s.estimatedPrice !== null && s.estimatedPrice !== undefined ? (
+          <span className="font-medium">${s.estimatedPrice.toFixed(2)}</span>
+        ) : (
+          <span className="text-slate-300 text-xs">—</span>
+        )}
+      </td>
+      {/* Shots */}
+      <td className="whitespace-nowrap px-5 py-4 text-center text-slate-600">
+        {s.shotCount}
+      </td>
+      <MetricCell value={fmt(s.avgClubSpeed)} valid={s.validClubSpeedCount} total={s.shotCount} unit="mph" />
+      <MetricCell value={fmt(s.avgBallSpeed)} valid={s.validBallSpeedCount} total={s.shotCount} unit="mph" />
+      <MetricCell value={fmtInt(s.avgSpinRate)} valid={s.validSpinRateCount} total={s.shotCount} unit="rpm" />
+      <MetricCell value={fmt(s.avgMaxHeight)} valid={s.validMaxHeightCount} total={s.shotCount} unit="yrd" />
+      <MetricCell value={fmt(s.avgCarry)} valid={s.validCarryCount} total={s.shotCount} unit="yrd" />
+      <MetricCell value={fmt(s.avgTotal)} valid={s.validTotalCount} total={s.shotCount} unit="yrd" />
+    </tr>
   );
 }

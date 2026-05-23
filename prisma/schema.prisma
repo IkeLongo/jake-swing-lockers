@@ -300,6 +300,8 @@ model ImportClubSummary {
   isManuallyEdited Boolean   @default(false)
   // Staff can exclude a club from the final Swing Locker / report
   includeInReport  Boolean   @default(true)
+  // Tags extracted from the Tags column for this Club+Tags group (JSON array of strings)
+  tags             Json      @default("[]")
   // Optional price set during review; copied into DemoClubTest.estimatedPrice on finalization
   estimatedPrice   Decimal?  @db.Decimal(10, 2)
   createdAt        DateTime  @default(now())
