@@ -306,7 +306,7 @@ export async function POST(
     success: true,
     alreadyFinalized: false,
     isRefinalize,
-    clubCount: summaries.length,
+    clubCount: parentSummaries.length,
     message: isRefinalize
       ? "Demo session re-finalized successfully. Club data has been updated."
       : "Demo session finalized successfully. Club averages have been saved.",
