@@ -3,7 +3,7 @@ import type { LockerData } from "@/lib/queries/locker";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type ClubTest = LockerData["clubTests"][number];
+export type ClubTest = LockerData["clubTests"][number];
 type MetricsRecord = NonNullable<ClubTest["metrics"]>;
 type Num = { toString(): string } | number | null | undefined;
 
