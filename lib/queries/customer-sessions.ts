@@ -22,6 +22,8 @@ export interface CustomerClub {
   carryDistance: number | null;
   totalDistance: number | null;
   estimatedPrice: number | null;
+  clubRole: string;
+  pairIndex: number;
 }
 
 export interface CustomerSessionDetail {
@@ -114,7 +116,6 @@ export async function getCustomerSession(
       demoDate: true,
       notes: true,
       clubTests: {
-        where: { clubRole: "demo" },
         orderBy: { sortOrder: "asc" },
         select: {
           id: true,
@@ -122,6 +123,8 @@ export async function getCustomerSession(
           brand: true,
           model: true,
           estimatedPrice: true,
+          clubRole: true,
+          pairIndex: true,
           metrics: {
             select: {
               clubSpeed: true,
@@ -149,6 +152,8 @@ export async function getCustomerSession(
     spinRate: ct.metrics?.spinRate ?? null,
     carryDistance: toNum(ct.metrics?.carryDistance),
     totalDistance: toNum(ct.metrics?.totalDistance),
+    clubRole: ct.clubRole,
+    pairIndex: ct.pairIndex,
   }));
 
   return {
@@ -156,6 +161,10 @@ export async function getCustomerSession(
     demoDate: row.demoDate,
     notes: row.notes,
     clubs,
-    estimatedTotal: sumPrices(row.clubTests.map((c) => c.estimatedPrice)),
+    estimatedTotal: sumPrices(
+      row.clubTests
+        .filter((c) => c.clubRole === "demo")
+        .map((c) => c.estimatedPrice)
+    ),
   };
 }

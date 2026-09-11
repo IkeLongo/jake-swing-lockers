@@ -6,6 +6,7 @@ import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
 import SessionDetailsCard from "./_components/SessionDetailsCard";
 import SendAccessButton from "../../_components/SendAccessButton";
+import PreviewLockerButton from "../../_components/PreviewLockerButton";
 
 export const metadata: Metadata = {
   title: "Club Averages — Jake Swing Lockers Staff",
@@ -159,14 +160,22 @@ export default async function ImportMapPage({
               Finalize this session before sending Swing Locker access.
             </p>
           ) : (
-            <SendAccessButton
-              sessionId={batch.demoSession.id}
-              initialStatus={batch.demoSession.accessInviteStatus ?? null}
-              clientHasContact={
-                !!(batch.demoSession.client.email || batch.demoSession.client.phone)
-              }
-              variant="card"
-            />
+            <div className="flex flex-col gap-3">
+              <SendAccessButton
+                sessionId={batch.demoSession.id}
+                initialStatus={batch.demoSession.accessInviteStatus ?? null}
+                clientHasContact={
+                  !!(batch.demoSession.client.email || batch.demoSession.client.phone)
+                }
+                variant="card"
+              />
+              <div className="border-t border-slate-100 pt-3">
+                <PreviewLockerButton
+                  sessionId={batch.demoSession.id}
+                  returnHref={`/staff/imports/${batchId}/map`}
+                />
+              </div>
+            </div>
           )}
         </div>
       )}

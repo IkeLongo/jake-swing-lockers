@@ -86,9 +86,43 @@ function MetricCell({
   );
 }
 
+// ── Compact metric cell (used inside comparison section) ─────────────────────
+
+function CompactMetricCell({
+  label,
+  value,
+  unit,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+}) {
+  return (
+    <div className="bg-slate-50 px-3 py-3 text-center">
+      <p className="font-body text-base font-semibold text-slate-600 tabular-nums leading-none">
+        {value}
+        {unit && (
+          <span className="ml-0.5 text-xs font-normal text-slate-400">
+            {unit}
+          </span>
+        )}
+      </p>
+      <p className="mt-1 font-body text-[10px] text-slate-400 uppercase tracking-widest">
+        {label}
+      </p>
+    </div>
+  );
+}
+
 // ── Club card ─────────────────────────────────────────────────────────────────
 
-function ClubCard({ club }: { club: CustomerClub }) {
+function ClubCard({
+  club,
+  comparisonClub,
+}: {
+  club: CustomerClub;
+  comparisonClub?: CustomerClub;
+}) {
   const hasMetrics =
     club.clubSpeed != null ||
     club.ballSpeed != null ||
@@ -146,6 +180,57 @@ function ClubCard({ club }: { club: CustomerClub }) {
           </p>
         </div>
       )}
+
+      {/* Comparison section — attached inside the same card */}
+      {comparisonClub && (
+        <div className="border-t border-slate-200 bg-slate-50">
+          <div className="px-5 pt-3 pb-2">
+            <p className="font-body text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
+              Compared with
+            </p>
+            <p className="font-heading text-sm font-semibold text-slate-600 mt-0.5">
+              {[
+                comparisonClub.brand,
+                comparisonClub.model,
+                comparisonClub.clubType,
+              ]
+                .filter(Boolean)
+                .join(" ") || "Current Club"}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-px bg-slate-200 sm:grid-cols-5">
+            <CompactMetricCell
+              label="Club Speed"
+              value={fmtNum(comparisonClub.clubSpeed)}
+              unit="mph"
+            />
+            <CompactMetricCell
+              label="Ball Speed"
+              value={fmtNum(comparisonClub.ballSpeed)}
+              unit="mph"
+            />
+            <CompactMetricCell
+              label="Spin Rate"
+              value={
+                comparisonClub.spinRate != null
+                  ? String(comparisonClub.spinRate)
+                  : "—"
+              }
+              unit="rpm"
+            />
+            <CompactMetricCell
+              label="Carry"
+              value={fmtNum(comparisonClub.carryDistance, 0)}
+              unit="yds"
+            />
+            <CompactMetricCell
+              label="Total"
+              value={fmtNum(comparisonClub.totalDistance, 0)}
+              unit="yds"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -179,6 +264,14 @@ export default async function SessionDetailPage({
     getExistingPurchaseRequest(golfClientId, sessionId),
   ]);
   if (!session) notFound();
+
+  // ── Group clubs by role ────────────────────────────────────────────────────
+  const demoClubs = session.clubs.filter((c) => c.clubRole === "demo");
+  const currentByPairIndex = new Map(
+    session.clubs
+      .filter((c) => c.clubRole === "current" && c.pairIndex > 0)
+      .map((c) => [c.pairIndex, c])
+  );
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -230,7 +323,7 @@ export default async function SessionDetailPage({
           </h2>
         </div>
 
-        {session.clubs.length === 0 ? (
+        {demoClubs.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
             <p className="font-body text-sm text-slate-500">
               No club data recorded for this session.
@@ -238,8 +331,16 @@ export default async function SessionDetailPage({
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {session.clubs.map((club, i) => (
-              <ClubCard key={i} club={club} />
+            {demoClubs.map((club) => (
+              <ClubCard
+                key={club.id}
+                club={club}
+                comparisonClub={
+                  club.pairIndex > 0
+                    ? currentByPairIndex.get(club.pairIndex)
+                    : undefined
+                }
+              />
             ))}
           </div>
         )}
@@ -257,7 +358,7 @@ export default async function SessionDetailPage({
         )}
 
         {/* Purchase request CTA */}
-        {session.clubs.length > 0 && (
+        {demoClubs.length > 0 && (
           existingRequest ? (
             <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-5 py-3.5 flex items-center gap-2">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
@@ -268,7 +369,7 @@ export default async function SessionDetailPage({
           ) : (
             <PurchaseRequestTrigger
               sessionId={session.id}
-              clubs={session.clubs.map<ModalClub>((c) => ({
+              clubs={demoClubs.map<ModalClub>((c) => ({
                 id: c.id,
                 clubType: c.clubType,
                 brand: c.brand,

@@ -1,6 +1,298 @@
-import type { Metadata } from "next";
-import { getLockerByToken } from "@/lib/queries/locker";
-import { LockerView } from "../_components/LockerView";
+import Link from "next/link";
+import type { LockerData } from "@/lib/queries/locker";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type ClubTest = LockerData["clubTests"][number];
+type MetricsRecord = NonNullable<ClubTest["metrics"]>;
+type Num = { toString(): string } | number | null | undefined;
+
+// ── Numeric helpers ────────────────────────────────────────────────────────────
+
+function numVal(v: Num): number | null {
+  if (v == null) return null;
+  const n = parseFloat(v.toString());
+  return isNaN(n) ? null : n;
+}
+
+function fmt(val: Num, decimals = 1): string {
+  const n = numVal(val);
+  return n == null ? "—" : n.toFixed(decimals);
+}
+
+function fmtInt(val: Num): string {
+  const n = numVal(val);
+  return n == null ? "—" : Math.round(n).toLocaleString("en-US");
+}
+
+function fmtDate(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+// ── Delta helpers ──────────────────────────────────────────────────────────────
+
+/** 1 = higher is better, -1 = lower is better */
+const DIR: Record<keyof MetricsRecord, 1 | -1> = {
+  clubSpeed:     1,
+  ballSpeed:     1,
+  smashFactor:   1,
+  carryDistance: 1,
+  totalDistance: 1,
+  launchAngle:   1,
+  spinRate:      -1,
+  dispersion:    -1,
+};
+
+function calcDelta(
+  demoVal: Num,
+  currVal: Num,
+  key: keyof MetricsRecord
+): { raw: number; good: boolean; neutral: boolean } | null {
+  const d = numVal(demoVal);
+  const c = numVal(currVal);
+  if (d == null || c == null) return null;
+  const raw = d - c;
+  const neutral = Math.abs(raw) < 0.005;
+  return { raw, good: raw * DIR[key] > 0, neutral };
+}
+
+// ── Auto-generated insights ────────────────────────────────────────────────────
+
+function buildInsights(
+  dm: MetricsRecord,
+  cm: MetricsRecord
+): Array<{ text: string; positive: boolean }> {
+  const out: Array<{ text: string; positive: boolean }> = [];
+
+  const carry = calcDelta(dm.carryDistance, cm.carryDistance, "carryDistance");
+  if (carry && !carry.neutral && Math.abs(carry.raw) >= 3) {
+    const y = Math.round(Math.abs(carry.raw));
+    out.push({ text: carry.good ? `${y} more yards carry` : `${y} fewer yards carry`, positive: carry.good });
+  }
+
+  const bs = calcDelta(dm.ballSpeed, cm.ballSpeed, "ballSpeed");
+  if (bs && !bs.neutral && Math.abs(bs.raw) >= 1.5) {
+    out.push({ text: bs.good ? "Higher ball speed" : "Lower ball speed", positive: bs.good });
+  }
+
+  const disp = calcDelta(dm.dispersion, cm.dispersion, "dispersion");
+  if (disp && !disp.neutral && Math.abs(disp.raw) >= 1) {
+    out.push({ text: disp.good ? "Tighter miss pattern" : "Wider miss pattern", positive: disp.good });
+  }
+
+  const smash = calcDelta(dm.smashFactor, cm.smashFactor, "smashFactor");
+  if (smash && !smash.neutral && Math.abs(smash.raw) >= 0.01) {
+    out.push({ text: smash.good ? "Better energy transfer" : "Lower efficiency", positive: smash.good });
+  }
+
+  const spin = calcDelta(dm.spinRate, cm.spinRate, "spinRate");
+  if (spin && !spin.neutral && Math.abs(spin.raw) >= 200) {
+    out.push({ text: spin.good ? "Optimized spin rate" : "Higher spin rate", positive: spin.good });
+  }
+
+  return out;
+}
+
+// ── Metric definitions (display order) ────────────────────────────────────────
+
+const METRIC_DEFS: Array<{
+  key: keyof MetricsRecord;
+  label: string;
+  unit: string;
+  decimals: number;
+  isInt?: boolean;
+  neutralDelta?: boolean;
+}> = [
+  { key: "clubSpeed",     label: "Club Speed",   unit: "mph", decimals: 1 },
+  { key: "ballSpeed",     label: "Ball Speed",   unit: "mph", decimals: 1 },
+  { key: "smashFactor",   label: "Smash Factor", unit: "",    decimals: 2 },
+  { key: "carryDistance", label: "Carry",        unit: "yds", decimals: 0 },
+  { key: "totalDistance", label: "Total",        unit: "yds", decimals: 0 },
+  { key: "dispersion",    label: "Dispersion",   unit: "yds", decimals: 1 },
+  { key: "launchAngle",   label: "Launch Angle", unit: "°",   decimals: 1, neutralDelta: true },
+  { key: "spinRate",      label: "Spin Rate",    unit: "rpm", decimals: 0, isInt: true, neutralDelta: true },
+];
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
+
+function SummaryItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  return (
+    <div className="px-5 py-4 sm:px-6">
+      <p className="font-body text-xs font-semibold uppercase tracking-widest text-slate-400 mb-1">
+        {label}
+      </p>
+      <p className="font-body text-sm font-medium text-slate-800">
+        {value || "—"}
+      </p>
+    </div>
+  );
+}
+
+function MetricCell({ label, value, unit }: { label: string; value: string; unit: string }) {
+  const isEmpty = value === "—";
+  return (
+    <div className="bg-white px-4 py-5 text-center">
+      <p className="font-body text-2xl font-bold text-slate-900 leading-none">
+        {value}
+        {!isEmpty && unit && (
+          <span className="font-body text-sm font-medium text-slate-400 ml-1">{unit}</span>
+        )}
+      </p>
+      <p className="font-body text-xs text-slate-400 mt-2 leading-tight">{label}</p>
+    </div>
+  );
+}
+
+// ── Performance headline deltas ───────────────────────────────────────────────
+
+function HeadlineDeltas({ demo, current }: { demo: ClubTest; current: ClubTest }) {
+  if (!demo.metrics || !current.metrics) return null;
+  const dm = demo.metrics;
+  const cm = current.metrics;
+
+  const candidates: Array<{ key: keyof MetricsRecord; label: string; unit: string; decimals: number; isInt?: boolean }> = [
+    { key: "carryDistance", label: "Carry",       unit: "yds", decimals: 0 },
+    { key: "ballSpeed",     label: "Ball Speed",  unit: "mph", decimals: 1 },
+    { key: "dispersion",    label: "Dispersion",  unit: "yds", decimals: 1 },
+    { key: "smashFactor",   label: "Efficiency",  unit: "",    decimals: 2 },
+    { key: "totalDistance", label: "Total Dist.", unit: "yds", decimals: 0 },
+    { key: "clubSpeed",     label: "Club Speed",  unit: "mph", decimals: 1 },
+  ];
+
+  const items = candidates
+    .map((c) => ({ ...c, d: calcDelta(dm[c.key], cm[c.key], c.key) }))
+    .filter((c) => c.d !== null)
+    .slice(0, 4);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="px-5 py-6 sm:px-6 bg-slate-900 border-b border-slate-800">
+      <p className="font-body text-xs font-semibold uppercase tracking-widest text-emerald-400 mb-5">
+        Performance Gains vs. Your Current Club
+      </p>
+      <div className={`grid gap-4 ${items.length <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
+        {items.map(({ key, label, unit, decimals, isInt, d }) => {
+          const sign = d!.raw > 0 ? "+" : "";
+          const valStr = isInt
+            ? `${sign}${Math.round(d!.raw).toLocaleString("en-US")}`
+            : `${sign}${d!.raw.toFixed(decimals)}`;
+          const color = d!.neutral
+            ? "text-slate-500"
+            : d!.good
+            ? "text-emerald-400"
+            : "text-red-400";
+          return (
+            <div key={key} className="text-center">
+              <p className={`font-heading text-3xl font-bold leading-none ${color}`}>
+                {valStr}
+                {unit && (
+                  <span className="font-body text-base font-medium ml-1 opacity-70">{unit}</span>
+                )}
+              </p>
+              <p className="font-body text-xs text-slate-500 mt-2 uppercase tracking-wide">{label}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Carry distance visual bars ─────────────────────────────────────────────────
+
+function CarryBars({
+  demoCarry,
+  currentCarry,
+  demoName,
+  currentName,
+}: {
+  demoCarry: number | null;
+  currentCarry: number | null;
+  demoName: string;
+  currentName: string;
+}) {
+  if (!demoCarry && !currentCarry) return null;
+  const max = Math.max(demoCarry ?? 0, currentCarry ?? 0);
+  if (max === 0) return null;
+  const scale = (v: number) => Math.round((v / max) * 88);
+
+  return (
+    <div className="px-5 py-5 sm:px-6 border-b border-slate-100">
+      <p className="font-body text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4">
+        Carry Distance
+      </p>
+      <div className="space-y-4">
+        {demoCarry != null && (
+          <div className="flex items-center gap-3">
+            <div className="w-28 shrink-0 text-right">
+              <p className="font-body text-xs font-semibold text-slate-700 leading-tight truncate">{demoName}</p>
+              <p className="font-body text-xs text-slate-400 leading-tight">Demo Club</p>
+            </div>
+            <div className="flex-1 bg-slate-100 rounded-full h-3.5 overflow-hidden">
+              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${scale(demoCarry)}%` }} />
+            </div>
+            <span className="font-body text-sm font-bold text-slate-800 w-16 shrink-0">{Math.round(demoCarry)} yds</span>
+          </div>
+        )}
+        {currentCarry != null && (
+          <div className="flex items-center gap-3">
+            <div className="w-28 shrink-0 text-right">
+              <p className="font-body text-xs font-semibold text-slate-600 leading-tight truncate">{currentName}</p>
+              <p className="font-body text-xs text-slate-400 leading-tight">Your Club</p>
+            </div>
+            <div className="flex-1 bg-slate-100 rounded-full h-3.5 overflow-hidden">
+              <div className="h-full rounded-full bg-slate-400" style={{ width: `${scale(currentCarry)}%` }} />
+            </div>
+            <span className="font-body text-sm font-bold text-slate-500 w-16 shrink-0">{Math.round(currentCarry)} yds</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Insight pills ───────────────────────────────────────────────────────────────
+
+function InsightPills({ insights }: { insights: Array<{ text: string; positive: boolean }> }) {
+  if (insights.length === 0) return null;
+  return (
+    <div className="px-5 py-4 sm:px-6 bg-slate-50 border-b border-slate-100">
+      <div className="flex flex-wrap gap-2">
+        {insights.map(({ text, positive }) => (
+          <span
+            key={text}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold font-body ${
+              positive ? "bg-emerald-100 text-emerald-700" : "bg-red-50 text-red-600"
+            }`}
+          >
+            {positive ? (
+              <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+              </svg>
+            ) : (
+              <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+            )}
+            {text}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ── Metrics table (side-by-side Δ or solo grid) ──────────────────────────────────
 
@@ -25,7 +317,7 @@ function MetricsComparison({ demo, current }: { demo: ClubTest; current?: ClubTe
         const raw = isInt
           ? `${sign}${Math.round(d.raw).toLocaleString("en-US")}`
           : `${sign}${d.raw.toFixed(decimals)}`;
-        deltaStr = unit ? `${raw} ${unit}` : raw;
+        deltaStr = unit ? `${raw} ${unit}` : raw;
       }
       const deltaColor =
         !d || d.neutral || neutralDelta
@@ -231,77 +523,79 @@ function ComparisonCard({
   );
 }
 
-// ── Not-Found State ────────────────────────────────────────────────────────────
+// ── Staff preview banner ───────────────────────────────────────────────────────
 
-function LockerNotFound() {
+function StaffPreviewBanner({ backHref }: { backHref?: string }) {
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col">
-      <div className="h-1 bg-gradient-to-r from-emerald-700 via-emerald-500 to-emerald-400" />
-      <div className="flex-1 flex flex-col items-center justify-center px-4 text-center">
-        <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-slate-800 mb-6">
+    <div className="sticky top-0 z-50 bg-amber-400 px-4 py-2.5 shadow-md">
+      <div className="mx-auto max-w-4xl flex items-center gap-4">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           <svg
-            className="h-8 w-8 text-slate-500"
+            className="h-4 w-4 shrink-0 text-amber-900"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
-            strokeWidth={1.5}
+            strokeWidth={2}
           >
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+              d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
             />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
+          <p className="font-body text-sm font-semibold text-amber-900 truncate">
+            Staff Preview — this is what the client will see.
+          </p>
         </div>
-        <h1 className="font-heading text-2xl font-bold text-white mb-3">
-          Locker Not Found
-        </h1>
-        <p className="font-body text-sm text-slate-400 max-w-sm leading-relaxed">
-          This locker link may be invalid or has expired. Please contact your
-          sales rep for a new link.
-        </p>
+        {backHref && (
+          <Link
+            href={backHref}
+            className="text-xs font-semibold text-amber-900 hover:text-amber-950 underline whitespace-nowrap shrink-0"
+          >
+            ← Back
+          </Link>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Metadata ───────────────────────────────────────────────────────────────────
+// ── LockerView ─────────────────────────────────────────────────────────────────
 
-export async function generateMetadata({
-  params,
+export function LockerView({
+  data,
+  previewMode = false,
+  backHref,
 }: {
-  params: Promise<{ token: string }>;
-}): Promise<Metadata> {
-  const { token } = await params;
-  const locker = await getLockerByToken(token);
-
-  if (!locker) {
-    return { title: "Locker Not Found | Jake Swing Lockers" };
-  }
-
-  const name = [locker.client.firstName, locker.client.lastName]
-    .filter(Boolean)
-    .join(" ");
-
-  return {
-    title: name ? `${name}'s Swing Locker` : "Your Swing Locker",
-    robots: { index: false, follow: false },
-  };
-}
-
-// ── Page ───────────────────────────────────────────────────────────────────────
-
-export default async function SwingLockerPage({
-  params,
-}: {
-  params: Promise<{ token: string }>;
+  data: LockerData;
+  previewMode?: boolean;
+  backHref?: string;
 }) {
-  const { token } = await params;
-  const locker = await getLockerByToken(token);
+  const { client, clubTests } = data;
 
-  if (!locker) return <LockerNotFound />;
+  const clientName =
+    [client.firstName, client.lastName].filter(Boolean).join(" ") || "Golfer";
 
-  return <LockerView data={locker} />;
+  // Group club tests by pairIndex into comparison pairs
+  const pairMap = new Map<number, { demo?: ClubTest; current?: ClubTest }>();
+  for (const club of clubTests) {
+    const entry = pairMap.get(club.pairIndex) ?? {};
+    if (club.clubRole === "demo") entry.demo = club;
+    else entry.current = club;
+    pairMap.set(club.pairIndex, entry);
+  }
+  const pairs = Array.from(pairMap.entries()).sort(([a], [b]) => a - b);
+
+  const hasNotes = !!data.notes?.trim();
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-body">
+      {/* ── Staff preview banner (only shown to staff) ─────────────────────── */}
+      {previewMode && <StaffPreviewBanner backHref={backHref} />}
+
+      {/* ── Top accent bar ─────────────────────────────────────────────────── */}
+      <div className="h-1 bg-gradient-to-r from-emerald-700 via-emerald-500 to-emerald-400" />
 
       {/* ── Brand header ───────────────────────────────────────────────────── */}
       <header className="bg-slate-900 px-4 py-3 sm:px-6">
@@ -390,7 +684,7 @@ export default async function SwingLockerPage({
               />
             </svg>
             <span className="font-body text-xs text-slate-300">
-              {fmtDate(locker.demoDate)}
+              {fmtDate(data.demoDate)}
             </span>
           </div>
         </div>
@@ -407,7 +701,7 @@ export default async function SwingLockerPage({
             </h2>
           </div>
           <div className="px-5 py-4 sm:px-6">
-            <SummaryItem label="Your Goal" value={locker.clientGoal} />
+            <SummaryItem label="Your Goal" value={data.clientGoal} />
           </div>
         </div>
 
@@ -433,17 +727,17 @@ export default async function SwingLockerPage({
         {hasNotes && (
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <SectionAccent
-              title={`A Note From ${locker.salesRep ?? "Your Rep"}`}
+              title={`A Note From ${data.salesRep ?? "Your Rep"}`}
             />
             <div className="px-5 py-5 sm:px-6">
               <blockquote className="pl-4 border-l-2 border-emerald-300">
                 <p className="font-body text-sm text-slate-600 italic leading-relaxed">
-                  {locker.notes}
+                  {data.notes}
                 </p>
               </blockquote>
-              {locker.salesRep && (
+              {data.salesRep && (
                 <p className="mt-3 font-body text-xs text-slate-400">
-                  — {locker.salesRep}
+                  — {data.salesRep}
                 </p>
               )}
             </div>
@@ -459,8 +753,8 @@ export default async function SwingLockerPage({
             Ready to move forward?
           </h2>
           <p className="font-body text-sm text-slate-400 mb-8 max-w-sm mx-auto leading-relaxed">
-            {locker.salesRep
-              ? `Connect with ${locker.salesRep} to lock in your setup, book your follow-up fitting, or request a custom quote.`
+            {data.salesRep
+              ? `Connect with ${data.salesRep} to lock in your setup, book your follow-up fitting, or request a custom quote.`
               : "Connect with your sales rep to lock in your setup, book a follow-up fitting, or request a custom quote."}
           </p>
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center">
