@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
-import StaffSidebar from "@/app/staff/_components/StaffSidebar";
+import StaffSidebar from "@/app/staff/_components/navigation/StaffSidebar";
 
 export default async function StaffProtectedLayout({
   children,
