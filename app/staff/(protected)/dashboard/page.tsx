@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import DashboardHeader from "@/app/staff/_components/dashboard/DashboardHeader";
+import DashboardStats from "@/app/staff/_components/DashboardStats";
+import NeedsAttention from "@/app/staff/_components/NeedsAttention";
 
 export const metadata: Metadata = {
   title: "Dashboard — Jake Swing Lockers Staff",
@@ -41,6 +43,20 @@ export default async function StaffDashboardPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8">
       <DashboardHeader />
+
+      <DashboardStats
+        activeLeads={12}
+        activeLeadsChange="+3 this week"
+        needsReview={3}
+        needsReviewDescription="3 demos waiting"
+        purchaseInterest={2}
+        purchaseInterestDescription="1 new today"
+        lockerOpenRate={67}
+        lockerOpened={20}
+        lockerSent={30}
+      />
+
+      <NeedsAttention />
 
       {/* ── Operational Dashboard Placeholder Area ──────────────────────── */}
       <div className="rounded-xl border border-dashed border-border p-8 text-center bg-card/50">
