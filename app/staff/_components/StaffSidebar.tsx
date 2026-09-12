@@ -92,7 +92,7 @@ export default function StaffSidebar({ children, isAdmin }: StaffSidebarProps) {
   };
 
   return (
-    <div className="flex flex-col md:flex-row bg-slate-50 dark:bg-neutral-900 w-full min-h-screen">
+    <div className="flex flex-col md:flex-row bg-background w-full min-h-screen">
       <Sidebar open={open} setOpen={setOpen}>
         <SidebarBody className="justify-between gap-6">
           <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
@@ -131,7 +131,7 @@ export default function StaffSidebar({ children, isAdmin }: StaffSidebarProps) {
           </div>
 
           {/* ── Footer / Sign Out ─────────────────────────────────────────── */}
-          <div className="border-t border-slate-200 dark:border-neutral-800 pt-3">
+          <div className="border-t border-border pt-3">
             <SidebarLink link={signOutLink} />
           </div>
         </SidebarBody>
@@ -152,7 +152,7 @@ function Logo({ isAdmin }: { isAdmin: boolean }) {
       href="/staff/dashboard"
       className="flex items-center gap-2.5 py-1 px-1 relative z-20 overflow-hidden"
     >
-      <div className="h-8 w-8 rounded-lg bg-emerald-600 flex shrink-0 items-center justify-center text-white font-bold text-xs shadow-xs">
+      <div className="h-8 w-8 rounded-lg bg-primary flex shrink-0 items-center justify-center text-primary-foreground font-bold text-xs shadow-xs">
         JL
       </div>
       <motion.div
@@ -162,15 +162,15 @@ function Logo({ isAdmin }: { isAdmin: boolean }) {
         }}
         className="flex items-center gap-2 whitespace-nowrap overflow-hidden"
       >
-        <span className="font-heading font-bold text-slate-900 dark:text-slate-100 text-base">
+        <span className="font-heading font-bold text-sidebar-foreground text-base">
           JL Golf Sales
         </span>
         {isAdmin ? (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 font-body">
+          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent font-body">
             ADMIN
           </span>
         ) : (
-          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 font-body">
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground font-body">
             STAFF
           </span>
         )}
@@ -194,7 +194,7 @@ function NavSection({
           display: animate ? (open ? "block" : "none") : "block",
           opacity: animate ? (open ? 1 : 0) : 1,
         }}
-        className="px-2 pb-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-neutral-500 uppercase font-body"
+        className="px-2 pb-1 text-[10px] font-bold tracking-wider text-muted-foreground uppercase font-body"
       >
         {title}
       </motion.div>
@@ -203,7 +203,7 @@ function NavSection({
           display: animate ? (open ? "none" : "block") : "none",
           opacity: animate ? (open ? 0 : 1) : 0,
         }}
-        className="my-1 border-t border-slate-200/80 dark:border-neutral-800"
+        className="my-1 border-t border-border"
       />
     </div>
   );

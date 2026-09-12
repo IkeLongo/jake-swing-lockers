@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Amiko, Lora, Mulish } from "next/font/google";
+import { ThemeProvider } from "./_components/theme/ThemeProvider";
 import "./globals.css";
 
 /** Main headings (h1, major page titles) */
@@ -41,8 +42,13 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${amiko.variable} ${lora.variable} ${mulish.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col font-body">{children}</body>
+      <body className="min-h-full flex flex-col font-body">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
