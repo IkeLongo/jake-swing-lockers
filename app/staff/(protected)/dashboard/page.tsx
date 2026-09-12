@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import DashboardHeader from "@/app/staff/_components/dashboard/DashboardHeader";
 import DashboardStats from "@/app/staff/_components/DashboardStats";
 import NeedsAttention from "@/app/staff/_components/NeedsAttention";
+import SalesPipeline from "@/app/staff/_components/SalesPipeline";
 
 export const metadata: Metadata = {
   title: "Dashboard — Jake Swing Lockers Staff",
@@ -58,12 +59,7 @@ export default async function StaffDashboardPage() {
 
       <NeedsAttention />
 
-      {/* ── Operational Dashboard Placeholder Area ──────────────────────── */}
-      <div className="rounded-xl border border-dashed border-border p-8 text-center bg-card/50">
-        <p className="text-sm text-muted-foreground font-body">
-          Operational dashboard sections will be added here.
-        </p>
-      </div>
+      <SalesPipeline />
     </div>
   );
 }
