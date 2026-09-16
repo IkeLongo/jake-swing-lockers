@@ -148,9 +148,9 @@ export async function updateGolfDemoOpportunity(
 }
 
 /**
- * Create or update an opportunity for a contact.
- * If the contact already has an open opportunity in the pipeline, update it;
- * otherwise create a new one.
+ * Create or update an opportunity for a demo session.
+ * If an explicit existingOpportunityId is provided (associated with this DemoSession),
+ * update that opportunity; otherwise create a new opportunity for this distinct sales pursuit.
  */
 export async function upsertGolfDemoOpportunity(
   input: OpportunityInput,
@@ -165,15 +165,17 @@ export async function upsertGolfDemoOpportunity(
     return existingOpportunityId;
   }
 
-  const existing = await findOpenOpportunityForContact(input.contactId);
-  if (existing) {
-    await updateGolfDemoOpportunity(existing.id, {
-      name: input.name,
-      pipelineStageId: STAGE_DEMO_SUBMITTED(),
-      monetaryValue: input.monetaryValue,
-    });
-    return existing.id;
-  }
+  // Commenting this section out.
+
+  // const existing = await findOpenOpportunityForContact(input.contactId);
+  // if (existing) {
+  //   await updateGolfDemoOpportunity(existing.id, {
+  //     name: input.name,
+  //     pipelineStageId: STAGE_DEMO_SUBMITTED(),
+  //     monetaryValue: input.monetaryValue,
+  //   });
+  //   return existing.id;
+  // }
 
   return createGolfDemoOpportunity(input);
 }
