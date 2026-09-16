@@ -3,57 +3,23 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import PipelineColumn from "@/app/_components/pipeline/PipelineColumn";
-import PipelineCard, {
-  type PipelineStatusVariant,
-} from "@/app/_components/pipeline/PipelineCard";
+import PipelineCard from "@/app/_components/pipeline/PipelineCard";
 import CustomerDrawer from "@/app/staff/_components/CustomerDrawer";
-import { IconChevronRight, IconCheck } from "@tabler/icons-react";
+import { IconChevronRight } from "@tabler/icons-react";
+import {
+  type PipelineStage,
+  type PipelineCustomer,
+  type PipelineStageConfig,
+  type PipelineStatusVariant,
+  ACTIVE_PIPELINE_STAGES,
+} from "@/lib/pipeline/types";
 
-export type PipelineStage = "demo" | "locker-sent" | "engaged" | "considering";
-
-export interface PipelineCustomer {
-  id: string;
-  clientId?: number | string;
-  name: string;
-  stage: PipelineStage;
-  fittingType: string;
-  product?: string;
-  status: string;
-  timeInStage: string;
-  statusVariant?: PipelineStatusVariant;
-  statusIcon?: React.ReactNode;
-
-  contact?: {
-    email?: string;
-    phone?: string;
-  };
-
-  demo?: {
-    id?: string | number;
-    type: string;
-    date: string;
-    product?: string;
-  };
-
-  swingLocker?: {
-    id?: string | number;
-    sentAt?: string;
-    openedAt?: string;
-    previewUrl?: string;
-  };
-}
-
-export interface PipelineStageConfig {
-  id: PipelineStage;
-  label: string;
-}
-
-const ACTIVE_PIPELINE_STAGES: PipelineStageConfig[] = [
-  { id: "demo", label: "Demo" },
-  { id: "locker-sent", label: "Locker Sent" },
-  { id: "engaged", label: "Engaged" },
-  { id: "considering", label: "Considering" },
-];
+export type {
+  PipelineStage,
+  PipelineCustomer,
+  PipelineStageConfig,
+  PipelineStatusVariant,
+};
 
 const MOCK_PIPELINE_CUSTOMERS: PipelineCustomer[] = [
   // ── DEMO ──────────────────────────────────────────────────────────────────
@@ -136,7 +102,6 @@ const MOCK_PIPELINE_CUSTOMERS: PipelineCustomer[] = [
     status: "Locker opened",
     timeInStage: "1 day in stage",
     statusVariant: "success",
-    statusIcon: <IconCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />,
     contact: {
       email: "alex.w@example.com",
       phone: "(504) 555-0144",
@@ -191,7 +156,6 @@ const MOCK_PIPELINE_CUSTOMERS: PipelineCustomer[] = [
     status: "Locker opened",
     timeInStage: "2 days in stage",
     statusVariant: "success",
-    statusIcon: <IconCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />,
     contact: {
       email: "james.wilson@example.com",
       phone: "(504) 555-1234",
@@ -352,7 +316,6 @@ export default function SalesPipeline({
                       status={customer.status}
                       timeInStage={customer.timeInStage}
                       statusVariant={customer.statusVariant}
-                      statusIcon={customer.statusIcon}
                       onClick={() => setSelectedCustomer(customer)}
                     />
                   );

@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import Drawer from "@/app/_components/ui/Drawer";
-import type { PipelineCustomer } from "@/app/staff/_components/SalesPipeline";
+import type { PipelineCustomer } from "@/lib/pipeline/types";
 import {
   IconCheck,
   IconChevronRight,
@@ -56,19 +56,15 @@ export default function CustomerDrawer({
               {stageLabel}
             </span>
 
-            <span className="text-xs text-muted-foreground/80 font-body">
-              {customer.timeInStage}
-            </span>
+            {customer.timeInStage && (
+              <span className="text-xs text-muted-foreground/80 font-body">
+                {customer.timeInStage}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground font-body rounded-full bg-muted px-2.5 py-1 border border-border w-fit">
-            {customer.statusIcon ? (
-              <span className="shrink-0 flex items-center justify-center">
-                {customer.statusIcon}
-              </span>
-            ) : (
-              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 shrink-0" />
-            )}
+            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 shrink-0" />
             <span>{customer.status}</span>
           </div>
         </div>

@@ -6,7 +6,7 @@ export interface PipelineCardProps {
   name: string;
   context: string;
   status: string;
-  timeInStage: string;
+  timeInStage?: string;
   statusVariant?: PipelineStatusVariant;
   statusIcon?: React.ReactNode;
   onClick?: () => void;
@@ -65,9 +65,11 @@ export default function PipelineCard({
           <span className="truncate">{status}</span>
         </div>
 
-        <span className="text-[11px] text-muted-foreground/80 shrink-0">
-          {timeInStage}
-        </span>
+        {timeInStage && (
+          <span className="text-[11px] text-muted-foreground/80 shrink-0">
+            {timeInStage}
+          </span>
+        )}
       </div>
     </>
   );
