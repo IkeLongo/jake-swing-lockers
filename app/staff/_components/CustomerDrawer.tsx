@@ -140,10 +140,10 @@ export default function CustomerDrawer({
             )}
           </div>
 
-          {customer.demo?.id && (
+          {customer.demo?.viewUrl && (
             <div className="pt-1">
               <Link
-                href={`/staff/imports/${customer.demo.id}`}
+                href={customer.demo.viewUrl}
                 className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-hover font-body transition-colors"
               >
                 View Demo

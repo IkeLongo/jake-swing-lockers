@@ -6,6 +6,7 @@ import DashboardHeader from "@/app/staff/_components/dashboard/DashboardHeader";
 import DashboardStats from "@/app/staff/_components/DashboardStats";
 import NeedsAttention from "@/app/staff/_components/NeedsAttention";
 import SalesPipeline from "@/app/staff/_components/SalesPipeline";
+import { getPipelineCustomers } from "@/lib/queries/pipeline";
 
 export const metadata: Metadata = {
   title: "Dashboard — Jake Swing Lockers Staff",
@@ -41,6 +42,8 @@ export default async function StaffDashboardPage() {
     redirect("/staff/login");
   }
 
+  const pipelineCustomers = await getPipelineCustomers();
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8">
       <DashboardHeader />
@@ -59,7 +62,7 @@ export default async function StaffDashboardPage() {
 
       <NeedsAttention />
 
-      <SalesPipeline />
+      <SalesPipeline customers={pipelineCustomers} />
     </div>
   );
 }

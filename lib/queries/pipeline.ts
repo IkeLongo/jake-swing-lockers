@@ -77,6 +77,13 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
           createdAt: true,
         },
       },
+      importBatches: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          id: true,
+        },
+      },
     },
     orderBy: {
       demoDate: "desc",
@@ -180,6 +187,13 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
       ? `/staff/demo-sessions/${primarySession.id}/preview-locker`
       : undefined;
 
+    const latestBatch = primarySession.importBatches?.[0];
+    const demoViewUrl = latestBatch?.id
+      ? `/staff/imports/${latestBatch.id}/map`
+      : primarySession.id
+      ? `/staff/demo-sessions/${primarySession.id}/upload`
+      : undefined;
+
     // Status derivation
     let status = "Demo submitted";
     let statusVariant: PipelineStatusVariant = "default";
@@ -222,6 +236,7 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
         type: fittingType,
         date: formatDate(primarySession.demoDate) ?? "",
         product,
+        viewUrl: demoViewUrl,
       },
       swingLocker: {
         id: primarySession.id,

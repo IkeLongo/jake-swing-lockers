@@ -21,7 +21,7 @@ export type {
   PipelineStatusVariant,
 };
 
-const MOCK_PIPELINE_CUSTOMERS: PipelineCustomer[] = [
+export const MOCK_PIPELINE_CUSTOMERS: PipelineCustomer[] = [
   // ── DEMO ──────────────────────────────────────────────────────────────────
   {
     id: "cust-1",
@@ -263,7 +263,7 @@ interface SalesPipelineProps {
 
 export default function SalesPipeline({
   stages = ACTIVE_PIPELINE_STAGES,
-  customers = MOCK_PIPELINE_CUSTOMERS,
+  customers = [],
 }: SalesPipelineProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<PipelineCustomer | null>(null);
 

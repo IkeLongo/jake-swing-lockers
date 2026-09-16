@@ -23,6 +23,7 @@ export interface PipelineCustomer {
     type: string;
     date: string;
     product?: string;
+    viewUrl?: string;
   };
 
   swingLocker?: {
