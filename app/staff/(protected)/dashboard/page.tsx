@@ -4,14 +4,36 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import DashboardHeader from "@/app/staff/_components/dashboard/DashboardHeader";
 import DashboardStats from "@/app/staff/_components/DashboardStats";
-import NeedsAttention from "@/app/staff/_components/NeedsAttention";
+import NeedsAttention, {
+  type AttentionItem,
+} from "@/app/staff/_components/NeedsAttention";
 import SalesPipeline from "@/app/staff/_components/SalesPipeline";
+import { getCustomerNextAction } from "@/lib/pipeline/next-action";
 import { getPipelineCustomers } from "@/lib/queries/pipeline";
 
 export const metadata: Metadata = {
   title: "Dashboard — Jake Swing Lockers Staff",
   robots: { index: false, follow: false },
 };
+
+function getAttentionCopy(actionId: AttentionItem["actionId"], label: string) {
+  if (actionId === "send-swing-locker") {
+    return {
+      reason: "Swing Locker ready for review",
+      actionLabel: "Review & Send",
+    };
+  }
+
+  if (actionId === "review-demo") {
+    return { reason: label, actionLabel: "Review Demo" };
+  }
+
+  if (actionId === "review-purchase-interest") {
+    return { reason: label, actionLabel: "Review Request" };
+  }
+
+  return { reason: label, actionLabel: label };
+}
 
 export default async function StaffDashboardPage() {
   // ── Load current staff user role ───────────────────────────────────────────
@@ -43,6 +65,27 @@ export default async function StaffDashboardPage() {
   }
 
   const pipelineCustomers = await getPipelineCustomers();
+  const attentionItems: AttentionItem[] = pipelineCustomers.flatMap((customer) => {
+    const nextAction = getCustomerNextAction(customer);
+    if (!nextAction.requiresAttention) return [];
+
+    const context = customer.product
+      ? `${customer.fittingType} • ${customer.product}`
+      : customer.fittingType;
+    const attentionCopy = getAttentionCopy(nextAction.id, nextAction.label);
+
+    return [
+      {
+        id: customer.id,
+        customerName: customer.name,
+        context,
+        reason: attentionCopy.reason,
+        actionId: nextAction.id,
+        actionLabel: nextAction.href ? attentionCopy.actionLabel : undefined,
+        href: nextAction.href,
+      },
+    ];
+  });
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8">
@@ -60,7 +103,7 @@ export default async function StaffDashboardPage() {
         lockerSent={30}
       />
 
-      <NeedsAttention />
+      <NeedsAttention items={attentionItems} />
 
       <SalesPipeline customers={pipelineCustomers} />
     </div>

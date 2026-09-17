@@ -58,8 +58,9 @@ export function getCustomerNextAction(
   if (!hasCompletedLockerSend(customer)) {
     return {
       id: "send-swing-locker",
-      label: "Send Swing Locker",
+      label: "Review & Send Swing Locker",
       requiresAttention: true,
+      href: customer.demo?.viewUrl,
     };
   }
 

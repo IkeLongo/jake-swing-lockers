@@ -1,10 +1,11 @@
 import React from "react";
-import AttentionCard, {
-  type AttentionBadgeVariant,
-} from "@/app/_components/cards/AttentionCard";
+import AttentionCard from "@/app/_components/cards/AttentionCard";
+import type { CustomerNextActionId } from "@/lib/pipeline/next-action";
 import {
   IconClipboardCheck,
   IconClock,
+  IconMessageCircle,
+  IconSend,
   IconShoppingCart,
 } from "@tabler/icons-react";
 
@@ -13,56 +14,43 @@ export interface AttentionItem {
   customerName: string;
   context: string;
   reason: string;
-  typeLabel: string;
-  badgeVariant: AttentionBadgeVariant;
-  icon: React.ReactNode;
-  actionLabel: string;
+  actionId: CustomerNextActionId;
+  actionLabel?: string;
   href?: string;
 }
 
-const MOCK_ATTENTION_ITEMS: AttentionItem[] = [
-  {
-    id: "1",
-    customerName: "John Smith",
-    context: "Driver Demo • Sep 11",
-    reason: "Demo session is ready for review.",
-    typeLabel: "Demo Review",
-    badgeVariant: "warning",
-    icon: <IconClipboardCheck className="h-5 w-5" />,
-    actionLabel: "Review",
-    href: "/staff/imports",
-  },
-  {
-    id: "2",
-    customerName: "Mike Johnson",
-    context: "Iron Demo • Sep 8",
-    reason: "Swing Locker hasn't been opened in 3 days.",
-    typeLabel: "Follow Up",
-    badgeVariant: "info",
-    icon: <IconClock className="h-5 w-5" />,
-    actionLabel: "View",
-    href: "/staff/clients",
-  },
-  {
-    id: "3",
-    customerName: "Sarah Davis",
-    context: "Driver Demo • Today",
-    reason: "Customer submitted purchase interest.",
-    typeLabel: "Purchase Interest",
-    badgeVariant: "success",
+const ACTION_PRESENTATION: Record<
+  CustomerNextActionId,
+  { icon: React.ReactNode }
+> = {
+  "review-purchase-interest": {
     icon: <IconShoppingCart className="h-5 w-5" />,
-    actionLabel: "View",
-    href: "/staff/purchase-requests",
   },
-];
+  "review-demo": {
+    icon: <IconClipboardCheck className="h-5 w-5" />,
+  },
+  "send-swing-locker": {
+    icon: <IconSend className="h-5 w-5" />,
+  },
+  "await-customer-engagement": {
+    icon: <IconClock className="h-5 w-5" />,
+  },
+  "continue-conversation": {
+    icon: <IconMessageCircle className="h-5 w-5" />,
+  },
+  "purchase-follow-up": {
+    icon: <IconShoppingCart className="h-5 w-5" />,
+  },
+  "no-action-required": {
+    icon: <IconClock className="h-5 w-5" />,
+  },
+};
 
 interface NeedsAttentionProps {
-  items?: AttentionItem[];
+  items: AttentionItem[];
 }
 
-export default function NeedsAttention({
-  items = MOCK_ATTENTION_ITEMS,
-}: NeedsAttentionProps) {
+export default function NeedsAttention({ items }: NeedsAttentionProps) {
   return (
     <section className="space-y-4">
       <div>
@@ -85,19 +73,21 @@ export default function NeedsAttention({
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map((item) => (
-            <AttentionCard
-              key={item.id}
-              title={item.customerName}
-              subtitle={item.context}
-              description={item.reason}
-              typeLabel={item.typeLabel}
-              badgeVariant={item.badgeVariant}
-              icon={item.icon}
-              actionLabel={item.actionLabel}
-              href={item.href}
-            />
-          ))}
+          {items.map((item) => {
+            const presentation = ACTION_PRESENTATION[item.actionId];
+
+            return (
+              <AttentionCard
+                key={item.id}
+                title={item.customerName}
+                subtitle={item.context}
+                description={item.reason}
+                icon={presentation.icon}
+                actionLabel={item.actionLabel}
+                href={item.href}
+              />
+            );
+          })}
         </div>
       )}
     </section>

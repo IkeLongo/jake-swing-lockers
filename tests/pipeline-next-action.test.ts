@@ -62,7 +62,7 @@ test("non-finalized or dirty demos require review", () => {
   }
 });
 
-test("finalized demo without a completed locker send requires sending", () => {
+test("finalized demo without a completed locker send requires review and sending", () => {
   const action = getCustomerNextAction(
     createCustomer({
       swingLocker: { id: 1, inviteStatus: "pending" },
@@ -71,8 +71,9 @@ test("finalized demo without a completed locker send requires sending", () => {
 
   assert.deepEqual(action, {
     id: "send-swing-locker",
-    label: "Send Swing Locker",
+    label: "Review & Send Swing Locker",
     requiresAttention: true,
+    href: "/staff/imports/batch-1/map",
   });
 });
 

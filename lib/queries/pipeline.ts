@@ -1,20 +1,12 @@
 import { db } from "@/lib/db";
 import { getOpportunityById } from "@/lib/ghl/opportunities";
+import {
+  formatPipelineDate,
+  getPrimarySessionSwingLockerSummary,
+} from "@/lib/pipeline/swing-locker";
 import { mapGhlStageToJlStage } from "@/lib/pipeline/stages";
 import type { PipelineCustomer, PipelineStatusVariant } from "@/lib/pipeline/types";
 import { isPurchaseRequestEditableStatus } from "@/lib/purchase-request-status";
-
-function formatDate(date: Date | string | null | undefined): string | undefined {
-  if (!date) return undefined;
-  const d = typeof date === "string" ? new Date(date) : date;
-  if (isNaN(d.getTime())) return undefined;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(d);
-}
 
 /**
  * Loads active pipeline customers by querying DemoSessions grouped by GHL opportunity ID.
@@ -178,16 +170,8 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
     const product =
       productParts.length > 0 ? productParts.join(" ") : activeClub?.clubType ?? undefined;
 
-    // Swing Locker sent information
-    const sentSession =
-      sortedSessions.find(
-        (s) => s.accessInviteStatus === "sent" && s.accessInviteSentAt
-      ) ?? primarySession;
-    const sentAtFormatted = formatDate(sentSession?.accessInviteSentAt);
-
-    const previewUrl = primarySession.id
-      ? `/staff/demo-sessions/${primarySession.id}/preview-locker`
-      : undefined;
+    // Swing Locker workflow information belongs to the primary display session.
+    const swingLocker = getPrimarySessionSwingLockerSummary(primarySession);
 
     const latestBatch = primarySession.importBatches?.[0];
     const demoViewUrl = latestBatch?.id
@@ -244,17 +228,14 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
       demo: {
         id: primarySession.id,
         type: fittingType,
-        date: formatDate(primarySession.demoDate) ?? "",
+        date: formatPipelineDate(primarySession.demoDate) ?? "",
         product,
         status: primarySession.status,
         needsRefinalization: primarySession.needsRefinalization,
         viewUrl: demoViewUrl,
       },
       swingLocker: {
-        id: primarySession.id,
-        inviteStatus: sentSession?.accessInviteStatus ?? undefined,
-        sentAt: sentAtFormatted,
-        previewUrl,
+        ...swingLocker,
       },
       purchaseRequest: actionablePurchaseRequest
         ? {
