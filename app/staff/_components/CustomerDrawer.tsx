@@ -1,6 +1,10 @@
 import React from "react";
 import Link from "next/link";
 import Drawer from "@/app/_components/ui/Drawer";
+import {
+  getCustomerNextAction,
+  type CustomerNextActionId,
+} from "@/lib/pipeline/next-action";
 import type { PipelineCustomer } from "@/lib/pipeline/types";
 import {
   IconCheck,
@@ -24,6 +28,46 @@ const STAGE_LABELS: Record<string, string> = {
   considering: "Considering",
 };
 
+const NEXT_ACTION_PRESENTATION: Record<
+  CustomerNextActionId,
+  { title: string; description: string; buttonLabel?: string }
+> = {
+  "review-purchase-interest": {
+    title: "Purchase interest needs review",
+    description:
+      "Review the customer's purchase request and determine the next sales step.",
+    buttonLabel: "Review Request",
+  },
+  "review-demo": {
+    title: "Demo needs review",
+    description: "Review the fitting data before continuing the customer workflow.",
+    buttonLabel: "Review Demo",
+  },
+  "send-swing-locker": {
+    title: "Swing Locker ready for review",
+    description: "Review the customer's Swing Locker before sending access.",
+    buttonLabel: "Review & Send",
+  },
+  "await-customer-engagement": {
+    title: "Await customer engagement",
+    description: "The Swing Locker has been sent. No staff action is currently required.",
+  },
+  "continue-conversation": {
+    title: "Continue the conversation",
+    description:
+      "The customer is engaged. Continue the sales conversation and address their questions or equipment needs.",
+  },
+  "purchase-follow-up": {
+    title: "Purchase follow-up",
+    description:
+      "The customer is considering a purchase. Continue the sales process and help move the opportunity forward.",
+  },
+  "no-action-required": {
+    title: "No action required",
+    description: "No staff action is currently required for this opportunity.",
+  },
+};
+
 export default function CustomerDrawer({
   customer,
   open,
@@ -36,6 +80,8 @@ export default function CustomerDrawer({
     : customer.fittingType;
 
   const stageLabel = STAGE_LABELS[customer.stage] ?? customer.stage;
+  const nextAction = getCustomerNextAction(customer);
+  const nextActionPresentation = NEXT_ACTION_PRESENTATION[nextAction.id];
 
   return (
     <Drawer open={open} onClose={onClose} title={customer.name}>
@@ -154,7 +200,7 @@ export default function CustomerDrawer({
         </div>
 
         {/* ── Swing Locker Section ──────────────────────────────────────── */}
-        <div className="space-y-3 pb-2">
+        <div className="space-y-3 pb-6 border-b border-border">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-heading">
             Swing Locker
           </h3>
@@ -201,6 +247,34 @@ export default function CustomerDrawer({
               >
                 Open Swing Locker
                 <IconExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+              </Link>
+            </div>
+          )}
+        </div>
+
+        {/* ── Next Action Section ─────────────────────────────────────────── */}
+        <div className="space-y-3 pb-2 pr-6">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-heading">
+            Next Action
+          </h3>
+
+          <div className="space-y-1.5 font-body">
+            <div className="text-sm font-semibold text-foreground">
+              {nextActionPresentation.title}
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {nextActionPresentation.description}
+            </p>
+          </div>
+
+          {nextAction.href && nextActionPresentation.buttonLabel && (
+            <div className="pt-1">
+              <Link
+                href={nextAction.href}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted font-body transition-colors shadow-2xs"
+              >
+                {nextActionPresentation.buttonLabel}
+                <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               </Link>
             </div>
           )}
