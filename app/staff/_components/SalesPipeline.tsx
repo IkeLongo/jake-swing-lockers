@@ -263,7 +263,7 @@ interface SalesPipelineProps {
 
 export default function SalesPipeline({
   stages = ACTIVE_PIPELINE_STAGES,
-  customers = [],
+  customers = MOCK_PIPELINE_CUSTOMERS,
 }: SalesPipelineProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<PipelineCustomer | null>(null);
 

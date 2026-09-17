@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { getOpportunityById } from "@/lib/ghl/opportunities";
 import { mapGhlStageToJlStage } from "@/lib/pipeline/stages";
 import type { PipelineCustomer, PipelineStatusVariant } from "@/lib/pipeline/types";
+import { isPurchaseRequestEditableStatus } from "@/lib/purchase-request-status";
 
 function formatDate(date: Date | string | null | undefined): string | undefined {
   if (!date) return undefined;
@@ -37,6 +38,7 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
       ghlOpportunityId: true,
       demoDate: true,
       status: true,
+      needsRefinalization: true,
       salesRep: true,
       notes: true,
       currentClub: true,
@@ -194,6 +196,14 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
       ? `/staff/demo-sessions/${primarySession.id}/upload`
       : undefined;
 
+    const actionablePurchaseRequest = oppSessions
+      .flatMap((session) => session.purchaseRequests)
+      .filter((request) => isPurchaseRequestEditableStatus(request.status))
+      .sort((a, b) => {
+        const createdAtDifference = b.createdAt.getTime() - a.createdAt.getTime();
+        return createdAtDifference !== 0 ? createdAtDifference : b.id - a.id;
+      })[0];
+
     // Status derivation
     let status = "Demo submitted";
     let statusVariant: PipelineStatusVariant = "default";
@@ -236,13 +246,24 @@ export async function getPipelineCustomers(): Promise<PipelineCustomer[]> {
         type: fittingType,
         date: formatDate(primarySession.demoDate) ?? "",
         product,
+        status: primarySession.status,
+        needsRefinalization: primarySession.needsRefinalization,
         viewUrl: demoViewUrl,
       },
       swingLocker: {
         id: primarySession.id,
+        inviteStatus: sentSession?.accessInviteStatus ?? undefined,
         sentAt: sentAtFormatted,
         previewUrl,
       },
+      purchaseRequest: actionablePurchaseRequest
+        ? {
+            id: actionablePurchaseRequest.id,
+            status: actionablePurchaseRequest.status,
+            createdAt: actionablePurchaseRequest.createdAt.toISOString(),
+            viewUrl: `/staff/purchase-requests/${actionablePurchaseRequest.id}`,
+          }
+        : undefined,
     });
   }
 

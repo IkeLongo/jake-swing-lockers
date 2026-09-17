@@ -23,14 +23,24 @@ export interface PipelineCustomer {
     type: string;
     date: string;
     product?: string;
+    status?: string;
+    needsRefinalization?: boolean;
     viewUrl?: string;
   };
 
   swingLocker?: {
     id?: string | number;
+    inviteStatus?: string;
     sentAt?: string;
     openedAt?: string;
     previewUrl?: string;
+  };
+
+  purchaseRequest?: {
+    id: string | number;
+    status: string;
+    createdAt: string;
+    viewUrl?: string;
   };
 }
 
