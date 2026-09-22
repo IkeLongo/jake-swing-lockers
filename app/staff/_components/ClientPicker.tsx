@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { IconCheck, IconSearch } from "@tabler/icons-react";
 import type { ClientSearchResult } from "@/app/api/staff/clients/search/route";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -114,39 +115,40 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
 
   return (
     <div className="space-y-3">
-      {/* Mode toggle */}
-      <div className="flex gap-2">
+      {/* Mode toggle — segmented control */}
+      <div className="inline-flex w-full rounded-lg bg-muted p-1 sm:w-auto">
         <button
           type="button"
           onClick={() => switchMode("search")}
-          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors font-subheading ${
+          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors font-subheading sm:flex-none ${
             mode === "search"
-              ? "bg-slate-900 text-white"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              ? "bg-card text-foreground shadow-xs"
+              : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          Find existing client
+          Find existing customer
         </button>
         <button
           type="button"
           onClick={() => switchMode("new")}
-          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors font-subheading ${
+          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors font-subheading sm:flex-none ${
             mode === "new"
-              ? "bg-slate-900 text-white"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              ? "bg-card text-foreground shadow-xs"
+              : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          New client
+          New customer
         </button>
       </div>
 
       {/* Search existing client */}
       {mode === "search" && (
         <div className="space-y-1.5">
-          <label className="block text-xs font-semibold text-slate-600 font-subheading">
-            Search client
+          <label className="block text-xs font-semibold text-muted-foreground font-subheading">
+            Search customer
           </label>
           <div className="relative">
+            <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
               value={searchQuery}
@@ -155,28 +157,28 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
               onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
               disabled={disabled}
               placeholder="Name, email, or phone…"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none font-body"
+              className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none font-body"
             />
             {searching && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                 Searching…
               </span>
             )}
             {showDropdown && searchResults.length > 0 && (
-              <ul className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-md">
+              <ul className="absolute z-20 mt-1 w-full rounded-lg border border-border bg-card shadow-md">
                 {searchResults.map((c) => (
                   <li key={c.id}>
                     <button
                       type="button"
                       onMouseDown={() => handleSelectClient(c)}
-                      className="w-full px-3 py-2.5 text-left hover:bg-slate-50 text-sm font-body"
+                      className="w-full px-3 py-2.5 text-left hover:bg-muted text-sm font-body"
                     >
-                      <span className="font-medium text-slate-800">
+                      <span className="font-medium text-foreground">
                         {[c.firstName, c.lastName].filter(Boolean).join(" ") ||
                           "(no name)"}
                       </span>
                       {(c.email ?? c.phone) && (
-                        <span className="ml-2 text-xs text-slate-400">
+                        <span className="ml-2 text-xs text-muted-foreground">
                           {c.email ?? c.phone}
                         </span>
                       )}
@@ -189,15 +191,16 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
               searchResults.length === 0 &&
               !searching &&
               searchQuery.trim().length >= 2 && (
-                <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-400 shadow-md font-body">
-                  No clients found — switch to &ldquo;New client&rdquo; to
+                <div className="absolute z-20 mt-1 w-full rounded-lg border border-border bg-card px-3 py-2.5 text-xs text-muted-foreground shadow-md font-body">
+                  No customers found — switch to &ldquo;New customer&rdquo; to
                   create one.
                 </div>
               )}
           </div>
           {selectedClient && (
-            <p className="text-xs text-emerald-700 font-body">
-              ✓ Selected:{" "}
+            <p className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 font-body">
+              <IconCheck className="h-3.5 w-3.5" />
+              Selected:{" "}
               {[selectedClient.firstName, selectedClient.lastName]
                 .filter(Boolean)
                 .join(" ") || `Client #${selectedClient.id}`}
@@ -212,7 +215,7 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="block text-xs font-semibold text-slate-600 font-subheading">
+              <label className="block text-xs font-semibold text-muted-foreground font-subheading">
                 First name
               </label>
               <input
@@ -221,11 +224,11 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
                 onChange={(e) => updateNewClient("firstName", e.target.value)}
                 disabled={disabled}
                 placeholder="Jane"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none font-body"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none font-body"
               />
             </div>
             <div className="space-y-1">
-              <label className="block text-xs font-semibold text-slate-600 font-subheading">
+              <label className="block text-xs font-semibold text-muted-foreground font-subheading">
                 Last name
               </label>
               <input
@@ -234,13 +237,13 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
                 onChange={(e) => updateNewClient("lastName", e.target.value)}
                 disabled={disabled}
                 placeholder="Smith"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none font-body"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none font-body"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="block text-xs font-semibold text-slate-600 font-subheading">
+              <label className="block text-xs font-semibold text-muted-foreground font-subheading">
                 Email
               </label>
               <input
@@ -249,11 +252,11 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
                 onChange={(e) => updateNewClient("email", e.target.value)}
                 disabled={disabled}
                 placeholder="jane@example.com"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none font-body"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none font-body"
               />
             </div>
             <div className="space-y-1">
-              <label className="block text-xs font-semibold text-slate-600 font-subheading">
+              <label className="block text-xs font-semibold text-muted-foreground font-subheading">
                 Phone
               </label>
               <input
@@ -262,7 +265,7 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
                 onChange={(e) => updateNewClient("phone", e.target.value)}
                 disabled={disabled}
                 placeholder="(555) 000-0000"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none font-body"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none font-body"
               />
             </div>
           </div>

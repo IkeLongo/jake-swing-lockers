@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { IconArrowRight } from "@tabler/icons-react";
 import { ClientPicker } from "@/app/staff/_components/ClientPicker";
 import type { ClientPickerValue } from "@/app/staff/_components/ClientPicker";
 
@@ -32,7 +33,7 @@ export function CreateSessionForm() {
     };
 
     if (!clientValue) {
-      setSubmitError("Please select an existing client or switch to create a new one.");
+      setSubmitError("Please select an existing customer or switch to create a new one.");
       return;
     }
     if (clientValue.mode === "existing") {
@@ -72,15 +73,15 @@ export function CreateSessionForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl border border-slate-200 bg-white shadow-xs"
+      className="rounded-xl border border-border bg-card shadow-xs"
     >
       {/* Header */}
-      <div className="border-b border-slate-100 px-5 py-4">
-        <h2 className="text-base font-semibold text-slate-800 font-heading">
-          Client
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="text-base font-semibold text-foreground font-heading">
+          Customer
         </h2>
-        <p className="mt-0.5 text-xs text-slate-500 font-body">
-          Find an existing client or create a new one.
+        <p className="mt-0.5 text-xs text-muted-foreground font-body">
+          Find an existing customer or create a new one.
         </p>
       </div>
 
@@ -89,13 +90,13 @@ export function CreateSessionForm() {
         <ClientPicker onChange={setClientValue} disabled={submitting} />
 
         {/* Divider */}
-        <div className="border-t border-slate-100 pt-1">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+        <div className="border-t border-border pt-1">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
             Session Details
           </h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="block text-xs font-semibold text-slate-600 font-subheading">
+              <label className="block text-xs font-semibold text-muted-foreground font-subheading">
                 Demo date <span className="text-red-500">*</span>
               </label>
               <input
@@ -103,11 +104,11 @@ export function CreateSessionForm() {
                 required
                 value={demoDate}
                 onChange={(e) => setDemoDate(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-slate-400 focus:outline-none font-body"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none font-body"
               />
             </div>
             <div className="space-y-1">
-              <label className="block text-xs font-semibold text-slate-600 font-subheading">
+              <label className="block text-xs font-semibold text-muted-foreground font-subheading">
                 Notes
               </label>
               <input
@@ -115,7 +116,7 @@ export function CreateSessionForm() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Optional session notes…"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none font-body"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none font-body"
               />
             </div>
           </div>
@@ -123,7 +124,7 @@ export function CreateSessionForm() {
 
         {/* Error */}
         {submitError && (
-          <p className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 font-body">
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 font-body">
             {submitError}
           </p>
         )}
@@ -132,9 +133,16 @@ export function CreateSessionForm() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50 font-subheading"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50 font-subheading"
         >
-          {submitting ? "Creating session…" : "Create Demo Session →"}
+          {submitting ? (
+            "Creating session…"
+          ) : (
+            <>
+              Continue to TrackMan Upload
+              <IconArrowRight className="h-4 w-4" />
+            </>
+          )}
         </button>
       </div>
     </form>
