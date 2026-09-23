@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { IconArrowLeft, IconAlertTriangle } from "@tabler/icons-react";
 import { db } from "@/lib/db";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
@@ -108,15 +109,19 @@ export default async function ImportMapPage({
     linkedToSummaryId: s.linkedToSummaryId ?? null,
   }));
 
+  const backHref = "/staff/imports";
+  const backLabel = batch.demoSession ? "Back to Sessions" : "Back to Imports";
+
   return (
-    <>
+    <div>
       {/* ── Back nav ───────────────────────────────────────────────────────── */}
-      <div className="mb-6">
+      <div className="mb-6 max-w-3xl">
         <Link
-          href="/staff/imports"
-          className="mb-6 underline inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+          href={backHref}
+          className="mb-6 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
         >
-          ← Back to Sessions
+          <IconArrowLeft className="h-4 w-4" />
+          {backLabel}
         </Link>
 
         {/* Golfer context card (shown when linked to a DemoSession) */}
@@ -147,10 +152,10 @@ export default async function ImportMapPage({
           />
         )}
 
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
           Club Averages
         </h1>
-        <p className="mt-1 text-sm text-slate-500 font-body">
+        <p className="mt-1 text-sm text-muted-foreground font-body">
           {batch.originalFileName}
         </p>
       </div>
@@ -159,21 +164,17 @@ export default async function ImportMapPage({
       <div className="mb-6 flex flex-wrap gap-3">
         <StatCard label="Total Shots" value={batch.rowCount.toLocaleString()} />
         <StatusCard status={batch.status} />
-        <StatCard
-          label="Clubs Found"
-          value={summaries.length.toString()}
-          accent="blue"
-        />
+        <StatCard label="Clubs Found" value={summaries.length.toString()} />
       </div>
 
       {/* ── Swing Locker Access ──────────────────────────────────────────── */}
       {batch.demoSession && (
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+        <div className="mb-6 rounded-xl border border-border bg-card p-4 shadow-xs">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
             Swing Locker Access
           </h2>
           {batch.demoSession.status !== "finalized" ? (
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted-foreground font-body">
               Finalize this session before sending Swing Locker access.
             </p>
           ) : (
@@ -186,7 +187,7 @@ export default async function ImportMapPage({
                 }
                 variant="card"
               />
-              <div className="border-t border-slate-100 pt-3">
+              <div className="border-t border-border pt-3">
                 <PreviewLockerButton
                   sessionId={batch.demoSession.id}
                   returnHref={`/staff/imports/${batchId}/map`}
@@ -206,8 +207,7 @@ export default async function ImportMapPage({
         sessionStatus={batch.demoSession?.status}
         needsRefinalization={batch.demoSession?.needsRefinalization ?? false}
       />
-
-    </>
+    </div>
   );
 }
 
@@ -236,11 +236,13 @@ function TrackManSessionCard({
         </p>
         {hasIdentity ? (
           <div className="mt-2 space-y-1 text-sm font-body">
-            {playerName && <p className="font-semibold text-foreground">{playerName}</p>}
+            {playerName && (
+              <p className="text-base font-semibold text-foreground">{playerName}</p>
+            )}
             {playerEmail && <p className="text-muted-foreground">{playerEmail}</p>}
             {sessionDate && (
               <p className="pt-1 text-muted-foreground">
-                Session date: {sessionDate.toLocaleDateString("en-US", {
+                {sessionDate.toLocaleDateString("en-US", {
                   month: "long",
                   day: "numeric",
                   year: "numeric",
@@ -248,27 +250,29 @@ function TrackManSessionCard({
                 })}
               </p>
             )}
+            <p className="pt-1 text-xs font-medium text-accent">Not yet assigned</p>
             {(sessionId || playerId) && (
-              <p className="pt-1 text-xs text-muted-foreground">
-                {sessionId && `TrackMan session: ${sessionId}`}
+              <p className="pt-2 text-[11px] text-muted-foreground/70">
+                {sessionId && `Session ${sessionId}`}
                 {sessionId && playerId && " · "}
-                {playerId && `Player: ${playerId}`}
+                {playerId && `Player ${playerId}`}
               </p>
             )}
           </div>
         ) : (
-          <p className="mt-2 text-sm text-muted-foreground font-body">
-            This staged import has no TrackMan session details.
-          </p>
+          <div className="mt-2 space-y-1">
+            <p className="text-sm text-muted-foreground font-body">
+              This staged import has no TrackMan session details.
+            </p>
+            <p className="text-xs font-medium text-accent">Not yet assigned</p>
+          </div>
         )}
-        <p className="mt-3 text-xs text-muted-foreground font-body">
-          Staged import — not yet assigned to a customer or sales opportunity.
-        </p>
       </section>
 
       {metadataError && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 font-body">
-          TrackMan session metadata could not be resolved consistently: {metadataError}
+        <div className="flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-foreground font-body">
+          <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+          <p>TrackMan session metadata could not be resolved consistently: {metadataError}</p>
         </div>
       )}
     </div>
@@ -277,89 +281,58 @@ function TrackManSessionCard({
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
 
-function StatCard({
-  label,
-  value,
-  accent = "slate",
-}: {
-  label: string;
-  value: string;
-  accent?: "slate" | "emerald" | "red" | "yellow" | "blue";
-}) {
-  const accentClass = {
-    slate: "text-slate-700",
-    emerald: "text-emerald-700",
-    red: "text-red-600",
-    yellow: "text-yellow-700",
-    blue: "text-blue-700",
-  }[accent];
-
+function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-xs min-w-[110px]">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-xs min-w-[110px]">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
         {label}
       </p>
-      <p className={`mt-1 text-lg font-bold font-heading ${accentClass}`}>
-        {value}
-      </p>
+      <p className="mt-1 text-lg font-bold text-foreground font-heading">{value}</p>
     </div>
   );
 }
 
 // ── Status card ───────────────────────────────────────────────────────────────
 
-const STATUS_STYLES: Record<
-  string,
-  { bg: string; border: string; text: string; label: string }
-> = {
+const STATUS_STYLES: Record<string, { className: string; label: string }> = {
   parsed: {
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-    text: "text-blue-700",
+    className: "border-primary/30 bg-primary/10 text-primary",
     label: "Parsed",
   },
   reviewing: {
-    bg: "bg-amber-50",
-    border: "border-amber-200",
-    text: "text-amber-700",
+    className: "border-accent/40 bg-accent/10 text-accent",
     label: "Reviewing",
   },
   approved: {
-    bg: "bg-emerald-50",
-    border: "border-emerald-200",
-    text: "text-emerald-700",
+    className:
+      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-400",
     label: "Approved",
   },
   failed: {
-    bg: "bg-red-50",
-    border: "border-red-200",
-    text: "text-red-700",
+    className:
+      "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400",
     label: "Failed",
   },
   uploaded: {
-    bg: "bg-slate-50",
-    border: "border-slate-200",
-    text: "text-slate-600",
+    className: "border-border bg-muted text-muted-foreground",
     label: "Uploaded",
   },
 };
 
 function StatusCard({ status }: { status: string }) {
   const style = STATUS_STYLES[status] ?? {
-    bg: "bg-slate-50",
-    border: "border-slate-200",
-    text: "text-slate-600",
+    className: "border-border bg-muted text-muted-foreground",
     label: status,
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-xs min-w-[110px]">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-xs min-w-[110px]">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
         Status
       </p>
       <div className="mt-1">
         <span
-          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold font-subheading ${style.bg} ${style.border} ${style.text}`}
+          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold font-subheading ${style.className}`}
         >
           {style.label}
         </span>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { IconX } from "@tabler/icons-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -172,43 +173,43 @@ export function EditClubSummaryModal({
     <dialog
       ref={dialogRef}
       onClick={handleBackdropClick}
-      className="m-auto max-w-lg w-full rounded-2xl bg-white p-0 shadow-2xl backdrop:bg-black/40"
+      className="m-auto max-w-lg w-full rounded-2xl bg-card p-0 shadow-2xl backdrop:bg-black/40"
     >
       <form onSubmit={handleSave} noValidate>
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-          <h2 className="text-base font-bold text-slate-900 font-heading">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <h2 className="text-base font-bold text-foreground font-heading">
             Edit Club Summary
           </h2>
           <button
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="text-slate-400 hover:text-slate-600 disabled:opacity-40 text-xl leading-none"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 transition-colors"
             aria-label="Close"
           >
-            ×
+            <IconX className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
         <div className="space-y-4 px-6 py-5">
           {error && (
-            <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 font-body">
+            <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 font-body dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
               {error}
             </p>
           )}
 
           {/* Read-only info */}
-          <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 text-sm font-body">
-            <span className="font-semibold text-slate-700">Original name:</span>{" "}
-            <span className="text-slate-500">
+          <div className="rounded-lg border border-border bg-muted px-4 py-3 text-sm font-body">
+            <span className="font-semibold text-foreground">Original name:</span>{" "}
+            <span className="text-muted-foreground">
               {summary.originalClubName ?? (
                 <span className="italic">none (was blank)</span>
               )}
             </span>
-            <span className="ml-4 font-semibold text-slate-700">Shots:</span>{" "}
-            <span className="text-slate-500">{summary.shotCount}</span>
+            <span className="ml-4 font-semibold text-foreground">Shots:</span>{" "}
+            <span className="text-muted-foreground">{summary.shotCount}</span>
           </div>
 
           {/* Club name */}
@@ -290,7 +291,7 @@ export function EditClubSummaryModal({
             />
           </div>
 
-          <p className="text-xs text-slate-400 font-body">
+          <p className="text-xs text-muted-foreground font-body">
             Leave a numeric field blank to store it as no data (—). Shot counts
             and valid counts are not editable.
           </p>
@@ -308,19 +309,19 @@ export function EditClubSummaryModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+        <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
           <button
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-colors font-body"
+            className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-40 transition-colors font-body"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={saving}
-            className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 transition-colors font-body"
+            className="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground shadow-xs hover:bg-primary-hover disabled:opacity-50 transition-colors font-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             {saving ? "Saving…" : "Save changes"}
           </button>
@@ -353,7 +354,7 @@ function ModalField({
     <div>
       <label
         htmlFor={id}
-        className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500 font-body"
+        className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground font-body"
       >
         {label}
       </label>
@@ -364,11 +365,11 @@ function ModalField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-300 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-200 disabled:opacity-50 font-body"
+        className="block w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50 font-body"
         placeholder="—"
       />
       {hint && (
-        <p className="mt-0.5 text-xs text-slate-400 font-body">{hint}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground font-body">{hint}</p>
       )}
     </div>
   );

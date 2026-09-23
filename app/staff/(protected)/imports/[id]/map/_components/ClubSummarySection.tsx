@@ -18,7 +18,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { IconGripVertical, IconAlertTriangle, IconCheck } from "@tabler/icons-react";
 import {
   EditClubSummaryModal,
   type SerializedClubSummary,
@@ -381,10 +381,10 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       {/* ── Header row ──────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-900 font-heading">
+          <h2 className="text-lg font-bold text-foreground font-heading">
             Club Averages
           </h2>
-          <p className="mt-0.5 text-sm text-slate-500 font-body">
+          <p className="mt-0.5 text-sm text-muted-foreground font-body">
             {hasSummaries
               ? `${summaries.length} club${summaries.length !== 1 ? "s" : ""} detected from shot data.`
               : parserMode === "trackman-result"
@@ -398,7 +398,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           <button
             onClick={handleGenerate}
             disabled={generating}
-            className="shrink-0 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 transition-colors font-body"
+            className="shrink-0 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-xs hover:bg-primary-hover disabled:opacity-50 transition-colors font-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             {generating ? "Generating…" : "Generate Club Averages"}
           </button>
@@ -407,17 +407,17 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
 
       {/* ── TrackMan fallback: summaries missing after upload ────────────── */}
       {!hasSummaries && parserMode === "trackman-result" && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-6 text-center">
-          <p className="text-sm font-semibold text-red-700 font-body">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-6 text-center dark:border-red-900/50 dark:bg-red-950/30">
+          <p className="text-sm font-semibold text-red-700 font-body dark:text-red-400">
             Club summaries were not generated during upload.
           </p>
-          <p className="mt-1 text-xs text-slate-500 font-body">
+          <p className="mt-1 text-xs text-muted-foreground font-body">
             This is unexpected. You can regenerate them manually below.
           </p>
           <button
             onClick={handleGenerate}
             disabled={generating}
-            className="mt-4 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors font-body"
+            className="mt-4 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50 transition-colors font-body"
           >
             {generating ? "Generating…" : "Re-generate from raw shots"}
           </button>
@@ -426,48 +426,51 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
 
       {/* ── Generate error ──────────────────────────────────────────────────── */}
       {generateError && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
           {generateError}
         </div>
       )}
 
       {/* ── Unassigned warning ──────────────────────────────────────────────── */}
       {hasUnassigned && (
-        <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-5 py-4 text-sm text-yellow-800 font-body">
-          <span className="font-semibold font-subheading">
-            ⚠ Unassigned shots detected.
-          </span>{" "}
-          Some shots had a blank{" "}
-          <code className="rounded bg-yellow-100 px-1 text-xs">Club.Type</code>{" "}
-          column. Click{" "}
-          <span className="font-semibold">Edit</span> on the Unassigned row to
-          assign a club name before confirming.
+        <div className="flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 px-5 py-4 text-sm text-foreground font-body">
+          <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+          <p>
+            <span className="font-semibold font-subheading">
+              Unassigned shots detected.
+            </span>{" "}
+            Some shots had a blank{" "}
+            <code className="rounded bg-muted px-1 text-xs">Club.Type</code>{" "}
+            column. Click{" "}
+            <span className="font-semibold">Edit</span> on the Unassigned row to
+            assign a club name before confirming.
+          </p>
         </div>
       )}
 
       {/* ── Toggle error ────────────────────────────────────────────────────── */}
       {toggleError && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
           {toggleError}
         </div>
       )}
       {/* ── Link error ───────────────────────────────────────────────────── */}
       {linkError && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
           {linkError}
         </div>
       )}
       {/* ── Club summary table ──────────────────────────────────────────────── */}
       {hasSummaries && (
-        <div className="overflow-x-auto overflow-y-auto max-h-[650px] rounded-xl border border-slate-200 bg-white shadow-xs">
+        <div className="overflow-x-auto overflow-y-auto max-h-[650px] rounded-xl border border-border bg-card shadow-xs">
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
             <table className="w-full min-w-[1950px] text-sm font-body">
-              <thead className="sticky top-0 z-10 bg-slate-50">
-                <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <thead className="sticky top-0 z-10 bg-muted">
+                <tr className="border-b border-border bg-muted text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <th className="w-10 px-3 py-3 font-subheading" />
                   <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
                   <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
@@ -484,7 +487,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                   <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Total</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-border">
                 <SortableContext
                   items={summaries.map((s) => s.id)}
                   strategy={verticalListSortingStrategy}
@@ -538,19 +541,22 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
 
       {/* ── Finalize section ────────────────────────────────────────────────── */}
       {hasSummaries && (
-        <div className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-xs">
+        <div className="rounded-xl border border-border bg-card px-5 py-5 shadow-xs">
           {finalized && !dirty ? (
             // ── Clean finalized state ────────────────────────────────────────────
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-emerald-700 font-subheading">
-                  ✓ Session Finalized
-                </p>
-                <p className="mt-0.5 text-xs text-slate-500 font-body">
-                  Demo session finalized successfully. Club averages have been saved.
-                </p>
+              <div className="flex items-center gap-2">
+                <IconCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground font-subheading">
+                    Session Finalized
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground font-body">
+                    Demo session finalized successfully. Club averages have been saved.
+                  </p>
+                </div>
               </div>
-              <span className="shrink-0 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 font-subheading">
+              <span className="shrink-0 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 font-subheading dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-400">
                 Finalized
               </span>
             </div>
@@ -559,13 +565,13 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
             <div className="flex flex-col gap-3">
               {/* Dirty warning banner */}
               {finalized && dirty && (
-                <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                  <span className="mt-0.5 shrink-0 text-amber-500" aria-hidden>&#9888;</span>
+                <div className="flex items-start gap-3 rounded-lg border border-accent/40 bg-accent/10 px-4 py-3">
+                  <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
                   <div>
-                    <p className="text-sm font-semibold text-amber-800 font-subheading">
+                    <p className="text-sm font-semibold text-foreground font-subheading">
                       Club summaries have changed since finalization.
                     </p>
-                    <p className="mt-0.5 text-xs text-amber-700 font-body">
+                    <p className="mt-0.5 text-xs text-muted-foreground font-body">
                       Re-finalize this session to update the saved club data.
                     </p>
                   </div>
@@ -573,20 +579,22 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
               )}
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-slate-700 font-subheading">
+                  <p className="text-sm font-semibold text-foreground font-subheading">
                     {dirty ? "Ready to re-finalize?" : "Ready to finalize?"}
                   </p>
-                  <p className="mt-0.5 text-xs text-slate-500 font-body">
+                  <p className="mt-0.5 text-xs text-muted-foreground font-body">
                     Review and edit club averages above. Only included clubs will
                     be saved. This action cannot be undone.
                   </p>
                   {!sessionId && (
-                    <p className="mt-2 text-xs text-slate-500 font-body">
-                      Assign this import to a customer and sales opportunity before finalizing.
+                    <p className="mt-2 text-xs font-medium text-accent font-body">
+                      Assignment required before finalizing
                     </p>
                   )}
                   {finalizeError && (
-                    <p className="mt-2 text-xs text-red-600 font-body">{finalizeError}</p>
+                    <p className="mt-2 text-xs text-red-600 dark:text-red-400 font-body">
+                      {finalizeError}
+                    </p>
                   )}
                 </div>
                 <button
@@ -620,7 +628,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                       })
                       .finally(() => setFinalizing(false));
                   }}
-                  className="shrink-0 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-body"
+                  className="shrink-0 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-xs hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   {finalizing
                     ? dirty
@@ -642,7 +650,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           <button
             onClick={handleGenerate}
             disabled={generating}
-            className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2 font-body disabled:opacity-40"
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 font-body disabled:opacity-40"
           >
             {generating ? "Regenerating…" : "Re-generate from raw shots"}
           </button>
@@ -681,15 +689,15 @@ function MetricCell({
       <div className="space-y-0.5">
         {/* Value + unit inline */}
         <div className="inline-flex items-baseline gap-1 whitespace-nowrap">
-          <span className={isNull ? "text-slate-300" : "text-slate-800"}>
+          <span className={isNull ? "text-muted-foreground/50" : "text-foreground"}>
             {value}
           </span>
           {!isNull && (
-            <span className="text-xs text-slate-400">{unit}</span>
+            <span className="text-xs text-muted-foreground">{unit}</span>
           )}
         </div>
         {/* Valid count — always shown */}
-        <div className="text-xs text-slate-400">
+        <div className="text-xs text-muted-foreground">
           {isNull ? `0/${total}` : `${valid}/${total}`}
         </div>
       </div>
@@ -742,10 +750,10 @@ function SortableRow({
         isDragging
           ? "relative z-10 opacity-60 shadow-lg"
           : isChild
-            ? "bg-indigo-50/40"
+            ? "bg-primary/5"
             : !isIncluded
-              ? "bg-slate-200/60 opacity-50 grayscale"
-              : "hover:bg-slate-50/60"
+              ? "bg-muted/60 opacity-50 grayscale"
+              : "hover:bg-muted/40"
       }`}
     >
       {/* Drag handle */}
@@ -755,16 +763,16 @@ function SortableRow({
           type="button"
           tabIndex={-1}
           aria-label="Drag to reorder"
-          className="cursor-grab active:cursor-grabbing touch-none text-slate-400 hover:text-slate-600"
+          className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
         >
-          <GripVertical className="h-4 w-4" />
+          <IconGripVertical className="h-4 w-4" />
         </button>
       </td>
       {/* Actions */}
       <td className="whitespace-nowrap px-5 py-4">
         <button
           onClick={onEdit}
-          className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+          className="rounded-md border border-border bg-card px-3 py-1 text-xs font-medium text-foreground hover:bg-muted hover:border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           Edit
         </button>
@@ -778,14 +786,14 @@ function SortableRow({
           onClick={() => {
             if (!isChild) onToggleInclude(isIncluded);
           }}
-          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
             isChild
-              ? "cursor-not-allowed bg-slate-200"
+              ? "cursor-not-allowed bg-muted"
               : isToggling
-                ? "cursor-wait bg-emerald-500"
+                ? "cursor-wait bg-primary"
                 : isIncluded
-                  ? "cursor-pointer bg-emerald-500"
-                  : "cursor-pointer bg-slate-300"
+                  ? "cursor-pointer bg-primary"
+                  : "cursor-pointer bg-muted"
           }`}
         >
           <span
@@ -795,11 +803,11 @@ function SortableRow({
           />
         </button>
         {isChild ? (
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-500">
+          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
             Linked comparison
           </div>
         ) : !isIncluded ? (
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Excluded
           </div>
         ) : null}
@@ -807,26 +815,27 @@ function SortableRow({
       {/* Club */}
       <td className="whitespace-nowrap px-5 py-4">
         {s.clubName === "Unassigned" ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-yellow-300 bg-yellow-50 px-2 py-0.5 text-xs font-semibold text-yellow-700">
-            ⚠ Unassigned
+          <span className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">
+            <IconAlertTriangle className="h-3 w-3" />
+            Unassigned
           </span>
         ) : (
-          <span className="font-medium text-slate-800">{s.clubName}</span>
+          <span className="font-medium text-foreground">{s.clubName}</span>
         )}
       </td>
       {/* Tags — for this Club+Tags group */}
       <td className="px-5 py-4 text-sm">
         {s.tags.length > 0 ? (
-          <span className="text-slate-700">{s.tags.join(", ")}</span>
+          <span className="text-foreground">{s.tags.join(", ")}</span>
         ) : (
-          <span className="text-slate-300 text-xs">None</span>
+          <span className="text-muted-foreground text-xs">None</span>
         )}
       </td>
       {/* Compare To — select which club should be linked as a comparison child.
            Child rows (isChild) cannot also be parents, so they show no dropdown. */}
       <td className="whitespace-nowrap px-5 py-4">
         {isChild ? (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted-foreground">
             {parentSummary
               ? `Linked to ${parentSummary.clubName} — ${
                   parentSummary.tags.length > 0
@@ -844,7 +853,7 @@ function SortableRow({
                 e.target.value === "" ? null : parseInt(e.target.value, 10),
               )
             }
-            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-indigo-400 focus:outline-none disabled:opacity-50"
+            className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
           >
             <option value="">None</option>
             {compareOptions.map((opt) => (
@@ -857,15 +866,15 @@ function SortableRow({
         )}
       </td>
       {/* Est. Price */}
-      <td className="whitespace-nowrap px-5 py-4 text-right text-slate-700">
+      <td className="whitespace-nowrap px-5 py-4 text-right text-foreground">
         {s.estimatedPrice !== null && s.estimatedPrice !== undefined ? (
           <span className="font-medium">${s.estimatedPrice.toFixed(2)}</span>
         ) : (
-          <span className="text-slate-300 text-xs">—</span>
+          <span className="text-muted-foreground text-xs">—</span>
         )}
       </td>
       {/* Shots */}
-      <td className="whitespace-nowrap px-5 py-4 text-center text-slate-600">
+      <td className="whitespace-nowrap px-5 py-4 text-center text-muted-foreground">
         {s.shotCount}
       </td>
       <MetricCell value={fmt(s.avgClubSpeed)} valid={s.validClubSpeedCount} total={s.shotCount} unit="mph" />

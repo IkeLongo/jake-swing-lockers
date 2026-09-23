@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
+import { IconX } from "@tabler/icons-react";
 import { ClientPicker } from "@/app/staff/_components/ClientPicker";
 import type { ClientPickerValue } from "@/app/staff/_components/ClientPicker";
 
@@ -207,12 +208,12 @@ export default function EditDemoSessionModal({
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
       {/* Panel */}
-      <div className="relative z-10 flex max-h-[90dvh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-xl ring-1 ring-slate-200">
+      <div className="relative z-10 flex max-h-[90dvh] w-full max-w-lg flex-col rounded-2xl bg-card shadow-xl ring-1 ring-border">
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-5">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-6 py-5">
           <h2
             id="edit-session-modal-title"
-            className="text-base font-semibold text-slate-900 font-heading"
+            className="text-base font-semibold text-foreground font-heading"
           >
             Edit Demo Session
           </h2>
@@ -220,17 +221,10 @@ export default function EditDemoSessionModal({
             type="button"
             onClick={handleClose}
             disabled={loading}
-            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors disabled:opacity-50"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
             aria-label="Close"
           >
-            <svg
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="h-4 w-4"
-              aria-hidden="true"
-            >
-              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-            </svg>
+            <IconX className="h-4 w-4" />
           </button>
         </div>
 
@@ -242,25 +236,25 @@ export default function EditDemoSessionModal({
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
             {/* ── Client section ──────────────────────────────────────────── */}
             <div>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
                 Client
               </p>
 
               {/* Current client display */}
-              <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="mb-1 text-xs font-semibold text-slate-500 font-subheading">
+              <div className="mb-3 rounded-lg border border-border bg-muted px-4 py-3">
+                <p className="mb-1 text-xs font-semibold text-muted-foreground font-subheading">
                   Current client
                 </p>
-                <p className="text-sm font-semibold text-slate-800 font-body">
+                <p className="text-sm font-semibold text-foreground font-body">
                   {currentClientName}
                 </p>
                 {initial.email && (
-                  <p className="text-xs text-slate-400 font-body">
+                  <p className="text-xs text-muted-foreground font-body">
                     {initial.email}
                   </p>
                 )}
                 {initial.phone && (
-                  <p className="text-xs text-slate-400 font-body">
+                  <p className="text-xs text-muted-foreground font-body">
                     {initial.phone}
                   </p>
                 )}
@@ -277,8 +271,8 @@ export default function EditDemoSessionModal({
                   }}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors font-subheading ${
                     clientAssignment === "keep"
-                      ? "bg-slate-900 text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70"
                   }`}
                 >
                   Keep current
@@ -292,8 +286,8 @@ export default function EditDemoSessionModal({
                   }}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors font-subheading ${
                     clientAssignment === "change"
-                      ? "bg-slate-900 text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70"
                   }`}
                 >
                   Change client
@@ -301,7 +295,7 @@ export default function EditDemoSessionModal({
               </div>
 
               {clientAssignment === "keep" ? (
-                <p className="text-xs text-slate-400 font-body">
+                <p className="text-xs text-muted-foreground font-body">
                   The session will remain assigned to the current client.
                 </p>
               ) : (
@@ -314,11 +308,11 @@ export default function EditDemoSessionModal({
 
             {/* ── Session details ─────────────────────────────────────────── */}
             <div>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400 font-subheading">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
                 Session Details
               </p>
               <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700 font-body">
+                <label className="mb-1 block text-sm font-semibold text-foreground font-body">
                   Demo date <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -330,11 +324,11 @@ export default function EditDemoSessionModal({
                   }}
                   disabled={loading}
                   required
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-xs outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50 font-body"
+                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground shadow-xs outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-muted font-body"
                 />
               </div>
               <div className="mt-3">
-                <label className="mb-1 block text-sm font-semibold text-slate-700 font-body">
+                <label className="mb-1 block text-sm font-semibold text-foreground font-body">
                   Notes
                 </label>
                 <textarea
@@ -343,30 +337,30 @@ export default function EditDemoSessionModal({
                   disabled={loading}
                   rows={3}
                   placeholder="Fitting at demo day event…"
-                  className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-xs outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50 font-body"
+                  className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground shadow-xs outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-muted font-body"
                 />
               </div>
             </div>
 
             {error && (
-              <p className="text-sm text-red-600 font-body">{error}</p>
+              <p className="text-sm text-red-600 dark:text-red-400 font-body">{error}</p>
             )}
           </div>
 
           {/* Footer */}
-          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-6 py-4">
             <button
               type="button"
               onClick={handleClose}
               disabled={loading}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-xs hover:bg-slate-50 transition-colors disabled:opacity-50 font-body"
+              className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground shadow-xs hover:bg-muted transition-colors disabled:opacity-50 font-body"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors disabled:opacity-50 font-body"
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-xs hover:bg-primary-hover transition-colors disabled:opacity-50 font-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               {loading ? "Saving…" : "Save Changes"}
             </button>

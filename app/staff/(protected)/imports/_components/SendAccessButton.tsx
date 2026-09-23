@@ -3,9 +3,9 @@
 import { useState } from "react";
 
 const BADGE_STYLES: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-700",
-  sent: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
+  pending: "bg-accent/10 text-accent",
+  sent: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+  failed: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400",
 };
 
 const BADGE_LABELS: Record<string, string> = {
@@ -66,7 +66,7 @@ export default function SendAccessButton({
 
   const badge = status ? (
     <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${BADGE_STYLES[status] ?? "bg-slate-100 text-slate-500"}`}
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${BADGE_STYLES[status] ?? "bg-muted text-muted-foreground"}`}
     >
       {BADGE_LABELS[status] ?? status}
     </span>
@@ -78,7 +78,7 @@ export default function SendAccessButton({
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-3">
           {badge ?? (
-            <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Not Sent
             </span>
           )}
@@ -86,18 +86,18 @@ export default function SendAccessButton({
             <button
               onClick={handleClick}
               disabled={submitting}
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground shadow-xs hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               {submitting ? "Sending…" : buttonLabel(status)}
             </button>
           ) : (
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted-foreground">
               Add an email or phone number before sending access.
             </p>
           )}
         </div>
-        {successMsg && <p className="text-sm text-emerald-600">{successMsg}</p>}
-        {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
+        {successMsg && <p className="text-sm text-emerald-600 dark:text-emerald-400">{successMsg}</p>}
+        {errorMsg && <p className="text-sm text-red-600 dark:text-red-400">{errorMsg}</p>}
       </div>
     );
   }
@@ -110,24 +110,24 @@ export default function SendAccessButton({
           <button
             onClick={handleClick}
             disabled={submitting}
-            className="whitespace-nowrap text-sm font-medium text-emerald-700 hover:text-emerald-800 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+            className="whitespace-nowrap text-sm font-medium text-primary hover:text-primary-hover hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? "Sending…" : buttonLabel(status)}
           </button>
         ) : (
           <span
             title="Client needs email or phone before access can be sent."
-            className="cursor-default whitespace-nowrap text-sm font-medium text-slate-300"
+            className="cursor-default whitespace-nowrap text-sm font-medium text-muted-foreground/60"
           >
             Send Access
           </span>
         )}
       </div>
       {successMsg && (
-        <p className="text-xs text-emerald-600">{successMsg}</p>
+        <p className="text-xs text-emerald-600 dark:text-emerald-400">{successMsg}</p>
       )}
       {errorMsg && (
-        <p className="text-xs text-red-600">{errorMsg}</p>
+        <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>
       )}
     </div>
   );
