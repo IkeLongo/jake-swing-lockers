@@ -234,6 +234,12 @@ model ImportBatch {
   rowCount              Int       @default(0)
   // "generic" | "trackman-result" — set at parse time, drives review UI
   parserMode            String    @default("generic")
+  trackmanSessionId     String?
+  trackmanPlayerId      String?
+  trackmanPlayerName    String?
+  trackmanPlayerEmail   String?
+  trackmanSessionDate   DateTime?
+  trackmanMetadataError String?   @db.Text
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 

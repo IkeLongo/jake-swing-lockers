@@ -580,6 +580,11 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                     Review and edit club averages above. Only included clubs will
                     be saved. This action cannot be undone.
                   </p>
+                  {!sessionId && (
+                    <p className="mt-2 text-xs text-slate-500 font-body">
+                      Assign this import to a customer and sales opportunity before finalizing.
+                    </p>
+                  )}
                   {finalizeError && (
                     <p className="mt-2 text-xs text-red-600 font-body">{finalizeError}</p>
                   )}

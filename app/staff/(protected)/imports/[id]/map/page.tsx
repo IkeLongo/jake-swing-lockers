@@ -46,6 +46,12 @@ export default async function ImportMapPage({
         rowCount: true,
         parserMode: true,
         demoSessionId: true,
+        trackmanSessionId: true,
+        trackmanPlayerId: true,
+        trackmanPlayerName: true,
+        trackmanPlayerEmail: true,
+        trackmanSessionDate: true,
+        trackmanMetadataError: true,
         createdAt: true,
         demoSession: {
           select: {
@@ -130,6 +136,17 @@ export default async function ImportMapPage({
           />
         )}
 
+        {!batch.demoSession && batch.parserMode === "trackman-result" && (
+          <TrackManSessionCard
+            playerName={batch.trackmanPlayerName}
+            playerEmail={batch.trackmanPlayerEmail}
+            sessionDate={batch.trackmanSessionDate}
+            sessionId={batch.trackmanSessionId}
+            playerId={batch.trackmanPlayerId}
+            metadataError={batch.trackmanMetadataError}
+          />
+        )}
+
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
           Club Averages
         </h1>
@@ -191,6 +208,70 @@ export default async function ImportMapPage({
       />
 
     </>
+  );
+}
+
+function TrackManSessionCard({
+  playerName,
+  playerEmail,
+  sessionDate,
+  sessionId,
+  playerId,
+  metadataError,
+}: {
+  playerName: string | null;
+  playerEmail: string | null;
+  sessionDate: Date | null;
+  sessionId: string | null;
+  playerId: string | null;
+  metadataError: string | null;
+}) {
+  const hasIdentity = playerName || playerEmail || sessionDate || sessionId || playerId;
+
+  return (
+    <div className="mb-4 space-y-3">
+      <section className="rounded-xl border border-border bg-card px-5 py-4 shadow-xs">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
+          TrackMan Session
+        </p>
+        {hasIdentity ? (
+          <div className="mt-2 space-y-1 text-sm font-body">
+            {playerName && <p className="font-semibold text-foreground">{playerName}</p>}
+            {playerEmail && <p className="text-muted-foreground">{playerEmail}</p>}
+            {sessionDate && (
+              <p className="pt-1 text-muted-foreground">
+                Session date: {sessionDate.toLocaleDateString("en-US", {
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                  timeZone: "UTC",
+                })}
+              </p>
+            )}
+            {(sessionId || playerId) && (
+              <p className="pt-1 text-xs text-muted-foreground">
+                {sessionId && `TrackMan session: ${sessionId}`}
+                {sessionId && playerId && " · "}
+                {playerId && `Player: ${playerId}`}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground font-body">
+            This staged import has no TrackMan session details.
+          </p>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground font-body">
+          Staged import — not yet assigned to a customer or sales opportunity.
+        </p>
+      </section>
+
+      {metadataError && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 font-body">
+          TrackMan session metadata could not be resolved consistently: {metadataError}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { parseFileBuffer } from "@/lib/imports/parseFile";
+import {
+  getTrackManImportBatchMetadata,
+  parseFileBuffer,
+} from "@/lib/imports/parseFile";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { aggregateTrackManClubSummaries } from "@/lib/imports/trackmanAggregation";
 import type { Prisma } from "@/app/generated/prisma/client";
@@ -93,7 +96,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Parse and stage rows ───────────────────────────────────────────────────
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const { rows, parserMode } = parseFileBuffer(buffer, file.name);
+    const parseResult = parseFileBuffer(buffer, file.name);
+    const { rows, parserMode } = parseResult;
+    const trackManMetadata = getTrackManImportBatchMetadata(parseResult);
 
     if (rows.length > 0) {
       await db.importRow.createMany({
@@ -154,6 +159,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         status: batchStatus,
         rowCount: rows.length,
         parserMode,
+        ...trackManMetadata,
       },
     });
 

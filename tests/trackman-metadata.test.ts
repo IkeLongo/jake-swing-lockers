@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
-import { parseFileBuffer, parseTrackManDate } from "@/lib/imports/parseFile";
+import {
+  getTrackManImportBatchMetadata,
+  parseFileBuffer,
+  parseTrackManDate,
+} from "@/lib/imports/parseFile";
 
 // ── Test fixture helper ────────────────────────────────────────────────────────
 // Builds a workbook shaped exactly like a real TrackMan "Result" sheet export:
@@ -200,4 +204,71 @@ test("tolerates missing player name/email without an error", () => {
   // SessionId/player ID are still present and consistent.
   assert.equal(result.metadata.sessionId, "SESSION-1");
   assert.equal(result.metadata.playerId, "P-100");
+});
+
+// ── 8. ImportBatch persistence mapping ─────────────────────────────────────
+
+test("maps TrackMan metadata to nullable ImportBatch fields", () => {
+  const result = parseFileBuffer(
+    buildTrackManBuffer([
+      {
+        sessionId: "SESSION-42",
+        playerId: "PLAYER-42",
+        playerName: "Max Tucker",
+        playerEmail: "max@example.com",
+        date: "5/20/2026",
+      },
+    ]),
+    "max-tucker.xlsx",
+  );
+
+  assert.deepEqual(getTrackManImportBatchMetadata(result), {
+    trackmanSessionId: "SESSION-42",
+    trackmanPlayerId: "PLAYER-42",
+    trackmanPlayerName: "Max Tucker",
+    trackmanPlayerEmail: "max@example.com",
+    trackmanSessionDate: new Date("2026-05-20T00:00:00.000Z"),
+    trackmanMetadataError: null,
+  });
+});
+
+test("maps missing TrackMan metadata fields to null", () => {
+  const result = parseFileBuffer(
+    buildTrackManBuffer([
+      {
+        sessionId: "",
+        playerId: "",
+        playerName: "",
+        playerEmail: "",
+        date: "",
+      },
+    ]),
+    "unknown-player.xlsx",
+  );
+
+  assert.deepEqual(getTrackManImportBatchMetadata(result), {
+    trackmanSessionId: null,
+    trackmanPlayerId: null,
+    trackmanPlayerName: null,
+    trackmanPlayerEmail: null,
+    trackmanSessionDate: null,
+    trackmanMetadataError: null,
+  });
+});
+
+test("maps a TrackMan metadata inconsistency to ImportBatch error fields", () => {
+  const result = parseFileBuffer(
+    buildTrackManBuffer([{ sessionId: "SESSION-A" }, { sessionId: "SESSION-B" }]),
+    "conflict.xlsx",
+  );
+  const metadata = getTrackManImportBatchMetadata(result);
+
+  assert.equal(metadata?.trackmanSessionId, null);
+  assert.match(metadata?.trackmanMetadataError ?? "", /inconsistent SessionId/);
+});
+
+test("does not attach TrackMan metadata to generic imports", () => {
+  const result = parseFileBuffer(Buffer.from("name,email\nMax,max@example.com\n"), "clients.csv");
+
+  assert.equal(getTrackManImportBatchMetadata(result), undefined);
 });

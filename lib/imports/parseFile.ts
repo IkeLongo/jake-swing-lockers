@@ -32,6 +32,35 @@ export interface ParseResult {
   metadataError?: string;
 }
 
+/** Nullable ImportBatch fields populated from a parsed TrackMan export. */
+export interface TrackManImportBatchMetadata {
+  trackmanSessionId: string | null;
+  trackmanPlayerId: string | null;
+  trackmanPlayerName: string | null;
+  trackmanPlayerEmail: string | null;
+  trackmanSessionDate: Date | null;
+  trackmanMetadataError: string | null;
+}
+
+/**
+ * Maps parser metadata to the staged ImportBatch shape without performing any
+ * customer or DemoSession resolution.
+ */
+export function getTrackManImportBatchMetadata(
+  result: Pick<ParseResult, "parserMode" | "metadata" | "metadataError">,
+): TrackManImportBatchMetadata | undefined {
+  if (result.parserMode !== "trackman-result") return undefined;
+
+  return {
+    trackmanSessionId: result.metadata?.sessionId ?? null,
+    trackmanPlayerId: result.metadata?.playerId ?? null,
+    trackmanPlayerName: result.metadata?.playerName ?? null,
+    trackmanPlayerEmail: result.metadata?.playerEmail ?? null,
+    trackmanSessionDate: result.metadata?.sessionDate ?? null,
+    trackmanMetadataError: result.metadataError ?? null,
+  };
+}
+
 // ── TrackMan constants ────────────────────────────────────────────────────────
 
 /**

@@ -2,6 +2,11 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  IconFileSpreadsheet,
+  IconUpload,
+  IconX,
+} from "@tabler/icons-react";
 
 const ACCEPTED = ".csv,.xlsx,.xls";
 
@@ -10,16 +15,32 @@ type UploadState =
   | { phase: "uploading" }
   | { phase: "error"; message: string };
 
-export default function UploadForm() {
+interface Props {
+  trackManOnly?: boolean;
+}
+
+export default function UploadForm({ trackManOnly = false }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [state, setState] = useState<UploadState>({ phase: "idle" });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
+
+  function selectFile(file: File | null) {
+    setState({ phase: "idle" });
+    setSelectedFile(file);
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setState({ phase: "idle" });
-    setSelectedFile(e.target.files?.[0] ?? null);
+    selectFile(e.target.files?.[0] ?? null);
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragActive(false);
+    if (isUploading) return;
+    selectFile(e.dataTransfer.files?.[0] ?? null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -72,76 +93,119 @@ export default function UploadForm() {
   }
 
   const isUploading = state.phase === "uploading";
+  const acceptedTypes = trackManOnly ? ".xlsx,.xls" : ACCEPTED;
+  const uploadLabel = trackManOnly ? "Upload TrackMan Session" : "Upload and parse";
 
   return (
-    <form onSubmit={handleSubmit} noValidate>
+    <form onSubmit={handleSubmit} noValidate className="rounded-xl border border-border bg-card p-4 shadow-xs sm:p-6">
       {/* ── Drop zone / file input ───────────────────────────────────────── */}
       <div
-        className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 py-12 text-center transition-colors ${
-          selectedFile
-            ? "border-emerald-400 bg-emerald-50"
-            : "border-slate-300 bg-white hover:border-slate-400"
+        onDragEnter={(e) => {
+          e.preventDefault();
+          if (!isUploading) setIsDragActive(true);
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+          setIsDragActive(false);
+        }}
+        onDrop={handleDrop}
+        className={`flex min-h-80 flex-col items-center justify-center rounded-lg border-2 border-dashed px-5 py-10 text-center transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary sm:px-10 ${
+          isDragActive
+            ? "border-primary bg-primary/5"
+            : selectedFile
+              ? "border-primary/40 bg-primary/5"
+              : "border-border bg-background hover:border-primary/50 hover:bg-muted/40"
         }`}
       >
         <input
           ref={inputRef}
           type="file"
-          accept={ACCEPTED}
-          className="absolute inset-0 cursor-pointer opacity-0"
+          id="trackman-upload"
+          accept={acceptedTypes}
+          className="sr-only"
           onChange={handleFileChange}
           disabled={isUploading}
-          aria-label="Select CSV or XLSX file"
+          aria-label={trackManOnly ? "Select TrackMan XLSX file" : "Select CSV or XLSX file"}
         />
 
-        <div className="pointer-events-none">
-          <div className="mb-3 text-4xl">{selectedFile ? "📄" : "📂"}</div>
+        <div className="flex max-w-sm flex-col items-center">
+          <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            {selectedFile ? (
+              <IconFileSpreadsheet className="h-6 w-6" aria-hidden />
+            ) : (
+              <IconUpload className="h-6 w-6" aria-hidden />
+            )}
+          </div>
 
           {selectedFile ? (
             <>
-              <p className="text-sm font-semibold text-emerald-800 font-body break-all">
+              <p className="break-all text-sm font-semibold text-foreground font-heading">
                 {selectedFile.name}
               </p>
-              <p className="mt-1 text-xs text-emerald-600 font-body">
-                {(selectedFile.size / 1024).toFixed(1)} KB — click to change
+              <p className="mt-1 text-xs text-muted-foreground font-body">
+                {(selectedFile.size / 1024).toFixed(1)} KB selected
               </p>
+              <label
+                htmlFor="trackman-upload"
+                className="mt-5 inline-flex cursor-pointer items-center rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground shadow-xs transition-colors hover:bg-muted focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary font-body"
+              >
+                Choose a different file
+              </label>
             </>
           ) : (
             <>
-              <p className="text-sm font-semibold text-slate-700 font-body">
-                Click to select a file
+              <h2 className="text-base font-semibold text-foreground font-heading">
+                Upload TrackMan Session
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground font-body">
+                Drag and drop your TrackMan file here, or browse files.
               </p>
-              <p className="mt-1 text-xs text-slate-400 font-body">
-                Accepts .csv and .xlsx — up to 10 MB
-              </p>
+              <label
+                htmlFor="trackman-upload"
+                className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary-hover focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary font-body"
+              >
+                <IconUpload className="h-4 w-4" aria-hidden />
+                Browse files
+              </label>
             </>
           )}
+
+          <p className="mt-5 text-xs text-muted-foreground font-body">
+            {trackManOnly ? "XLSX / XLS" : "CSV / XLSX / XLS"} · Max 10 MB
+          </p>
         </div>
       </div>
 
       {/* ── Error message ────────────────────────────────────────────────── */}
       {state.phase === "error" && (
-        <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 font-body">
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 font-body" role="alert">
+          <IconX className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           {state.message}
         </div>
       )}
 
       {/* ── Actions ──────────────────────────────────────────────────────── */}
-      <div className="mt-6 flex items-center justify-between gap-4">
-        <button
-          type="button"
-          onClick={() => router.push("/staff/imports")}
-          disabled={isUploading}
-          className="text-sm font-medium text-slate-500 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-40 font-body"
-        >
-          Cancel
-        </button>
+      <div className={`mt-5 flex items-center gap-4 ${trackManOnly ? "justify-end" : "justify-between"}`}>
+        {!trackManOnly && (
+          <button
+            type="button"
+            onClick={() => router.push("/staff/imports")}
+            disabled={isUploading}
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-40 font-body"
+          >
+            Cancel
+          </button>
+        )}
 
         <button
           type="submit"
           disabled={isUploading || !selectedFile}
-          className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-emerald-400 transition-colors font-body"
+          className="inline-flex min-w-48 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 font-body"
         >
-          {isUploading ? "Uploading…" : "Upload and parse"}
+          <IconUpload className="h-4 w-4" aria-hidden />
+          {isUploading ? "Uploading TrackMan Session…" : uploadLabel}
         </button>
       </div>
     </form>
