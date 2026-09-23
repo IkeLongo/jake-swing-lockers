@@ -9,10 +9,27 @@ export type ParsedRow = Record<string, unknown>;
 /** Parser mode stored on ImportBatch to drive downstream UI decisions. */
 export type ParserMode = "trackman-result" | "generic";
 
+/**
+ * Session/player identity metadata extracted from the TrackMan "Result" sheet's
+ * SessionId / Player.Id / Player.Name / Player.Email / Date columns.
+ * Extraction only — no GolfClient/DemoSession matching happens here.
+ */
+export interface TrackManSessionMetadata {
+  sessionId: string | null;
+  playerId: string | null;
+  playerName: string | null;
+  playerEmail: string | null;
+  sessionDate: Date | null;
+}
+
 /** Result returned by parseFileBuffer. */
 export interface ParseResult {
   rows: ParsedRow[];
   parserMode: ParserMode;
+  /** Only populated when parserMode === "trackman-result"; undefined for generic/CSV imports. */
+  metadata?: TrackManSessionMetadata | null;
+  /** Set instead of metadata when shot rows disagree on session/player identity or date. */
+  metadataError?: string;
 }
 
 // ── TrackMan constants ────────────────────────────────────────────────────────
@@ -69,6 +86,19 @@ const TRACKMAN_FIELDS_OF_INTEREST = new Set([
  */
 const TRACKMAN_TAGS_COLUMN = "Tags";
 
+/**
+ * Session/player identity columns on the TrackMan "Result" sheet. These repeat
+ * on every shot row and are kept separate from TRACKMAN_FIELDS_OF_INTEREST so
+ * shot-row rawData (and hasValue detection) never changes.
+ */
+const TRACKMAN_METADATA_COLUMNS = {
+  sessionId: "SessionId",
+  playerId: "Player.Id",
+  playerName: "Player.Name",
+  playerEmail: "Player.Email",
+  date: "Date",
+} as const;
+
 // Strings that indicate a row is a unit/conversion row, not a shot row.
 // Used only for dev-mode assertion.
 const UNIT_VALUE_PATTERN = /^(mph|rpm|yrd|yd|ft|m|deg|[°%])$/i;
@@ -95,6 +125,159 @@ export function parseTagsCell(raw: string | null): string[] {
     .split(",")
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
+}
+
+/**
+ * Parse a TrackMan "Date" cell into a UTC Date, without relying on
+ * JavaScript's locale-ambiguous `new Date(string)` parsing.
+ *
+ * Accepts:
+ *   - "M/D/YYYY" or "M/D/YYYY H:mm[:ss]"        (TrackMan's US-formatted export)
+ *   - "YYYY-MM-DD" or "YYYY-MM-DD[T ]HH:mm[:ss]" (ISO fallback)
+ *
+ * Returns null for anything else rather than guessing.
+ */
+export function parseTrackManDate(raw: string): Date | null {
+  const value = raw.trim();
+  if (!value) return null;
+
+  const usMatch = value.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
+  );
+  if (usMatch) {
+    const [, month, day, year, hour, minute, second] = usMatch;
+    return new Date(
+      Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour ?? 0),
+        Number(minute ?? 0),
+        Number(second ?? 0),
+      ),
+    );
+  }
+
+  const isoMatch = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
+  );
+  if (isoMatch) {
+    const [, year, month, day, hour, minute, second] = isoMatch;
+    return new Date(
+      Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour ?? 0),
+        Number(minute ?? 0),
+        Number(second ?? 0),
+      ),
+    );
+  }
+
+  return null;
+}
+
+/** Calendar-day key (UTC) used to check that all shot rows share one session date. */
+function toCalendarDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Extract session/player identity metadata from the TrackMan "Result" sheet's
+ * SessionId / Player.Id / Player.Name / Player.Email / Date columns.
+ *
+ * These columns repeat on every shot row. Rather than trusting an arbitrary
+ * row, every shot row's values are collected and checked for consistency:
+ *   - SessionId, Player.Id, Player.Name, Player.Email must each resolve to a
+ *     single distinct non-empty value when present at all — player fields
+ *     are optional and tolerated as missing.
+ *   - Date must resolve to a single calendar day across all shots.
+ *
+ * Returns `{ metadata: null, error }` instead of throwing so a metadata
+ * inconsistency never blocks the existing shot-row import behavior.
+ */
+function extractTrackManSessionMetadata(
+  raw: (string | null)[][],
+  headers: string[],
+): { metadata: TrackManSessionMetadata | null; error?: string } {
+  const sessionIdCol = headers.indexOf(TRACKMAN_METADATA_COLUMNS.sessionId);
+  const playerIdCol = headers.indexOf(TRACKMAN_METADATA_COLUMNS.playerId);
+  const playerNameCol = headers.indexOf(TRACKMAN_METADATA_COLUMNS.playerName);
+  const playerEmailCol = headers.indexOf(TRACKMAN_METADATA_COLUMNS.playerEmail);
+  const dateCol = headers.indexOf(TRACKMAN_METADATA_COLUMNS.date);
+
+  const readCell = (rowArr: (string | null)[], col: number): string | null => {
+    if (col < 0) return null;
+    const cell = rowArr[col];
+    if (cell === null || cell === undefined) return null;
+    const trimmed = String(cell).trim();
+    return trimmed === "" ? null : trimmed;
+  };
+
+  const sessionIds = new Set<string>();
+  const playerIds = new Set<string>();
+  const playerNames = new Set<string>();
+  const playerEmails = new Set<string>();
+  const dateKeys = new Set<string>();
+  let earliestDate: Date | null = null;
+
+  for (const rowArr of raw.slice(TRACKMAN_DATA_START_INDEX)) {
+    const sessionId = readCell(rowArr, sessionIdCol);
+    if (sessionId) sessionIds.add(sessionId);
+
+    const playerId = readCell(rowArr, playerIdCol);
+    if (playerId) playerIds.add(playerId);
+
+    const playerName = readCell(rowArr, playerNameCol);
+    if (playerName) playerNames.add(playerName);
+
+    const playerEmail = readCell(rowArr, playerEmailCol);
+    if (playerEmail) playerEmails.add(playerEmail);
+
+    const dateRaw = readCell(rowArr, dateCol);
+    if (dateRaw) {
+      const parsed = parseTrackManDate(dateRaw);
+      if (parsed) {
+        dateKeys.add(toCalendarDayKey(parsed));
+        if (!earliestDate || parsed < earliestDate) earliestDate = parsed;
+      }
+    }
+  }
+
+  const issues: string[] = [];
+  if (sessionIds.size > 1) {
+    issues.push(`inconsistent SessionId values (${[...sessionIds].join(", ")})`);
+  }
+  if (playerIds.size > 1) {
+    issues.push(`inconsistent Player.Id values (${[...playerIds].join(", ")})`);
+  }
+  if (playerNames.size > 1) {
+    issues.push(`inconsistent Player.Name values (${[...playerNames].join(", ")})`);
+  }
+  if (playerEmails.size > 1) {
+    issues.push(`inconsistent Player.Email values (${[...playerEmails].join(", ")})`);
+  }
+  if (dateKeys.size > 1) {
+    issues.push(`shot rows span multiple session dates (${[...dateKeys].join(", ")})`);
+  }
+
+  if (issues.length > 0) {
+    return {
+      metadata: null,
+      error: `TrackMan export contains inconsistent session metadata: ${issues.join("; ")}.`,
+    };
+  }
+
+  const metadata: TrackManSessionMetadata = {
+    sessionId: sessionIds.size === 1 ? [...sessionIds][0] : null,
+    playerId: playerIds.size === 1 ? [...playerIds][0] : null,
+    playerName: playerNames.size === 1 ? [...playerNames][0] : null,
+    playerEmail: playerEmails.size === 1 ? [...playerEmails][0] : null,
+    sessionDate: earliestDate,
+  };
+
+  return { metadata };
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -181,7 +364,14 @@ function parseXlsx(buffer: Buffer): ParseResult {
           `imperial units=row ${TRACKMAN_IMPERIAL_UNIT_ROW_INDEX + 1} (skipped), ` +
           `data starts row ${TRACKMAN_DATA_START_INDEX + 1}`,
       );
-      return { rows: parseTrackManSheet(raw, headerStrings), parserMode: "trackman-result" };
+      const rows = parseTrackManSheet(raw, headerStrings);
+      const { metadata, error: metadataError } = extractTrackManSessionMetadata(raw, headerStrings);
+      return {
+        rows,
+        parserMode: "trackman-result",
+        metadata,
+        ...(metadataError ? { metadataError } : {}),
+      };
     }
 
     console.warn(
