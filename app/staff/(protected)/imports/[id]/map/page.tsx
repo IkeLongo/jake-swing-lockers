@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
 import SessionDetailsCard from "./_components/SessionDetailsCard";
+import { CustomerResolutionSection } from "./_components/CustomerResolutionSection";
 import SendAccessButton from "../../_components/SendAccessButton";
 import PreviewLockerButton from "../../_components/PreviewLockerButton";
 
@@ -142,14 +143,17 @@ export default async function ImportMapPage({
         )}
 
         {!batch.demoSession && batch.parserMode === "trackman-result" && (
-          <TrackManSessionCard
-            playerName={batch.trackmanPlayerName}
-            playerEmail={batch.trackmanPlayerEmail}
-            sessionDate={batch.trackmanSessionDate}
-            sessionId={batch.trackmanSessionId}
-            playerId={batch.trackmanPlayerId}
-            metadataError={batch.trackmanMetadataError}
-          />
+          <>
+            <TrackManSessionCard
+              playerName={batch.trackmanPlayerName}
+              playerEmail={batch.trackmanPlayerEmail}
+              sessionDate={batch.trackmanSessionDate}
+              sessionId={batch.trackmanSessionId}
+              playerId={batch.trackmanPlayerId}
+              metadataError={batch.trackmanMetadataError}
+            />
+            <CustomerResolutionSection batchId={batchId} />
+          </>
         )}
 
         <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">

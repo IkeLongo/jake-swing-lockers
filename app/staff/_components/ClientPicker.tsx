@@ -13,13 +13,22 @@ export type ClientPickerValue =
 interface Props {
   onChange: (value: ClientPickerValue | null) => void;
   disabled?: boolean;
+  /** Optional: also receive the full record when an existing customer is selected. */
+  onSelectExisting?: (client: ClientSearchResult | null) => void;
+  /** When false, hides the "New customer" toggle and forces search-only mode. Defaults to true. */
+  allowNew?: boolean;
 }
 
 type Mode = "search" | "new";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ClientPicker({ onChange, disabled = false }: Props) {
+export function ClientPicker({
+  onChange,
+  disabled = false,
+  onSelectExisting,
+  allowNew = true,
+}: Props) {
   const [mode, setMode] = useState<Mode>("search");
 
   // Search state
@@ -45,6 +54,7 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
       setSearchQuery(val);
       setSelectedClient(null);
       onChange(null);
+      onSelectExisting?.(null);
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
@@ -70,7 +80,7 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
         }
       }, 300);
     },
-    [onChange],
+    [onChange, onSelectExisting],
   );
 
   const handleSelectClient = (c: ClientSearchResult) => {
@@ -84,6 +94,7 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
     setShowDropdown(false);
     setSearchResults([]);
     onChange({ mode: "existing", clientId: c.id });
+    onSelectExisting?.(c);
   };
 
   // ── Mode switch ────────────────────────────────────────────────────────────
@@ -94,6 +105,7 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
     setSearchQuery("");
     setSearchResults([]);
     setShowDropdown(false);
+    onSelectExisting?.(null);
     if (newMode === "new") {
       onChange({ mode: "new", ...newClient });
     } else {
@@ -116,30 +128,32 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
   return (
     <div className="space-y-3">
       {/* Mode toggle — segmented control */}
-      <div className="inline-flex w-full rounded-lg bg-muted p-1 sm:w-auto">
-        <button
-          type="button"
-          onClick={() => switchMode("search")}
-          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors font-subheading sm:flex-none ${
-            mode === "search"
-              ? "bg-card text-foreground shadow-xs"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Find existing customer
-        </button>
-        <button
-          type="button"
-          onClick={() => switchMode("new")}
-          className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors font-subheading sm:flex-none ${
-            mode === "new"
-              ? "bg-card text-foreground shadow-xs"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          New customer
-        </button>
-      </div>
+      {allowNew && (
+        <div className="inline-flex w-full rounded-lg bg-muted p-1 sm:w-auto">
+          <button
+            type="button"
+            onClick={() => switchMode("search")}
+            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors font-subheading sm:flex-none ${
+              mode === "search"
+                ? "bg-card text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Find existing customer
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode("new")}
+            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors font-subheading sm:flex-none ${
+              mode === "new"
+                ? "bg-card text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            New customer
+          </button>
+        </div>
+      )}
 
       {/* Search existing client */}
       {mode === "search" && (
@@ -211,7 +225,7 @@ export function ClientPicker({ onChange, disabled = false }: Props) {
       )}
 
       {/* New client fields */}
-      {mode === "new" && (
+      {allowNew && mode === "new" && (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
