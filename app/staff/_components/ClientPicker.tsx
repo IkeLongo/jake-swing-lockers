@@ -13,6 +13,13 @@ export type ClientPickerValue =
 interface Props {
   onChange: (value: ClientPickerValue | null) => void;
   disabled?: boolean;
+  initialMode?: Mode;
+  initialNewCustomer?: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+  };
   /** Optional: also receive the full record when an existing customer is selected. */
   onSelectExisting?: (client: ClientSearchResult | null) => void;
   /** When false, hides the "New customer" toggle and forces search-only mode. Defaults to true. */
@@ -26,10 +33,12 @@ type Mode = "search" | "new";
 export function ClientPicker({
   onChange,
   disabled = false,
+  initialMode = "search",
+  initialNewCustomer,
   onSelectExisting,
   allowNew = true,
 }: Props) {
-  const [mode, setMode] = useState<Mode>("search");
+  const [mode, setMode] = useState<Mode>(initialMode);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -41,10 +50,10 @@ export function ClientPicker({
 
   // New client state (single object to simplify onChange calls)
   const [newClient, setNewClient] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
+    firstName: initialNewCustomer?.firstName ?? "",
+    lastName: initialNewCustomer?.lastName ?? "",
+    email: initialNewCustomer?.email ?? "",
+    phone: initialNewCustomer?.phone ?? "",
   });
 
   // ── Search ─────────────────────────────────────────────────────────────────
@@ -212,7 +221,7 @@ export function ClientPicker({
               )}
           </div>
           {selectedClient && (
-            <p className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 font-body">
+            <p className="flex items-center gap-1 text-xs text-primary font-body">
               <IconCheck className="h-3.5 w-3.5" />
               Selected:{" "}
               {[selectedClient.firstName, selectedClient.lastName]

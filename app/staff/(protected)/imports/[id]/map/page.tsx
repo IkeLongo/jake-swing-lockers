@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { IconArrowLeft, IconAlertTriangle } from "@tabler/icons-react";
+import { notFound, redirect } from "next/navigation";
+import { IconArrowLeft } from "@tabler/icons-react";
 import { db } from "@/lib/db";
+import { getReviewPageRedirect } from "@/lib/imports/customer-workflow-routing";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
 import SessionDetailsCard from "./_components/SessionDetailsCard";
-import { CustomerResolutionSection } from "./_components/CustomerResolutionSection";
 import SendAccessButton from "../../_components/SendAccessButton";
 import PreviewLockerButton from "../../_components/PreviewLockerButton";
 
@@ -35,8 +35,9 @@ export default async function ImportMapPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const batchId = parseInt(id, 10);
-  if (isNaN(batchId)) notFound();
+  if (!/^[1-9]\d*$/.test(id)) notFound();
+  const batchId = Number(id);
+  if (!Number.isSafeInteger(batchId)) notFound();
 
   const [batch, summariesRaw] = await Promise.all([
     db.importBatch.findUnique({
@@ -48,12 +49,14 @@ export default async function ImportMapPage({
         rowCount: true,
         parserMode: true,
         demoSessionId: true,
-        trackmanSessionId: true,
-        trackmanPlayerId: true,
+        customerResolution: true,
+        selectedGolfClientId: true,
+        proposedFirstName: true,
+        proposedLastName: true,
+        proposedEmail: true,
+        proposedPhone: true,
         trackmanPlayerName: true,
         trackmanPlayerEmail: true,
-        trackmanSessionDate: true,
-        trackmanMetadataError: true,
         createdAt: true,
         demoSession: {
           select: {
@@ -83,6 +86,8 @@ export default async function ImportMapPage({
   ]);
 
   if (!batch) notFound();
+  const redirectToCustomer = getReviewPageRedirect(batch);
+  if (redirectToCustomer) redirect(redirectToCustomer);
 
   // Serialize Decimal fields for client components
   const summaries: SerializedClubSummary[] = summariesRaw.map((s) => ({
@@ -143,21 +148,24 @@ export default async function ImportMapPage({
         )}
 
         {!batch.demoSession && batch.parserMode === "trackman-result" && (
-          <>
-            <TrackManSessionCard
-              playerName={batch.trackmanPlayerName}
-              playerEmail={batch.trackmanPlayerEmail}
-              sessionDate={batch.trackmanSessionDate}
-              sessionId={batch.trackmanSessionId}
-              playerId={batch.trackmanPlayerId}
-              metadataError={batch.trackmanMetadataError}
-            />
-            <CustomerResolutionSection batchId={batchId} />
-          </>
+          <div className="mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
+              Review fitting
+            </p>
+            {(batch.trackmanPlayerName || batch.trackmanPlayerEmail) && (
+              <p className="mt-1 text-sm text-muted-foreground font-body">
+                {batch.trackmanPlayerName}
+                {batch.trackmanPlayerName && batch.trackmanPlayerEmail && " · "}
+                {batch.trackmanPlayerEmail}
+              </p>
+            )}
+          </div>
         )}
 
         <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
-          Club Averages
+          {!batch.demoSession && batch.parserMode === "trackman-result"
+            ? "Is the fitting data correct?"
+            : "Club Averages"}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground font-body">
           {batch.originalFileName}
@@ -211,74 +219,6 @@ export default async function ImportMapPage({
         sessionStatus={batch.demoSession?.status}
         needsRefinalization={batch.demoSession?.needsRefinalization ?? false}
       />
-    </div>
-  );
-}
-
-function TrackManSessionCard({
-  playerName,
-  playerEmail,
-  sessionDate,
-  sessionId,
-  playerId,
-  metadataError,
-}: {
-  playerName: string | null;
-  playerEmail: string | null;
-  sessionDate: Date | null;
-  sessionId: string | null;
-  playerId: string | null;
-  metadataError: string | null;
-}) {
-  const hasIdentity = playerName || playerEmail || sessionDate || sessionId || playerId;
-
-  return (
-    <div className="mb-4 space-y-3">
-      <section className="rounded-xl border border-border bg-card px-5 py-4 shadow-xs">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
-          TrackMan Session
-        </p>
-        {hasIdentity ? (
-          <div className="mt-2 space-y-1 text-sm font-body">
-            {playerName && (
-              <p className="text-base font-semibold text-foreground">{playerName}</p>
-            )}
-            {playerEmail && <p className="text-muted-foreground">{playerEmail}</p>}
-            {sessionDate && (
-              <p className="pt-1 text-muted-foreground">
-                {sessionDate.toLocaleDateString("en-US", {
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                  timeZone: "UTC",
-                })}
-              </p>
-            )}
-            <p className="pt-1 text-xs font-medium text-accent">Not yet assigned</p>
-            {(sessionId || playerId) && (
-              <p className="pt-2 text-[11px] text-muted-foreground/70">
-                {sessionId && `Session ${sessionId}`}
-                {sessionId && playerId && " · "}
-                {playerId && `Player ${playerId}`}
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="mt-2 space-y-1">
-            <p className="text-sm text-muted-foreground font-body">
-              This staged import has no TrackMan session details.
-            </p>
-            <p className="text-xs font-medium text-accent">Not yet assigned</p>
-          </div>
-        )}
-      </section>
-
-      {metadataError && (
-        <div className="flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-foreground font-body">
-          <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-          <p>TrackMan session metadata could not be resolved consistently: {metadataError}</p>
-        </div>
-      )}
     </div>
   );
 }

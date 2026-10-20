@@ -70,11 +70,10 @@ export default function UploadForm({ trackManOnly = false }: Props) {
       };
 
       if (res.ok && data.success && data.batchId != null) {
-        // TrackMan imports have club summaries generated during upload —
-        // redirect directly to the club averages review page.
+        // TrackMan imports begin at customer resolution before fitting review.
         const redirectPath =
           data.parserMode === "trackman-result"
-            ? `/staff/imports/${data.batchId}/map`
+            ? `/staff/imports/${data.batchId}/customer`
             : `/staff/imports/${data.batchId}`;
         router.push(redirectPath);
         return;
