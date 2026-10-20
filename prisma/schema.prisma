@@ -24,6 +24,7 @@ model GolfClient {
   updatedAt        DateTime  @updatedAt
 
   demoSessions     DemoSession[]
+  stagedImportBatches ImportBatch[]
   swingLockerOtps  SwingLockerOtp[]
   purchaseRequests PurchaseRequest[]
 }
@@ -240,8 +241,16 @@ model ImportBatch {
   trackmanPlayerEmail   String?
   trackmanSessionDate   DateTime?
   trackmanMetadataError String?   @db.Text
+  customerResolution    String?
+  selectedGolfClientId  Int?
+  proposedFirstName     String?
+  proposedLastName      String?
+  proposedEmail         String?
+  proposedPhone         String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+
+  selectedGolfClient GolfClient? @relation(fields: [selectedGolfClientId], references: [id], onDelete: Restrict)
 
   // Set after the import is confirmed and a DemoSession is created
   demoSessionId Int?
@@ -253,6 +262,7 @@ model ImportBatch {
 
   @@index([uploadedByStaffUserId])
   @@index([status])
+  @@index([selectedGolfClientId])
   @@index([demoSessionId])
 }
 
