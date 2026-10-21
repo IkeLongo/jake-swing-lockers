@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { aggregateTrackManClubSummaries } from "@/lib/imports/trackmanAggregation";
+import { createTrackManClubSummaries } from "@/lib/imports/trackmanClubSummaryPersistence";
 
 export async function POST(
   req: NextRequest,
@@ -23,7 +24,7 @@ export async function POST(
   // ── Verify batch exists ─────────────────────────────────────────────────────
   const batch = await db.importBatch.findUnique({
     where: { id: batchId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, parserMode: true },
   });
   if (!batch) {
     return NextResponse.json(
@@ -36,7 +37,7 @@ export async function POST(
   const importRows = await db.importRow.findMany({
     where: { importBatchId: batchId },
     orderBy: { rowIndex: "asc" },
-    select: { rawData: true },
+    select: { id: true, rowIndex: true, rawData: true },
   });
 
   if (importRows.length === 0) {
@@ -46,14 +47,49 @@ export async function POST(
     );
   }
 
-  // rawData is Json — cast to Record<string, unknown> for aggregation
-  const rawRows = importRows.map(
-    (r) => r.rawData as Record<string, unknown>,
-  );
+  const rawRows = importRows.map((r) => r.rawData as Record<string, unknown>);
 
-  // ── Aggregate ───────────────────────────────────────────────────────────────
+  // TrackMan supports initial generation only. Replacing summaries after staff
+  // review would destroy associations, comparison links, and other review state.
+  if (batch.parserMode === "trackman-result") {
+    const existingSummaryCount = await db.importClubSummary.count({
+      where: { importBatchId: batchId },
+    });
+    if (existingSummaryCount > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "TrackMan summaries already exist and cannot be regenerated destructively. Recalculate the affected summary from its associated shots instead.",
+        },
+        { status: 409 },
+      );
+    }
+
+    await db.$transaction(async (tx) => {
+      await createTrackManClubSummaries(
+        tx,
+        batchId,
+        importRows.map((row) => ({
+          id: row.id,
+          rowIndex: row.rowIndex,
+          rawData: row.rawData as Record<string, unknown>,
+        })),
+      );
+      await tx.importBatch.update({
+        where: { id: batchId },
+        data: { status: "reviewing" },
+      });
+    });
+
+    const created = await db.importClubSummary.findMany({
+      where: { importBatchId: batchId },
+      orderBy: [{ clubName: "asc" }],
+    });
+    return NextResponse.json({ success: true, summaries: created });
+  }
+
+  // ── Aggregate generic-import summaries ──────────────────────────────────────
   const summaries = aggregateTrackManClubSummaries(rawRows);
-
   if (summaries.length === 0) {
     return NextResponse.json(
       { error: "Aggregation produced no club summaries. Check row data." },
@@ -61,7 +97,7 @@ export async function POST(
     );
   }
 
-  // ── Persist (delete existing, insert fresh) ─────────────────────────────────
+  // ── Persist generic-import summaries using the existing behavior ────────────
   await db.$transaction([
     db.importClubSummary.deleteMany({ where: { importBatchId: batchId } }),
     db.importClubSummary.createMany({

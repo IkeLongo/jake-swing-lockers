@@ -49,6 +49,27 @@ export interface ClubSummaryInput {
   validTotalCount: number;
 }
 
+export interface TrackManSummaryMetrics {
+  shotCount: number;
+  avgClubSpeed: number | null;
+  avgBallSpeed: number | null;
+  avgSpinRate: number | null;
+  avgMaxHeight: number | null;
+  avgCarry: number | null;
+  avgTotal: number | null;
+  validClubSpeedCount: number;
+  validBallSpeedCount: number;
+  validSpinRateCount: number;
+  validMaxHeightCount: number;
+  validCarryCount: number;
+  validTotalCount: number;
+}
+
+export interface ClubSummaryGroup {
+  summary: ClubSummaryInput;
+  rowIndexes: number[];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -74,10 +95,52 @@ export function averageValidNumbers(values: number[]): number | null {
   return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
+/**
+ * Calculate summary metrics from shot rows without using their club or tag
+ * fields. This also supports recalculation after the rows have been associated
+ * with a summary independently of editable display fields.
+ */
+export function calculateTrackManSummaryMetrics(
+  rows: readonly Record<string, unknown>[],
+): TrackManSummaryMetrics {
+  const values: Record<MetricField, number[]> = {
+    "Measurement.ClubSpeed": [],
+    "Measurement.BallSpeed": [],
+    "Measurement.SpinRate": [],
+    "MaxHeight.Height": [],
+    "Measurement.Carry": [],
+    "Measurement.Total": [],
+  };
+
+  for (const row of rows) {
+    for (const field of METRIC_FIELDS) {
+      const value = safeNumber(row[field]);
+      if (value !== null) values[field].push(value);
+    }
+  }
+
+  return {
+    shotCount: rows.length,
+    avgClubSpeed: averageValidNumbers(values["Measurement.ClubSpeed"]),
+    avgBallSpeed: averageValidNumbers(values["Measurement.BallSpeed"]),
+    avgSpinRate: averageValidNumbers(values["Measurement.SpinRate"]),
+    avgMaxHeight: averageValidNumbers(values["MaxHeight.Height"]),
+    avgCarry: averageValidNumbers(values["Measurement.Carry"]),
+    avgTotal: averageValidNumbers(values["Measurement.Total"]),
+    validClubSpeedCount: values["Measurement.ClubSpeed"].length,
+    validBallSpeedCount: values["Measurement.BallSpeed"].length,
+    validSpinRateCount: values["Measurement.SpinRate"].length,
+    validMaxHeightCount: values["MaxHeight.Height"].length,
+    validCarryCount: values["Measurement.Carry"].length,
+    validTotalCount: values["Measurement.Total"].length,
+  };
+}
+
 // ── Aggregation ───────────────────────────────────────────────────────────────
 
 /**
- * Group shot rows by Club.Type + Tags and return per-group average summaries.
+ * Group shot rows by Club.Type + Tags and return per-group summaries and the
+ * input row indexes that belong to each group.
  *
  * Rows with the same club but different tags produce separate summary rows.
  * Tags are normalized (trimmed, sorted) before grouping so that whitespace
@@ -85,11 +148,11 @@ export function averageValidNumbers(values: number[]): number | null {
  *
  * @param rows - Array of rawData objects from ImportRow (or any similar
  *               Record<string, unknown> from the parsed XLSX).
- * @returns Summaries sorted alphabetically by clubName then tags, with "Unassigned" last.
+ * @returns Groups sorted alphabetically by clubName then tags, with "Unassigned" last.
  */
-export function aggregateTrackManClubSummaries(
-  rows: Record<string, unknown>[],
-): ClubSummaryInput[] {
+export function aggregateTrackManClubGroups(
+  rows: readonly Record<string, unknown>[],
+): ClubSummaryGroup[] {
   // Map from composite key `${clubName}::${sortedTags.join("|")}` → accumulated data
   const groups = new Map<
     string,
@@ -97,12 +160,12 @@ export function aggregateTrackManClubSummaries(
       originalClubName: string | null;
       clubName: string;
       tags: string[];
-      shotCount: number;
-      values: Record<MetricField, number[]>;
+      rows: Record<string, unknown>[];
+      rowIndexes: number[];
     }
   >();
 
-  for (const row of rows) {
+  for (const [rowIndex, row] of rows.entries()) {
     const rawClub = row["Club.Type"];
     const clubStr =
       rawClub !== null && rawClub !== undefined
@@ -127,64 +190,44 @@ export function aggregateTrackManClubSummaries(
         originalClubName,
         clubName,
         tags: normalizedTags,
-        shotCount: 0,
-        values: {
-          "Measurement.ClubSpeed": [],
-          "Measurement.BallSpeed": [],
-          "Measurement.SpinRate": [],
-          "MaxHeight.Height": [],
-          "Measurement.Carry": [],
-          "Measurement.Total": [],
-        },
+        rows: [],
+        rowIndexes: [],
       });
     }
 
     const group = groups.get(groupKey)!;
-    group.shotCount += 1;
-
-    for (const field of METRIC_FIELDS) {
-      const n = safeNumber(row[field]);
-      if (n !== null) {
-        group.values[field].push(n);
-      }
-    }
+    group.rows.push(row);
+    group.rowIndexes.push(rowIndex);
   }
 
-  // Build output summaries
-  const summaries: ClubSummaryInput[] = [];
-
-  for (const group of groups.values()) {
-    const v = group.values;
-    summaries.push({
+  const summaries: ClubSummaryGroup[] = Array.from(groups.values(), (group) => ({
+    summary: {
       originalClubName: group.originalClubName,
       clubName: group.clubName,
       tags: group.tags,
-      shotCount: group.shotCount,
-
-      avgClubSpeed: averageValidNumbers(v["Measurement.ClubSpeed"]),
-      avgBallSpeed: averageValidNumbers(v["Measurement.BallSpeed"]),
-      avgSpinRate: averageValidNumbers(v["Measurement.SpinRate"]),
-      avgMaxHeight: averageValidNumbers(v["MaxHeight.Height"]),
-      avgCarry: averageValidNumbers(v["Measurement.Carry"]),
-      avgTotal: averageValidNumbers(v["Measurement.Total"]),
-
-      validClubSpeedCount: v["Measurement.ClubSpeed"].length,
-      validBallSpeedCount: v["Measurement.BallSpeed"].length,
-      validSpinRateCount: v["Measurement.SpinRate"].length,
-      validMaxHeightCount: v["MaxHeight.Height"].length,
-      validCarryCount: v["Measurement.Carry"].length,
-      validTotalCount: v["Measurement.Total"].length,
-    });
-  }
+      ...calculateTrackManSummaryMetrics(group.rows),
+    },
+    rowIndexes: group.rowIndexes,
+  }));
 
   // Sort: named clubs alphabetically, then by tags; "Unassigned" always last
   summaries.sort((a, b) => {
-    if (a.clubName === "Unassigned") return 1;
-    if (b.clubName === "Unassigned") return -1;
-    const clubCmp = a.clubName.localeCompare(b.clubName);
+    if (a.summary.clubName === "Unassigned") return 1;
+    if (b.summary.clubName === "Unassigned") return -1;
+    const clubCmp = a.summary.clubName.localeCompare(b.summary.clubName);
     if (clubCmp !== 0) return clubCmp;
-    return a.tags.join("|").localeCompare(b.tags.join("|"));
+    return a.summary.tags.join("|").localeCompare(b.summary.tags.join("|"));
   });
 
   return summaries;
+}
+
+/**
+ * Group shot rows and return their summaries, preserving the original public
+ * result shape for existing callers.
+ */
+export function aggregateTrackManClubSummaries(
+  rows: readonly Record<string, unknown>[],
+): ClubSummaryInput[] {
+  return aggregateTrackManClubGroups(rows).map((group) => group.summary);
 }

@@ -267,22 +267,27 @@ model ImportBatch {
 }
 
 model ImportRow {
-  id               Int      @id @default(autoincrement())
-  importBatchId    Int
-  rowIndex         Int
+  id                 Int      @id @default(autoincrement())
+  importBatchId      Int
+  rowIndex           Int
   // Raw parsed row data — stored as-is from CSV/XLSX, no normalization
-  rawData          Json
+  rawData            Json
   // pending → reviewed | flagged
-  status           String   @default("pending")
+  status             String   @default("pending")
   // TODO: populate in validation phase when column mapping is known
-  validationErrors Json?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  validationErrors   Json?
+  // Nullable for generic imports and legacy TrackMan rows that are not safely mapped.
+  clubSummaryId      Int?
+  includedInSummary  Boolean?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  batch ImportBatch @relation(fields: [importBatchId], references: [id])
+  batch       ImportBatch       @relation(fields: [importBatchId], references: [id])
+  clubSummary ImportClubSummary? @relation(fields: [clubSummaryId], references: [id], onDelete: SetNull)
 
   @@index([importBatchId])
   @@index([status])
+  @@index([clubSummaryId])
 }
 
 // Club-level aggregation of TrackMan shot rows.
@@ -326,6 +331,7 @@ model ImportClubSummary {
   linkedToSummaryId  Int?
   linkedTo           ImportClubSummary?  @relation("ClubSummaryLink", fields: [linkedToSummaryId], references: [id], onDelete: SetNull)
   linkedBy           ImportClubSummary[] @relation("ClubSummaryLink")
+  shots              ImportRow[]
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

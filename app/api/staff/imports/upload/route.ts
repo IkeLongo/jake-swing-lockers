@@ -5,7 +5,7 @@ import {
   parseFileBuffer,
 } from "@/lib/imports/parseFile";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { aggregateTrackManClubSummaries } from "@/lib/imports/trackmanAggregation";
+import { createTrackManClubSummaries } from "@/lib/imports/trackmanClubSummaryPersistence";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 const ALLOWED_EXTENSIONS = ["csv", "xlsx", "xls"];
@@ -116,36 +116,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // we generate summaries immediately during upload — no manual button needed.
     let clubSummaryCount = 0;
     if (parserMode === "trackman-result" && rows.length > 0) {
-      const summaryInputs = aggregateTrackManClubSummaries(
-        rows as Record<string, unknown>[],
-      );
-
-      if (summaryInputs.length > 0) {
-        await db.importClubSummary.createMany({
-          data: summaryInputs.map((s) => ({
-            importBatchId: batch.id,
-            originalClubName: s.originalClubName,
-            clubName: s.clubName,
-            tags: s.tags,
-            shotCount: s.shotCount,
-            avgClubSpeed: s.avgClubSpeed,
-            avgBallSpeed: s.avgBallSpeed,
-            avgSpinRate: s.avgSpinRate,
-            avgMaxHeight: s.avgMaxHeight,
-            avgCarry: s.avgCarry,
-            avgTotal: s.avgTotal,
-            validClubSpeedCount: s.validClubSpeedCount,
-            validBallSpeedCount: s.validBallSpeedCount,
-            validSpinRateCount: s.validSpinRateCount,
-            validMaxHeightCount: s.validMaxHeightCount,
-            validCarryCount: s.validCarryCount,
-            validTotalCount: s.validTotalCount,
-            isManuallyEdited: false,
-            includeInReport: true,
-          })),
-        });
-        clubSummaryCount = summaryInputs.length;
+      const persistedRows = await db.importRow.findMany({
+        where: { importBatchId: batch.id },
+        orderBy: { rowIndex: "asc" },
+        select: { id: true, rowIndex: true },
+      });
+      if (
+        persistedRows.length !== rows.length ||
+        persistedRows.some((row, index) => row.rowIndex !== index)
+      ) {
+        throw new Error("TrackMan shot rows could not be mapped to their import order.");
       }
+
+      clubSummaryCount = await db.$transaction((tx) =>
+        createTrackManClubSummaries(
+          tx,
+          batch.id,
+          persistedRows.map((row) => ({
+            id: row.id,
+            rowIndex: row.rowIndex,
+            rawData: rows[row.rowIndex] as Record<string, unknown>,
+          })),
+        ),
+      );
     }
 
     // TrackMan batches jump straight to "reviewing" (summaries already exist).
