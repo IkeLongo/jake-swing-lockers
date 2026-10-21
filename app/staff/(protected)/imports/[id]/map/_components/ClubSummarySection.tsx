@@ -6,10 +6,7 @@ import {
   ClubReviewGrid,
   type ShotReviewSummaryMetrics,
 } from "./ClubReviewGrid";
-import {
-  EditClubSummaryModal,
-  type SerializedClubSummary,
-} from "./EditClubSummaryModal";
+import type { SerializedClubSummary } from "./clubSummaryTypes";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -23,16 +20,17 @@ interface Props {
   sessionStatus?: string;
   /** True when the session is finalized but club summaries have been edited since. */
   needsRefinalization?: boolean;
+  /** Hides the section heading/intro when the page already provides one. */
+  hideHeading?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization }: Props) {
+export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization, hideHeading = false }: Props) {
   const [summaries, setSummaries] =
     useState<SerializedClubSummary[]>(initialSummaries);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
   // IDs currently awaiting a PATCH toggle response
   const [toggling, setToggling] = useState<Set<number>>(new Set());
   const [toggleError, setToggleError] = useState<string | null>(null);
@@ -49,7 +47,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   const [dirty, setDirty] = useState(initialNeedsRefinalization ?? false);
 
   const hasSummaries = summaries.length > 0;
-  const editingSummary = summaries.find((s) => s.id === editingId) ?? null;
   const hasUnassigned = summaries.some((s) => s.clubName === "Unassigned");
 
   async function handleGenerate() {
@@ -236,9 +233,12 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
     }
   }
 
-  function handleSaved(updated: SerializedClubSummary) {
+  function handleIdentitySaved(
+    summaryId: number,
+    identity: Pick<SerializedClubSummary, "clubName" | "tags" | "isManuallyEdited">,
+  ) {
     setSummaries((prev) =>
-      prev.map((s) => (s.id === updated.id ? updated : s)),
+      prev.map((s) => (s.id === summaryId ? { ...s, ...identity } : s)),
     );
     // If the session was finalized, mark it as needing re-finalization
     if (finalized) setDirty(true);
@@ -331,7 +331,8 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   return (
     <div className="space-y-6">
       {/* ── Header row ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className={`flex-col gap-3 sm:flex-row sm:items-center sm:justify-between ${hideHeading && hasSummaries ? "hidden" : "flex"}`}>
+        {!hideHeading && (
         <div>
           <h2 className="text-lg font-bold text-foreground font-heading">
             Review clubs
@@ -344,6 +345,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                 : "No club summaries yet. Generate them from the shot rows below."}
           </p>
         </div>
+        )}
 
         {/* Generate button — generic imports only; TrackMan generates during upload */}
         {!hasSummaries && parserMode !== "trackman-result" && (
@@ -393,9 +395,9 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
             </span>{" "}
             Some shots had a blank{" "}
             <code className="rounded bg-muted px-1 text-xs">Club.Type</code>{" "}
-            column. Click{" "}
-            <span className="font-semibold">Edit</span> on the Unassigned row to
-            open the Unassigned club card and choose Edit before confirming.
+            column. Open the Unassigned club card and choose{" "}
+            <span className="font-semibold">Edit</span> to name it before
+            confirming.
           </p>
         </div>
       )}
@@ -420,7 +422,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           summaries={summaries}
           toggling={toggling}
           linking={linking}
-          onEdit={setEditingId}
+          onIdentitySaved={handleIdentitySaved}
           onToggleInclude={handleToggleInclude}
           onLinkChange={handleLinkChange}
           onPriceSaved={handlePriceSaved}
@@ -544,16 +546,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
             {generating ? "Regenerating…" : "Re-generate from raw shots"}
           </button>
         </div>
-      )}
-
-      {/* ── Edit modal ──────────────────────────────────────────────────────── */}
-      {editingSummary && (
-        <EditClubSummaryModal
-          batchId={batchId}
-          summary={editingSummary}
-          onClose={() => setEditingId(null)}
-          onSaved={handleSaved}
-        />
       )}
     </div>
   );

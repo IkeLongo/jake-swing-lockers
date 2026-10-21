@@ -5,7 +5,7 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { db } from "@/lib/db";
 import { getReviewPageRedirect } from "@/lib/imports/customer-workflow-routing";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
-import type { SerializedClubSummary } from "./_components/EditClubSummaryModal";
+import type { SerializedClubSummary } from "./_components/clubSummaryTypes";
 import SessionDetailsCard from "./_components/SessionDetailsCard";
 import SendAccessButton from "../../_components/SendAccessButton";
 import PreviewLockerButton from "../../_components/PreviewLockerButton";
@@ -117,14 +117,16 @@ export default async function ImportMapPage({
 
   const backHref = "/staff/imports";
   const backLabel = batch.demoSession ? "Back to Sessions" : "Back to Imports";
+  const isTrackManReview =
+    !batch.demoSession && batch.parserMode === "trackman-result";
 
   return (
     <div>
       {/* ── Back nav ───────────────────────────────────────────────────────── */}
-      <div className="mb-6 max-w-3xl">
+      <div className={`max-w-3xl ${isTrackManReview ? "mb-5" : "mb-6"}`}>
         <Link
           href={backHref}
-          className="mb-6 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
+          className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
         >
           <IconArrowLeft className="h-4 w-4" />
           {backLabel}
@@ -147,37 +149,52 @@ export default async function ImportMapPage({
           />
         )}
 
-        {!batch.demoSession && batch.parserMode === "trackman-result" && (
-          <div className="mb-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
-              Review fitting
-            </p>
+        {isTrackManReview ? (
+          <div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <h1 className="text-lg font-bold text-foreground font-heading">
+                Review Fitting
+              </h1>
+              <StatusBadge status={batch.status} />
+            </div>
             {(batch.trackmanPlayerName || batch.trackmanPlayerEmail) && (
-              <p className="mt-1 text-sm text-muted-foreground font-body">
-                {batch.trackmanPlayerName}
-                {batch.trackmanPlayerName && batch.trackmanPlayerEmail && " · "}
-                {batch.trackmanPlayerEmail}
-              </p>
+              <div className="mt-2">
+                {batch.trackmanPlayerName && (
+                  <p className="text-base font-semibold text-foreground font-subheading">
+                    {batch.trackmanPlayerName}
+                  </p>
+                )}
+                {batch.trackmanPlayerEmail && (
+                  <p className="text-sm text-muted-foreground font-body">
+                    {batch.trackmanPlayerEmail}
+                  </p>
+                )}
+              </div>
             )}
+            <p className="mt-2 text-sm text-muted-foreground font-body">
+              Open a card to review its metrics and shots.
+            </p>
           </div>
+        ) : (
+          <>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
+              Club Averages
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground font-body">
+              {batch.originalFileName}
+            </p>
+          </>
         )}
-
-        <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
-          {!batch.demoSession && batch.parserMode === "trackman-result"
-            ? "Is the fitting data correct?"
-            : "Club Averages"}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground font-body">
-          {batch.originalFileName}
-        </p>
       </div>
 
       {/* ── Batch summary cards ──────────────────────────────────────────────── */}
-      <div className="mb-6 flex flex-wrap gap-3">
-        <StatCard label="Total Shots" value={batch.rowCount.toLocaleString()} />
-        <StatusCard status={batch.status} />
-        <StatCard label="Clubs Found" value={summaries.length.toString()} />
-      </div>
+      {!isTrackManReview && (
+        <div className="mb-6 flex flex-wrap gap-3">
+          <StatCard label="Total Shots" value={batch.rowCount.toLocaleString()} />
+          <StatusCard status={batch.status} />
+          <StatCard label="Clubs Found" value={summaries.length.toString()} />
+        </div>
+      )}
 
       {/* ── Swing Locker Access ──────────────────────────────────────────── */}
       {batch.demoSession && (
@@ -218,6 +235,7 @@ export default async function ImportMapPage({
         sessionId={batch.demoSession?.id}
         sessionStatus={batch.demoSession?.status}
         needsRefinalization={batch.demoSession?.needsRefinalization ?? false}
+        hideHeading={isTrackManReview}
       />
     </div>
   );
@@ -262,6 +280,21 @@ const STATUS_STYLES: Record<string, { className: string; label: string }> = {
     label: "Uploaded",
   },
 };
+
+function StatusBadge({ status }: { status: string }) {
+  const style = STATUS_STYLES[status] ?? {
+    className: "border-border bg-muted text-muted-foreground",
+    label: status,
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold font-subheading ${style.className}`}
+    >
+      {style.label}
+    </span>
+  );
+}
 
 function StatusCard({ status }: { status: string }) {
   const style = STATUS_STYLES[status] ?? {

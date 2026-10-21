@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconAlertTriangle, IconArrowUpRight, IconX } from "@tabler/icons-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { useOutsideClick } from "@/hooks/use-outside-click";
-import type { SerializedClubSummary } from "./EditClubSummaryModal";
+import type { SerializedClubSummary } from "./clubSummaryTypes";
 
 interface ShotReviewShot {
   id: number;
@@ -52,7 +52,10 @@ interface ClubReviewGridProps {
   summaries: SerializedClubSummary[];
   toggling: Set<number>;
   linking: Set<number>;
-  onEdit: (summaryId: number) => void;
+  onIdentitySaved: (
+    summaryId: number,
+    identity: ClubIdentity,
+  ) => void;
   onToggleInclude: (summaryId: number, currentIncluded: boolean) => void;
   onLinkChange: (parentId: number, newChildId: number | null) => void;
   onPriceSaved: (summaryId: number, price: number | null) => void;
@@ -157,7 +160,7 @@ export function ClubReviewGrid({
   summaries,
   toggling,
   linking,
-  onEdit,
+  onIdentitySaved,
   onToggleInclude,
   onLinkChange,
   onPriceSaved,
@@ -428,11 +431,6 @@ export function ClubReviewGrid({
     };
   }, [closeSummary, expandedId]);
 
-  function handleEdit(summaryId: number) {
-    closeSummary();
-    onEdit(summaryId);
-  }
-
   return (
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -543,7 +541,9 @@ export function ClubReviewGrid({
                                 expandedSummary.linkedToSummaryId,
                             ) ?? null
                       }
-                      onEdit={() => handleEdit(expandedSummary.id)}
+                      onIdentitySaved={(identity) =>
+                        onIdentitySaved(expandedSummary.id, identity)
+                      }
                       onToggleInclude={() =>
                         onToggleInclude(
                           expandedSummary.id,
@@ -606,7 +606,7 @@ function ClubCard({
         aria-haspopup="dialog"
         aria-expanded={isExpanded}
         aria-label={`View ${summary.clubName} details, ${shotCountLabel(summary.shotCount)}`}
-        className={`group flex h-full w-full flex-col rounded-2xl border bg-card p-5 text-left text-foreground shadow-xs transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+        className={`group flex h-full w-full cursor-pointer flex-col rounded-2xl border bg-card p-5 text-left text-foreground shadow-xs transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
           isChild
             ? "border-primary/30 bg-primary/[0.03]"
             : !isIncluded
@@ -739,6 +739,229 @@ function CompactMetric({
   );
 }
 
+export type ClubIdentity = Pick<
+  SerializedClubSummary,
+  "clubName" | "tags" | "isManuallyEdited"
+>;
+
+interface ClubSummarySavedResponse {
+  success: true;
+  summary: { clubName: string; tags: string[]; isManuallyEdited: boolean };
+}
+
+function isClubSummarySavedResponse(
+  value: unknown,
+): value is ClubSummarySavedResponse {
+  if (value === null || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  if (result.success !== true) return false;
+  const summary = result.summary as Record<string, unknown> | null | undefined;
+  return (
+    summary !== null &&
+    typeof summary === "object" &&
+    typeof summary.clubName === "string" &&
+    Array.isArray(summary.tags) &&
+    summary.tags.every((tag) => typeof tag === "string") &&
+    typeof summary.isManuallyEdited === "boolean"
+  );
+}
+
+function parseTags(value: string): string[] {
+  return value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+interface ClubIdentityEditorProps {
+  batchId: number;
+  summary: SerializedClubSummary;
+  onSaved: (identity: ClubIdentity) => void;
+}
+
+function ClubIdentityEditor({
+  batchId,
+  summary,
+  onSaved,
+}: ClubIdentityEditorProps) {
+  const [editing, setEditing] = useState(false);
+  const [clubName, setClubName] = useState(summary.clubName);
+  const [tags, setTags] = useState(summary.tags.join(", "));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function startEditing() {
+    setClubName(summary.clubName);
+    setTags(summary.tags.join(", "));
+    setError(null);
+    setEditing(true);
+  }
+
+  function cancel() {
+    if (saving) return;
+    setError(null);
+    setEditing(false);
+  }
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving) return;
+    const trimmedName = clubName.trim();
+    if (trimmedName === "") {
+      setError("Club name cannot be blank.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/staff/imports/${batchId}/club-summaries/${summary.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clubName: trimmedName,
+            tags: parseTags(tags),
+          }),
+        },
+      );
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(apiErrorMessage(result) ?? "Could not save club details.");
+      }
+      if (!isClubSummarySavedResponse(result)) {
+        throw new Error("The save response was invalid. Please try again.");
+      }
+      onSaved({
+        clubName: result.summary.clubName,
+        tags: result.summary.tags,
+        isManuallyEdited: result.summary.isManuallyEdited,
+      });
+      setEditing(false);
+    } catch (saveError: unknown) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Network error — please try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form
+        onSubmit={save}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            cancel();
+          }
+        }}
+        className="mt-2 max-w-md space-y-3"
+        noValidate
+      >
+        <div>
+          <label
+            htmlFor={`club-name-${summary.id}`}
+            className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            Club name
+          </label>
+          <input
+            id={`club-name-${summary.id}`}
+            type="text"
+            value={clubName}
+            onChange={(event) => setClubName(event.target.value)}
+            disabled={saving}
+            autoFocus
+            className="mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor={`club-tags-${summary.id}`}
+            className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            Tags
+          </label>
+          <input
+            id={`club-tags-${summary.id}`}
+            type="text"
+            value={tags}
+            onChange={(event) => setTags(event.target.value)}
+            disabled={saving}
+            placeholder="Comma-separated"
+            className="mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+          />
+        </div>
+        {error && (
+          <p className="text-xs text-red-700 dark:text-red-400" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={saving}
+            className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <>
+      <div className="mt-2 flex items-start gap-3">
+        <h2
+          id={`club-review-title-${summary.id}`}
+          className="font-heading text-2xl font-bold tracking-tight sm:text-3xl"
+        >
+          {summary.clubName}
+        </h2>
+        <button
+          type="button"
+          onClick={startEditing}
+          aria-label={`Edit ${summary.clubName} name and tags`}
+          className="mt-1.5 shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:mt-2.5"
+        >
+          Edit
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        {summary.tags.length > 0 ? (
+          summary.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-md border border-border bg-muted/60 px-2 py-1 text-xs"
+            >
+              {tag}
+            </span>
+          ))
+        ) : (
+          <span>No tags</span>
+        )}
+        <span aria-hidden="true">·</span>
+        <span>{shotCountLabel(summary.shotCount)}</span>
+      </div>
+    </>
+  );
+}
+
 interface ExpandedClubDetailProps {
   batchId: number;
   parserMode?: string;
@@ -755,7 +978,7 @@ interface ExpandedClubDetailProps {
   currentChildId: number | null;
   compareOptions: SerializedClubSummary[];
   parentSummary: SerializedClubSummary | null;
-  onEdit: () => void;
+  onIdentitySaved: (identity: ClubIdentity) => void;
   onPriceSaved: (price: number | null) => void;
   onShotInclusionChange: (
     shot: ShotReviewShot,
@@ -781,7 +1004,7 @@ function ExpandedClubDetail({
   currentChildId,
   compareOptions,
   parentSummary,
-  onEdit,
+  onIdentitySaved,
   onPriceSaved,
   onShotInclusionChange,
   onToggleInclude,
@@ -812,28 +1035,11 @@ function ExpandedClubDetail({
               </span>
             )}
           </div>
-          <h2
-            id={`club-review-title-${summary.id}`}
-            className="mt-2 font-heading text-2xl font-bold tracking-tight sm:text-3xl"
-          >
-            {summary.clubName}
-          </h2>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            {summary.tags.length > 0 ? (
-              summary.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-md border border-border bg-muted/60 px-2 py-1 text-xs"
-                >
-                  {tag}
-                </span>
-              ))
-            ) : (
-              <span>No tags</span>
-            )}
-            <span aria-hidden="true">·</span>
-            <span>{shotCountLabel(summary.shotCount)}</span>
-          </div>
+          <ClubIdentityEditor
+            batchId={batchId}
+            summary={summary}
+            onSaved={onIdentitySaved}
+          />
         </div>
         <EstimatedPriceEditor
           batchId={batchId}
@@ -845,34 +1051,41 @@ function ExpandedClubDetail({
       <section aria-label="Club summary metrics" className="py-6">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <DetailMetric
+            key={`${summary.id}-carry`}
             label="Carry"
-            value={metric(summary.avgCarry)}
+            value={summary.avgCarry}
             unit="yd"
             emphasis
           />
-          <DetailMetric label="Total" value={metric(summary.avgTotal)} unit="yd" />
           <DetailMetric
+            key={`${summary.id}-total`}
+            label="Total"
+            value={summary.avgTotal}
+            unit="yd"
+          />
+          <DetailMetric
+            key={`${summary.id}-ball`}
             label="Ball speed"
-            value={metric(summary.avgBallSpeed)}
+            value={summary.avgBallSpeed}
             unit="mph"
           />
           <DetailMetric
+            key={`${summary.id}-club`}
             label="Club speed"
-            value={metric(summary.avgClubSpeed)}
+            value={summary.avgClubSpeed}
             unit="mph"
           />
           <DetailMetric
+            key={`${summary.id}-spin`}
             label="Spin"
-            value={
-              summary.avgSpinRate === null
-                ? "—"
-                : Math.round(summary.avgSpinRate).toLocaleString()
-            }
+            value={summary.avgSpinRate}
             unit="rpm"
+            decimals={0}
           />
           <DetailMetric
+            key={`${summary.id}-height`}
             label="Max height"
-            value={metric(summary.avgMaxHeight)}
+            value={summary.avgMaxHeight}
             unit="yd"
           />
         </div>
@@ -929,93 +1142,93 @@ function ExpandedClubDetail({
             Individual shot review isn&apos;t available for this earlier import.
           </p>
         ) : shotData ? (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {shotData.shots.map((shot) => (
-              <article
-                key={shot.id}
-                className={`rounded-xl border p-4 ${
-                  shot.included
-                    ? "border-border bg-card"
-                    : "border-border bg-muted/35"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-foreground">
-                      Shot {shot.rowIndex + 1}
-                    </h4>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {shot.included ? "Included in averages" : "Excluded from averages"}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
-                      shot.included
-                        ? "border-primary/25 bg-primary/10 text-primary"
-                        : "border-border bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {shot.included ? "Included" : "Excluded"}
-                  </span>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
-                  <ShotMetric label="Carry" value={shotMetric(shot.carry)} unit="yd" />
-                  <ShotMetric label="Total" value={shotMetric(shot.total)} unit="yd" />
-                  <ShotMetric
-                    label="Ball speed"
-                    value={shotMetric(shot.ballSpeed)}
-                    unit="mph"
-                  />
-                  <ShotMetric
-                    label="Club speed"
-                    value={shotMetric(shot.clubSpeed)}
-                    unit="mph"
-                  />
-                  <ShotMetric
-                    label="Spin"
-                    value={shotMetric(shot.spinRate, 0)}
-                    unit="rpm"
-                  />
-                  <ShotMetric
-                    label="Max height"
-                    value={shotMetric(shot.maxHeight)}
-                    unit="yd"
-                  />
-                </div>
-                <div className="mt-4 border-t border-border pt-3">
-                  <button
-                    type="button"
-                    disabled={savingShotIds.has(shot.id)}
-                    aria-label={`${shot.included ? "Exclude" : "Include"} Shot ${shot.rowIndex + 1}`}
-                    aria-busy={savingShotIds.has(shot.id)}
-                    onClick={() =>
-                      onShotInclusionChange(shot, !shot.included)
-                    }
-                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-wait disabled:opacity-60 ${
-                      shot.included
-                        ? "border-border bg-card text-foreground hover:bg-muted"
-                        : "border-primary bg-primary text-primary-foreground hover:bg-primary-hover"
-                    }`}
-                  >
-                    {savingShotIds.has(shot.id)
-                      ? shot.included
-                        ? "Excluding…"
-                        : "Including…"
-                      : shot.included
-                        ? "Exclude"
-                        : "Include"}
-                  </button>
-                  {shotActionErrors[shot.id] && (
-                    <p
-                      className="mt-2 text-xs text-red-700 dark:text-red-400"
-                      role="alert"
-                    >
-                      {shotActionErrors[shot.id]}
-                    </p>
-                  )}
-                </div>
-              </article>
-            ))}
+          <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-card">
+            <table className="w-full min-w-[820px] border-collapse text-left">
+              <caption className="sr-only">
+                Individual shots for {summary.clubName}
+              </caption>
+              <thead>
+                <tr className="border-b border-border bg-muted/40 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th scope="col" className="sticky left-0 z-10 bg-muted px-4 py-2.5">
+                    Shot
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right">Carry</th>
+                  <th scope="col" className="px-3 py-2.5 text-right">Total</th>
+                  <th scope="col" className="px-3 py-2.5 text-right">Ball speed</th>
+                  <th scope="col" className="px-3 py-2.5 text-right">Club speed</th>
+                  <th scope="col" className="px-3 py-2.5 text-right">Spin</th>
+                  <th scope="col" className="px-3 py-2.5 text-right">Max height</th>
+                  <th scope="col" className="px-3 py-2.5">Status</th>
+                  <th scope="col" className="px-4 py-2.5 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {shotData.shots.map((shot) => {
+                  const saving = savingShotIds.has(shot.id);
+                  return (
+                    <tr key={shot.id} className="bg-card">
+                      <th
+                        scope="row"
+                        className="sticky left-0 z-10 bg-card px-4 py-3 text-sm font-semibold tabular-nums text-foreground"
+                      >
+                        <span className={shot.included ? undefined : "opacity-60"}>
+                          {shot.rowIndex + 1}
+                        </span>
+                      </th>
+                      <ShotCell value={shotMetric(shot.carry)} unit="yd" muted={!shot.included} />
+                      <ShotCell value={shotMetric(shot.total)} unit="yd" muted={!shot.included} />
+                      <ShotCell value={shotMetric(shot.ballSpeed)} unit="mph" muted={!shot.included} />
+                      <ShotCell value={shotMetric(shot.clubSpeed)} unit="mph" muted={!shot.included} />
+                      <ShotCell value={shotMetric(shot.spinRate, 0)} unit="rpm" muted={!shot.included} />
+                      <ShotCell value={shotMetric(shot.maxHeight)} unit="yd" muted={!shot.included} />
+                      <td className="px-3 py-3">
+                        <span
+                          className={`inline-block rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                            shot.included
+                              ? "border-primary/25 bg-primary/10 text-primary"
+                              : "border-border bg-muted text-muted-foreground opacity-60"
+                          }`}
+                        >
+                          {shot.included ? "Included" : "Excluded"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          disabled={saving}
+                          aria-label={`${shot.included ? "Exclude" : "Include"} Shot ${shot.rowIndex + 1}`}
+                          aria-busy={saving}
+                          onClick={() =>
+                            onShotInclusionChange(shot, !shot.included)
+                          }
+                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-wait disabled:opacity-60 ${
+                            shot.included
+                              ? "border-border bg-card text-foreground hover:bg-muted"
+                              : "border-primary bg-primary text-primary-foreground hover:bg-primary-hover"
+                          }`}
+                        >
+                          {saving
+                            ? shot.included
+                              ? "Excluding…"
+                              : "Including…"
+                            : shot.included
+                              ? "Exclude"
+                              : "Include"}
+                        </button>
+                        {shotActionErrors[shot.id] && (
+                          <p
+                            className="mt-1.5 max-w-[14rem] whitespace-normal text-left text-xs text-red-700 dark:text-red-400"
+                            role="alert"
+                          >
+                            {shotActionErrors[shot.id]}
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="py-6 text-sm text-muted-foreground" role="status">
@@ -1115,13 +1328,6 @@ function ExpandedClubDetail({
         </div>
 
         <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            Edit club details &amp; price
-          </button>
           <span className="self-center px-2 text-xs text-muted-foreground">
             {summary.isManuallyEdited ? "Manually edited" : "TrackMan summary"}
           </span>
@@ -1296,21 +1502,92 @@ function DetailMetric({
   label,
   value,
   unit,
+  decimals = 1,
   emphasis = false,
 }: {
   label: string;
-  value: string;
+  value: number | null;
   unit: string;
+  decimals?: number;
   emphasis?: boolean;
 }) {
+  const reduceMotion = useReducedMotion();
+  // Non-null only while a number tween is running; otherwise the server value renders.
+  const [tweened, setTweened] = useState<number | null>(null);
+  const previousRef = useRef(value);
+  const shownRef = useRef(value);
+  const pulseRef = useRef<HTMLSpanElement>(null);
+  const valueRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const previous = previousRef.current;
+    if (previous === value) return;
+    previousRef.current = value;
+    const from = shownRef.current;
+
+    if (reduceMotion) {
+      shownRef.current = value;
+      return;
+    }
+
+    const controls: Array<{ stop: () => void }> = [];
+    if (pulseRef.current) {
+      controls.push(
+        animate(pulseRef.current, { opacity: [0, 1, 0] }, {
+          duration: 0.9,
+          ease: "easeInOut",
+        }),
+      );
+    }
+
+    if (from !== null && value !== null) {
+      controls.push(
+        animate(from, value, {
+          duration: 0.7,
+          ease: "easeOut",
+          onUpdate: (latest) => {
+            shownRef.current = latest;
+            setTweened(latest);
+          },
+          onComplete: () => {
+            shownRef.current = value;
+            setTweened(null);
+          },
+        }),
+      );
+    } else {
+      shownRef.current = value;
+      if (valueRef.current) {
+        controls.push(
+          animate(valueRef.current, { opacity: [0.2, 1] }, { duration: 0.5 }),
+        );
+      }
+    }
+
+    return () => controls.forEach((control) => control.stop());
+  }, [value, reduceMotion]);
+
+  const displayed = reduceMotion ? value : (tweened ?? value);
+  const text =
+    displayed === null
+      ? "—"
+      : decimals === 0
+        ? Math.round(displayed).toLocaleString()
+        : displayed.toFixed(decimals);
+
   return (
     <div
-      className={`min-w-0 rounded-xl border p-3 ${
+      className={`relative min-w-0 rounded-xl border p-3 ${
         emphasis
           ? "border-primary/25 bg-primary/[0.04]"
           : "border-border bg-muted/30"
       }`}
     >
+      <span
+        ref={pulseRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute -inset-px rounded-xl border-2 border-accent opacity-0"
+      />
       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
@@ -1319,8 +1596,8 @@ function DetailMetric({
           emphasis ? "text-2xl" : "text-lg"
         }`}
       >
-        {value}
-        {value !== "—" && (
+        <span ref={valueRef}>{text}</span>
+        {text !== "—" && (
           <span className="ml-1 text-xs font-medium text-muted-foreground">
             {unit}
           </span>
@@ -1330,28 +1607,25 @@ function DetailMetric({
   );
 }
 
-function ShotMetric({
-  label,
+function ShotCell({
   value,
   unit,
+  muted = false,
 }: {
-  label: string;
   value: string;
   unit: string;
+  muted?: boolean;
 }) {
   return (
-    <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-foreground">
+    <td className="whitespace-nowrap px-3 py-3 text-right text-sm font-semibold tabular-nums text-foreground">
+      <span className={muted ? "opacity-60" : undefined}>
         {value}
         {value !== "—" && (
           <span className="ml-1 text-xs font-normal text-muted-foreground">
             {unit}
           </span>
         )}
-      </p>
-    </div>
+      </span>
+    </td>
   );
 }
