@@ -1,0 +1,1125 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { IconAlertTriangle, IconArrowUpRight, IconX } from "@tabler/icons-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useOutsideClick } from "@/hooks/use-outside-click";
+import type { SerializedClubSummary } from "./EditClubSummaryModal";
+
+interface ShotReviewShot {
+  id: number;
+  rowIndex: number;
+  included: boolean;
+  clubSpeed: string | null;
+  ballSpeed: string | null;
+  spinRate: string | null;
+  maxHeight: string | null;
+  carry: string | null;
+  total: string | null;
+}
+
+interface ShotReviewResponse {
+  shots: ShotReviewShot[];
+}
+
+interface ClubReviewGridProps {
+  batchId: number;
+  parserMode?: string;
+  summaries: SerializedClubSummary[];
+  toggling: Set<number>;
+  linking: Set<number>;
+  onEdit: (summaryId: number) => void;
+  onToggleInclude: (summaryId: number, currentIncluded: boolean) => void;
+  onLinkChange: (parentId: number, newChildId: number | null) => void;
+  onPriceSaved: (summaryId: number, price: number | null) => void;
+}
+
+const sharedTransition = { type: "spring", stiffness: 260, damping: 28 } as const;
+
+function metric(value: number | null, decimals = 1): string {
+  return value === null ? "—" : value.toFixed(decimals);
+}
+
+function shotMetric(value: string | null, decimals = 1): string {
+  if (value === null || value.trim() === "") return "—";
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return "—";
+  return decimals === 0
+    ? Math.round(numericValue).toLocaleString()
+    : numericValue.toFixed(decimals);
+}
+
+function shotCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "shot" : "shots"}`;
+}
+
+export function ClubReviewGrid({
+  batchId,
+  parserMode,
+  summaries,
+  toggling,
+  linking,
+  onEdit,
+  onToggleInclude,
+  onLinkChange,
+  onPriceSaved,
+}: ClubReviewGridProps) {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [shotData, setShotData] = useState<Record<number, ShotReviewResponse>>({});
+  const [shotErrors, setShotErrors] = useState<Record<number, string>>({});
+  const [loadingIds, setLoadingIds] = useState<Set<number>>(new Set());
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const requestsRef = useRef(new Map<number, AbortController>());
+
+  const expandedSummary =
+    summaries.find((summary) => summary.id === expandedId) ?? null;
+  const parentIds = new Set(
+    summaries
+      .filter((summary) => summary.linkedToSummaryId !== null)
+      .map((summary) => summary.linkedToSummaryId!),
+  );
+
+  const closeSummary = useCallback(() => {
+    setExpandedId(null);
+  }, []);
+
+  useOutsideClick(panelRef, closeSummary);
+
+  const loadShots = useCallback(
+    (summaryId: number, force = false) => {
+      if (parserMode !== "trackman-result") return;
+      if (!force && (shotData[summaryId] || loadingIds.has(summaryId))) return;
+
+      requestsRef.current.get(summaryId)?.abort();
+      const controller = new AbortController();
+      requestsRef.current.set(summaryId, controller);
+      setLoadingIds((current) => new Set(current).add(summaryId));
+      setShotErrors((current) => {
+        const next = { ...current };
+        delete next[summaryId];
+        return next;
+      });
+
+      void fetch(
+        `/api/staff/imports/${batchId}/club-summaries/${summaryId}/shots`,
+        { signal: controller.signal },
+      )
+        .then(async (response) => {
+          const result = (await response.json()) as
+            | ShotReviewResponse
+            | { error?: string };
+          if (!response.ok) {
+            throw new Error(
+              "error" in result && result.error
+                ? result.error
+                : "Could not load shots for this club.",
+            );
+          }
+          if (!("shots" in result) || !Array.isArray(result.shots)) {
+            throw new Error("The shot response was incomplete. Please try again.");
+          }
+          setShotData((current) => ({ ...current, [summaryId]: result }));
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setShotErrors((current) => ({
+            ...current,
+            [summaryId]:
+              error instanceof Error
+                ? error.message
+                : "Could not load shots for this club.",
+          }));
+        })
+        .finally(() => {
+          if (requestsRef.current.get(summaryId) === controller) {
+            requestsRef.current.delete(summaryId);
+            setLoadingIds((current) => {
+              const next = new Set(current);
+              next.delete(summaryId);
+              return next;
+            });
+          }
+        });
+    },
+    [batchId, loadingIds, parserMode, shotData],
+  );
+
+  function openSummary(summaryId: number, trigger: HTMLElement) {
+    returnFocusRef.current = trigger;
+    setExpandedId(summaryId);
+    loadShots(summaryId);
+  }
+
+  useEffect(
+    () => () => {
+      requestsRef.current.forEach((controller) => controller.abort());
+      requestsRef.current.clear();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (expandedId === null) return;
+
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyPaddingRight = document.body.style.paddingRight;
+    const viewportScrollbarWidth =
+      window.innerWidth - document.documentElement.clientWidth;
+    if (viewportScrollbarWidth > 0) {
+      const bodyPaddingRight = Number.parseFloat(
+        window.getComputedStyle(document.body).paddingRight,
+      );
+      document.body.style.paddingRight = `${
+        bodyPaddingRight + viewportScrollbarWidth
+      }px`;
+    }
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+
+    const scrollableAncestors: Array<{
+      element: HTMLElement;
+      overflowY: string;
+      paddingRight: string;
+    }> = [];
+    let ancestor = returnFocusRef.current?.parentElement ?? null;
+    while (ancestor && ancestor !== document.body) {
+      const overflowY = window.getComputedStyle(ancestor).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
+        const scrollbarWidth = ancestor.offsetWidth - ancestor.clientWidth;
+        const paddingRight = ancestor.style.paddingRight;
+        scrollableAncestors.push({
+          element: ancestor,
+          overflowY: ancestor.style.overflowY,
+          paddingRight,
+        });
+        if (scrollbarWidth > 0) {
+          const currentPadding = Number.parseFloat(
+            window.getComputedStyle(ancestor).paddingRight,
+          );
+          ancestor.style.paddingRight = `${currentPadding + scrollbarWidth}px`;
+        }
+        ancestor.style.overflowY = "hidden";
+      }
+      ancestor = ancestor.parentElement;
+    }
+
+    const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSummary();
+        return;
+      }
+      if (event.key !== "Tab" || !panelRef.current) return;
+
+      const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", handleKeyDown);
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+      document.body.style.paddingRight = previousBodyPaddingRight;
+      for (const item of scrollableAncestors) {
+        item.element.style.overflowY = item.overflowY;
+        item.element.style.paddingRight = item.paddingRight;
+      }
+      if (expandedId !== null) {
+        window.requestAnimationFrame(() => {
+          if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+        });
+      }
+    };
+  }, [closeSummary, expandedId]);
+
+  function handleEdit(summaryId: number) {
+    closeSummary();
+    onEdit(summaryId);
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {summaries.map((summary) => {
+          const currentChild =
+            summaries.find((candidate) => candidate.linkedToSummaryId === summary.id) ??
+            null;
+          const compareOptions = summaries.filter(
+            (candidate) =>
+              candidate.id !== summary.id &&
+              (candidate.linkedToSummaryId === null ||
+                candidate.linkedToSummaryId === summary.id) &&
+              !parentIds.has(candidate.id),
+          );
+          const parentSummary =
+            summary.linkedToSummaryId === null
+              ? null
+              : summaries.find(
+                  (candidate) => candidate.id === summary.linkedToSummaryId,
+                ) ?? null;
+
+          return (
+            <ClubCard
+              key={summary.id}
+              summary={summary}
+              isExpanded={expandedId === summary.id}
+              isParent={parentIds.has(summary.id)}
+              currentChildId={currentChild?.id ?? null}
+              compareOptions={compareOptions}
+              parentSummary={parentSummary}
+              onOpen={openSummary}
+            />
+          );
+        })}
+      </div>
+
+      {typeof document !== "undefined" &&
+        createPortal(
+          <AnimatePresence>
+            {expandedSummary && (
+              <motion.div
+                key={`backdrop-${expandedSummary.id}`}
+                className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-black/40 p-3 backdrop-blur-[2px] sm:p-6"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18 }}
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) closeSummary();
+                }}
+                onTouchStart={(event) => {
+                  if (event.target === event.currentTarget) closeSummary();
+                }}
+              >
+                <motion.div
+                  ref={panelRef}
+                  layoutId={`club-review-card-${expandedSummary.id}`}
+                  transition={sharedTransition}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby={`club-review-title-${expandedSummary.id}`}
+                  tabIndex={-1}
+                  className="relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-2xl outline-none sm:max-h-[calc(100dvh-3rem)]"
+                >
+                  <button
+                    ref={closeButtonRef}
+                    type="button"
+                    onClick={closeSummary}
+                    aria-label="Close club details"
+                    className="absolute right-3 top-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:right-5 sm:top-5"
+                  >
+                    <IconX className="h-5 w-5" />
+                  </button>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                    <ExpandedClubDetail
+                      batchId={batchId}
+                      parserMode={parserMode}
+                      summary={expandedSummary}
+                      shotData={shotData[expandedSummary.id]}
+                      loading={loadingIds.has(expandedSummary.id)}
+                      error={shotErrors[expandedSummary.id] ?? null}
+                      onRetry={() => loadShots(expandedSummary.id, true)}
+                      isParent={parentIds.has(expandedSummary.id)}
+                      isToggling={toggling.has(expandedSummary.id)}
+                      isLinking={linking.has(expandedSummary.id)}
+                      currentChildId={
+                        summaries.find(
+                          (candidate) =>
+                            candidate.linkedToSummaryId === expandedSummary.id,
+                        )?.id ?? null
+                      }
+                      compareOptions={summaries.filter(
+                        (candidate) =>
+                          candidate.id !== expandedSummary.id &&
+                          (candidate.linkedToSummaryId === null ||
+                            candidate.linkedToSummaryId === expandedSummary.id) &&
+                          !parentIds.has(candidate.id),
+                      )}
+                      parentSummary={
+                        expandedSummary.linkedToSummaryId === null
+                          ? null
+                          : summaries.find(
+                              (candidate) =>
+                                candidate.id ===
+                                expandedSummary.linkedToSummaryId,
+                            ) ?? null
+                      }
+                      onEdit={() => handleEdit(expandedSummary.id)}
+                      onToggleInclude={() =>
+                        onToggleInclude(
+                          expandedSummary.id,
+                          expandedSummary.includeInReport !== false,
+                        )
+                      }
+                      onLinkChange={(newChildId) =>
+                        onLinkChange(expandedSummary.id, newChildId)
+                      }
+                      onPriceSaved={(price) =>
+                        onPriceSaved(expandedSummary.id, price)
+                      }
+                    />
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+interface ClubCardProps {
+  summary: SerializedClubSummary;
+  isExpanded: boolean;
+  isParent: boolean;
+  currentChildId: number | null;
+  compareOptions: SerializedClubSummary[];
+  parentSummary: SerializedClubSummary | null;
+  onOpen: (summaryId: number, trigger: HTMLElement) => void;
+}
+
+function ClubCard({
+  summary,
+  isExpanded,
+  isParent,
+  currentChildId,
+  compareOptions,
+  parentSummary,
+  onOpen,
+}: ClubCardProps) {
+  const isIncluded = summary.includeInReport !== false;
+  const isChild = summary.linkedToSummaryId !== null;
+
+  return (
+    <motion.button
+        layoutId={`club-review-card-${summary.id}`}
+        transition={sharedTransition}
+        type="button"
+        onClick={(event) => onOpen(summary.id, event.currentTarget)}
+        aria-haspopup="dialog"
+        aria-expanded={isExpanded}
+        aria-label={`View ${summary.clubName} details, ${shotCountLabel(summary.shotCount)}`}
+        className={`group flex h-full w-full flex-col rounded-2xl border bg-card p-5 text-left text-foreground shadow-xs transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+          isChild
+            ? "border-primary/30 bg-primary/[0.03]"
+            : !isIncluded
+              ? "border-border opacity-65"
+              : "border-border hover:border-primary/30"
+        }`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          {isChild && (
+            <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              Linked comparison
+            </span>
+          )}
+          {!isIncluded && !isChild && (
+            <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Excluded
+            </span>
+          )}
+          {summary.clubName === "Unassigned" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+              <IconAlertTriangle className="h-3 w-3" />
+              Unassigned
+            </span>
+          )}
+        </div>
+
+        <h3 className="mt-2 line-clamp-1 pr-1 font-heading text-lg font-bold tracking-tight">
+          {summary.clubName}
+        </h3>
+        {summary.tags.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {summary.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md border border-border bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">No tags</p>
+        )}
+
+        <div className="mt-5 border-t border-border pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Avg carry
+          </p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-heading text-4xl font-bold tracking-tight text-foreground">
+              {metric(summary.avgCarry)}
+            </span>
+            <span className="text-sm font-medium text-muted-foreground">yd</span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Avg total{" "}
+            <span className="font-semibold text-foreground">
+              {metric(summary.avgTotal)} yd
+            </span>
+          </p>
+        </div>
+
+        <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-4">
+          <CompactMetric
+            label="Ball speed"
+            value={metric(summary.avgBallSpeed)}
+            unit="mph"
+          />
+          <CompactMetric
+            label="Club speed"
+            value={metric(summary.avgClubSpeed)}
+            unit="mph"
+          />
+          <CompactMetric
+            label="Spin"
+            value={
+              summary.avgSpinRate === null
+                ? "—"
+                : Math.round(summary.avgSpinRate).toLocaleString()
+            }
+            unit="rpm"
+          />
+        </div>
+
+        <div className="mt-auto flex items-center justify-between gap-2 pt-5 text-xs">
+          <span className="text-muted-foreground">{shotCountLabel(summary.shotCount)}</span>
+          {parentSummary ? (
+            <span className="max-w-[60%] truncate text-right text-muted-foreground">
+              Compared to {parentSummary.clubName}
+            </span>
+          ) : isParent && currentChildId !== null ? (
+            <span className="max-w-[60%] truncate text-right text-muted-foreground">
+              Compared to{" "}
+              {compareOptions.find((option) => option.id === currentChildId)
+                ?.clubName ?? "linked club"}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 font-semibold text-primary">
+              View details <IconArrowUpRight className="h-3.5 w-3.5" />
+            </span>
+          )}
+        </div>
+      </motion.button>
+  );
+}
+
+function CompactMetric({
+  label,
+  value,
+  unit,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold tabular-nums text-foreground">
+        {value}
+        {value !== "—" && (
+          <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+            {unit}
+          </span>
+        )}
+      </p>
+    </div>
+  );
+}
+
+interface ExpandedClubDetailProps {
+  batchId: number;
+  parserMode?: string;
+  summary: SerializedClubSummary;
+  shotData?: ShotReviewResponse;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  isParent: boolean;
+  isToggling: boolean;
+  isLinking: boolean;
+  currentChildId: number | null;
+  compareOptions: SerializedClubSummary[];
+  parentSummary: SerializedClubSummary | null;
+  onEdit: () => void;
+  onPriceSaved: (price: number | null) => void;
+  onToggleInclude: () => void;
+  onLinkChange: (newChildId: number | null) => void;
+}
+
+function ExpandedClubDetail({
+  batchId,
+  parserMode,
+  summary,
+  shotData,
+  loading,
+  error,
+  onRetry,
+  isParent,
+  isToggling,
+  isLinking,
+  currentChildId,
+  compareOptions,
+  parentSummary,
+  onEdit,
+  onPriceSaved,
+  onToggleInclude,
+  onLinkChange,
+}: ExpandedClubDetailProps) {
+  const isChild = summary.linkedToSummaryId !== null;
+  const isIncluded = summary.includeInReport !== false;
+
+  return (
+    <div className="p-5 sm:p-8">
+      <div className="flex flex-col gap-4 border-b border-border pb-6 pr-10 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {summary.clubName === "Unassigned" && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent">
+                <IconAlertTriangle className="h-3.5 w-3.5" />
+                Unassigned
+              </span>
+            )}
+            {isChild && (
+              <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                Linked comparison
+              </span>
+            )}
+            {!isIncluded && !isChild && (
+              <span className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+                Excluded from report
+              </span>
+            )}
+          </div>
+          <h2
+            id={`club-review-title-${summary.id}`}
+            className="mt-2 font-heading text-2xl font-bold tracking-tight sm:text-3xl"
+          >
+            {summary.clubName}
+          </h2>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            {summary.tags.length > 0 ? (
+              summary.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-md border border-border bg-muted/60 px-2 py-1 text-xs"
+                >
+                  {tag}
+                </span>
+              ))
+            ) : (
+              <span>No tags</span>
+            )}
+            <span aria-hidden="true">·</span>
+            <span>{shotCountLabel(summary.shotCount)}</span>
+          </div>
+        </div>
+        <EstimatedPriceEditor
+          batchId={batchId}
+          summary={summary}
+          onSaved={onPriceSaved}
+        />
+      </div>
+
+      <section aria-label="Club summary metrics" className="py-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <DetailMetric
+            label="Carry"
+            value={metric(summary.avgCarry)}
+            unit="yd"
+            emphasis
+          />
+          <DetailMetric label="Total" value={metric(summary.avgTotal)} unit="yd" />
+          <DetailMetric
+            label="Ball speed"
+            value={metric(summary.avgBallSpeed)}
+            unit="mph"
+          />
+          <DetailMetric
+            label="Club speed"
+            value={metric(summary.avgClubSpeed)}
+            unit="mph"
+          />
+          <DetailMetric
+            label="Spin"
+            value={
+              summary.avgSpinRate === null
+                ? "—"
+                : Math.round(summary.avgSpinRate).toLocaleString()
+            }
+            unit="rpm"
+          />
+          <DetailMetric
+            label="Max height"
+            value={metric(summary.avgMaxHeight)}
+            unit="yd"
+          />
+        </div>
+      </section>
+
+      <section aria-labelledby={`shot-review-heading-${summary.id}`}>
+        <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border pb-3">
+          <div>
+            <h3
+              id={`shot-review-heading-${summary.id}`}
+              className="font-subheading text-base font-semibold text-foreground"
+            >
+              Individual shots
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Shot numbers follow the order of rows in the imported file.
+            </p>
+          </div>
+          {shotData && (
+            <span className="text-xs text-muted-foreground">
+              {shotCountLabel(shotData.shots.length)} loaded
+            </span>
+          )}
+        </div>
+
+        {parserMode !== "trackman-result" ? (
+          <p className="py-6 text-sm text-muted-foreground">
+            Individual shot details are available for TrackMan imports.
+          </p>
+        ) : loading ? (
+          <div
+            className="flex items-center gap-3 py-8 text-sm text-muted-foreground"
+            role="status"
+          >
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />
+            Loading individual shots…
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-start gap-3 py-6">
+            <p className="text-sm text-muted-foreground" role="alert">
+              {error}
+            </p>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              Try again
+            </button>
+          </div>
+        ) : shotData?.shots.length === 0 ? (
+          <p className="py-6 text-sm text-muted-foreground">
+            Individual shot review isn&apos;t available for this earlier import.
+          </p>
+        ) : shotData ? (
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {shotData.shots.map((shot) => (
+              <article
+                key={shot.id}
+                className="rounded-xl border border-border bg-card p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-foreground">
+                      Shot {shot.rowIndex + 1}
+                    </h4>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {shot.included ? "Included in averages" : "Excluded from averages"}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                      shot.included
+                        ? "border-primary/25 bg-primary/10 text-primary"
+                        : "border-border bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {shot.included ? "Included" : "Excluded"}
+                  </span>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
+                  <ShotMetric label="Carry" value={shotMetric(shot.carry)} unit="yd" />
+                  <ShotMetric label="Total" value={shotMetric(shot.total)} unit="yd" />
+                  <ShotMetric
+                    label="Ball speed"
+                    value={shotMetric(shot.ballSpeed)}
+                    unit="mph"
+                  />
+                  <ShotMetric
+                    label="Club speed"
+                    value={shotMetric(shot.clubSpeed)}
+                    unit="mph"
+                  />
+                  <ShotMetric
+                    label="Spin"
+                    value={shotMetric(shot.spinRate, 0)}
+                    unit="rpm"
+                  />
+                  <ShotMetric
+                    label="Max height"
+                    value={shotMetric(shot.maxHeight)}
+                    unit="yd"
+                  />
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="py-6 text-sm text-muted-foreground" role="status">
+            Preparing shot details…
+          </div>
+        )}
+      </section>
+
+      <div className="mt-7 border-t border-border pt-5">
+        <h3 className="font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Club actions
+        </h3>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-border bg-muted/30 p-4">
+            <p className="text-sm font-medium text-foreground">Report inclusion</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isChild
+                ? "Linked comparison clubs are excluded from the standalone report."
+                : isIncluded
+                  ? "This club will be included when the fitting is finalized."
+                  : "This club is currently excluded from the report."}
+            </p>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!isChild && isIncluded}
+              aria-label={`Include ${summary.clubName} in report`}
+              disabled={isToggling || isChild}
+              onClick={onToggleInclude}
+              className={`relative mt-3 inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-55 ${
+                !isChild && isIncluded ? "bg-primary" : "bg-muted-foreground/35"
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                  !isChild && isIncluded ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
+            {isToggling && (
+              <span className="ml-2 text-xs text-muted-foreground" role="status">
+                Saving…
+              </span>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border bg-muted/30 p-4">
+            <label
+              htmlFor={`compare-to-${summary.id}`}
+              className="text-sm font-medium text-foreground"
+            >
+              Compare to
+            </label>
+            {isChild ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Linked to {parentSummary?.clubName ?? "another club"}
+                {parentSummary?.tags.length
+                  ? ` · ${parentSummary.tags.join(", ")}`
+                  : ""}
+              </p>
+            ) : isParent ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select one club to link as its comparison.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Link another club as a comparison for this one.
+              </p>
+            )}
+            {!isChild && (
+              <select
+                id={`compare-to-${summary.id}`}
+                disabled={isLinking}
+                value={currentChildId ?? ""}
+                onChange={(event) =>
+                  onLinkChange(
+                    event.target.value === "" ? null : Number(event.target.value),
+                  )
+                }
+                className="mt-3 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+              >
+                <option value="">None</option>
+                {compareOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.clubName}
+                    {option.tags.length > 0 ? ` — ${option.tags.join(", ")}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            {isLinking && (
+              <p className="mt-2 text-xs text-muted-foreground" role="status">
+                Updating comparison…
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            Edit club details &amp; price
+          </button>
+          <span className="self-center px-2 text-xs text-muted-foreground">
+            {summary.isManuallyEdited ? "Manually edited" : "TrackMan summary"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EstimatedPriceEditor({
+  batchId,
+  summary,
+  onSaved,
+}: {
+  batchId: number;
+  summary: SerializedClubSummary;
+  onSaved: (price: number | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(
+    summary.estimatedPrice === null ? "" : String(summary.estimatedPrice),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function cancelEdit() {
+    setValue(
+      summary.estimatedPrice === null ? "" : String(summary.estimatedPrice),
+    );
+    setError(null);
+    setEditing(false);
+  }
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = value.trim();
+    const price = trimmed === "" ? null : Number(trimmed);
+    if (price !== null && (!Number.isFinite(price) || price < 0)) {
+      setError("Enter a valid non-negative price or leave it blank.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/staff/imports/${batchId}/club-summaries/${summary.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ estimatedPrice: price }),
+        },
+      );
+      const result = (await response.json()) as {
+        success?: boolean;
+        summary?: { estimatedPrice?: unknown };
+        error?: string;
+      };
+      if (!response.ok || !result.success || !result.summary) {
+        throw new Error(result.error ?? "Could not save the estimated price.");
+      }
+      const savedPrice =
+        result.summary.estimatedPrice === null ||
+        result.summary.estimatedPrice === undefined
+          ? null
+          : Number(result.summary.estimatedPrice);
+      if (savedPrice !== null && !Number.isFinite(savedPrice)) {
+        throw new Error("The saved price response was invalid. Please reload.");
+      }
+      setValue(savedPrice === null ? "" : String(savedPrice));
+      setEditing(false);
+      onSaved(savedPrice);
+    } catch (saveError: unknown) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Network error — please try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="shrink-0 rounded-xl border border-border bg-muted/40 px-4 py-3 sm:min-w-48">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Estimated price
+      </p>
+      {editing ? (
+        <form
+          className="mt-2"
+          onSubmit={save}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !saving) {
+              event.preventDefault();
+              event.stopPropagation();
+              cancelEdit();
+            }
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-sm text-muted-foreground">
+              $
+            </span>
+            <input
+              ref={inputRef}
+              autoFocus
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              aria-label={`Estimated price for ${summary.clubName}`}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              disabled={saving}
+              className="min-w-0 flex-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-sm tabular-nums text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+            />
+          </div>
+          {error && (
+            <p className="mt-2 max-w-56 text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-60"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              disabled={saving}
+              className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="mt-1 flex items-center gap-2">
+          <p className="font-heading text-lg font-semibold tabular-nums text-foreground">
+            {summary.estimatedPrice === null
+              ? "—"
+              : `$${summary.estimatedPrice.toFixed(2)}`}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setValue(
+                summary.estimatedPrice === null
+                  ? ""
+                  : String(summary.estimatedPrice),
+              );
+              setError(null);
+              setEditing(true);
+            }}
+            className="rounded-md px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            Edit price
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailMetric({
+  label,
+  value,
+  unit,
+  emphasis = false,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  emphasis?: boolean;
+}) {
+  return (
+    <div
+      className={`min-w-0 rounded-xl border p-3 ${
+        emphasis
+          ? "border-primary/25 bg-primary/[0.04]"
+          : "border-border bg-muted/30"
+      }`}
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p
+        className={`mt-1 truncate font-heading font-bold tabular-nums text-foreground ${
+          emphasis ? "text-2xl" : "text-lg"
+        }`}
+      >
+        {value}
+        {value !== "—" && (
+          <span className="ml-1 text-xs font-medium text-muted-foreground">
+            {unit}
+          </span>
+        )}
+      </p>
+    </div>
+  );
+}
+
+function ShotMetric({
+  label,
+  value,
+  unit,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-foreground">
+        {value}
+        {value !== "—" && (
+          <span className="ml-1 text-xs font-normal text-muted-foreground">
+            {unit}
+          </span>
+        )}
+      </p>
+    </div>
+  );
+}

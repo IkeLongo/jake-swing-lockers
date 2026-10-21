@@ -1,40 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable,
-  arrayMove,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { IconGripVertical, IconAlertTriangle, IconCheck } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
+import { ClubReviewGrid } from "./ClubReviewGrid";
 import {
   EditClubSummaryModal,
   type SerializedClubSummary,
 } from "./EditClubSummaryModal";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmt(v: number | null, decimals = 1): string {
-  if (v === null) return "—";
-  return v.toFixed(decimals);
-}
-
-function fmtInt(v: number | null): string {
-  if (v === null) return "—";
-  return Math.round(v).toLocaleString();
-}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -76,50 +48,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   const hasSummaries = summaries.length > 0;
   const editingSummary = summaries.find((s) => s.id === editingId) ?? null;
   const hasUnassigned = summaries.some((s) => s.clubName === "Unassigned");
-  // Set of summary IDs that already have a comparison child linked to them
-  const parentIds = new Set(
-    summaries
-      .filter((s) => s.linkedToSummaryId !== null)
-      .map((s) => s.linkedToSummaryId!),
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    setSummaries((prev) => {
-      // IDs of rows that are children (linked to a parent).
-      // They will be pulled into their parent's block and skipped in the main pass.
-      const childIds = new Set(
-        prev.filter((s) => s.linkedToSummaryId !== null).map((s) => s.id),
-      );
-
-      // Build blocks in current row order.
-      // Each block is either [parentRow, childRow] or [standaloneRow].
-      // Children are always appended after their parent so the parent-first
-      // order is enforced on every reorder.
-      const blocks: (typeof prev)[] = [];
-      for (const row of prev) {
-        if (childIds.has(row.id)) continue; // already captured inside parent's block
-        const child = prev.find((c) => c.linkedToSummaryId === row.id) ?? null;
-        blocks.push(child ? [row, child] : [row]);
-      }
-
-      // Find which block contains the dragged row and which contains the drop target.
-      const activeIdx = blocks.findIndex((b) => b.some((r) => r.id === active.id));
-      const overIdx = blocks.findIndex((b) => b.some((r) => r.id === over.id));
-
-      if (activeIdx === -1 || overIdx === -1 || activeIdx === overIdx) return prev;
-
-      // Move the whole block to the new position, then flatten back to a flat row list.
-      return arrayMove(blocks, activeIdx, overIdx).flat();
-    });
-  }
 
   async function handleGenerate() {
     setGenerating(true);
@@ -313,6 +241,15 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
     if (finalized) setDirty(true);
   }
 
+  function handlePriceSaved(summaryId: number, estimatedPrice: number | null) {
+    setSummaries((prev) =>
+      prev.map((summary) =>
+        summary.id === summaryId ? { ...summary, estimatedPrice } : summary,
+      ),
+    );
+    if (finalized) setDirty(true);
+  }
+
   async function handleToggleInclude(id: number, currentIncluded: boolean) {
     // Guard: linked children cannot be toggled — their includeInReport is
     // controlled by the server when linkedToSummaryId is set/cleared.
@@ -382,11 +319,11 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-bold text-foreground font-heading">
-            Club Averages
+            Review clubs
           </h2>
           <p className="mt-0.5 text-sm text-muted-foreground font-body">
             {hasSummaries
-              ? `${summaries.length} club${summaries.length !== 1 ? "s" : ""} detected from shot data.`
+              ? `${summaries.length} club${summaries.length !== 1 ? "s" : ""} detected. Open a card to review its metrics and shots.`
               : parserMode === "trackman-result"
                 ? "Club summaries were not generated during upload."
                 : "No club summaries yet. Generate them from the shot rows below."}
@@ -443,7 +380,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
             <code className="rounded bg-muted px-1 text-xs">Club.Type</code>{" "}
             column. Click{" "}
             <span className="font-semibold">Edit</span> on the Unassigned row to
-            assign a club name before confirming.
+            open the Unassigned club card and choose Edit before confirming.
           </p>
         </div>
       )}
@@ -460,83 +397,19 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           {linkError}
         </div>
       )}
-      {/* ── Club summary table ──────────────────────────────────────────────── */}
+      {/* ── Club review grid ────────────────────────────────────────────────── */}
       {hasSummaries && (
-        <div className="overflow-x-auto overflow-y-auto max-h-[650px] rounded-xl border border-border bg-card shadow-xs">
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <table className="w-full min-w-[1950px] text-sm font-body">
-              <thead className="sticky top-0 z-10 bg-muted">
-                <tr className="border-b border-border bg-muted text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <th className="w-10 px-3 py-3 font-subheading" />
-                  <th className="min-w-[100px] whitespace-nowrap px-5 py-3 font-subheading">Actions</th>
-                  <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Include</th>
-                  <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Club</th>
-                  <th className="min-w-[140px] whitespace-nowrap px-5 py-3 font-subheading">Tags</th>
-                  <th className="min-w-[180px] whitespace-nowrap px-5 py-3 font-subheading">Compare To</th>
-                  <th className="min-w-[130px] whitespace-nowrap px-5 py-3 font-subheading text-right">Est. Price</th>
-                  <th className="min-w-[90px] whitespace-nowrap px-5 py-3 font-subheading text-center">Shots</th>
-                  <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Club Speed</th>
-                  <th className="min-w-[160px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Ball Speed</th>
-                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Spin</th>
-                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Height</th>
-                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Carry</th>
-                  <th className="min-w-[150px] whitespace-nowrap px-5 py-3 font-subheading text-right">Avg Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                <SortableContext
-                  items={summaries.map((s) => s.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {summaries.map((s) => {
-                    // The child currently linked to this row (if any)
-                    const currentChild = summaries.find(
-                      (c) => c.linkedToSummaryId === s.id,
-                    );
-                    const currentChildId = currentChild?.id ?? null;
-
-                    // Potential children for this row's dropdown:
-                    //   - not self
-                    //   - not already someone else's child (linkedToSummaryId === null,
-                    //     OR linkedToSummaryId === s.id meaning it IS our current child)
-                    //   - not already acting as a parent themselves (can't be both)
-                    const compareOptions = summaries.filter(
-                      (candidate) =>
-                        candidate.id !== s.id &&
-                        (candidate.linkedToSummaryId === null ||
-                          candidate.linkedToSummaryId === s.id) &&
-                        !parentIds.has(candidate.id),
-                    );
-                    // Parent of this row, if it is a linked child
-                    const parentSummary =
-                      s.linkedToSummaryId !== null
-                        ? (summaries.find((p) => p.id === s.linkedToSummaryId) ?? null)
-                        : null;
-                    return (
-                    <SortableRow
-                      key={s.id}
-                      summary={s}
-                      isToggling={toggling.has(s.id)}
-                      onEdit={() => setEditingId(s.id)}
-                      onToggleInclude={(current) => handleToggleInclude(s.id, current)}
-                      isParent={parentIds.has(s.id)}
-                      parentSummary={parentSummary}
-                      currentChildId={currentChildId}
-                      compareOptions={compareOptions}
-                      onLinkChange={(newChildId) => handleLinkChange(s.id, newChildId)}
-                      isLinking={linking.has(s.id)}
-                    />
-                    );
-                  })}
-                </SortableContext>
-              </tbody>
-            </table>
-          </DndContext>
-        </div>
+        <ClubReviewGrid
+          batchId={batchId}
+          parserMode={parserMode}
+          summaries={summaries}
+          toggling={toggling}
+          linking={linking}
+          onEdit={setEditingId}
+          onToggleInclude={handleToggleInclude}
+          onLinkChange={handleLinkChange}
+          onPriceSaved={handlePriceSaved}
+        />
       )}
 
       {/* ── Finalize section ────────────────────────────────────────────────── */}
@@ -645,7 +518,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       )}
 
       {/* ── Regenerate option ───────────────────────────────────────────────── */}
-      {hasSummaries && (
+      {hasSummaries && parserMode !== "trackman-result" && (
         <div className="flex items-center justify-end">
           <button
             onClick={handleGenerate}
@@ -667,222 +540,5 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
         />
       )}
     </div>
-  );
-}
-
-// ── Metric table cell ─────────────────────────────────────────────────────────
-
-function MetricCell({
-  value,
-  valid,
-  total,
-  unit,
-}: {
-  value: string;
-  valid: number;
-  total: number;
-  unit: string;
-}) {
-  const isNull = value === "—";
-  return (
-    <td className="whitespace-nowrap px-5 py-4 text-right">
-      <div className="space-y-0.5">
-        {/* Value + unit inline */}
-        <div className="inline-flex items-baseline gap-1 whitespace-nowrap">
-          <span className={isNull ? "text-muted-foreground/50" : "text-foreground"}>
-            {value}
-          </span>
-          {!isNull && (
-            <span className="text-xs text-muted-foreground">{unit}</span>
-          )}
-        </div>
-        {/* Valid count — always shown */}
-        <div className="text-xs text-muted-foreground">
-          {isNull ? `0/${total}` : `${valid}/${total}`}
-        </div>
-      </div>
-    </td>
-  );
-}
-
-// ── Sortable row ──────────────────────────────────────────────────────────────
-
-interface SortableRowProps {
-  summary: SerializedClubSummary;
-  isToggling: boolean;
-  onEdit: () => void;
-  onToggleInclude: (currentIncluded: boolean) => void;
-  isParent: boolean;
-  /** If this row is a linked child, the parent summary it points to. */
-  parentSummary: SerializedClubSummary | null;
-  /** ID of the child summary currently linked to this row (null if none). */
-  currentChildId: number | null;
-  /** Summaries eligible to become this row's comparison child. */
-  compareOptions: SerializedClubSummary[];
-  onLinkChange: (newChildId: number | null) => void;
-  isLinking: boolean;
-}
-
-function SortableRow({
-  summary: s,
-  isToggling,
-  onEdit,
-  onToggleInclude,
-  isParent,
-  parentSummary,
-  currentChildId,
-  compareOptions,
-  onLinkChange,
-  isLinking,
-}: SortableRowProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: s.id });
-
-  const isIncluded = s.includeInReport !== false;
-  const isChild = s.linkedToSummaryId !== null;
-
-  return (
-    <tr
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      {...attributes}
-      className={`transition-colors ${
-        isDragging
-          ? "relative z-10 opacity-60 shadow-lg"
-          : isChild
-            ? "bg-primary/5"
-            : !isIncluded
-              ? "bg-muted/60 opacity-50 grayscale"
-              : "hover:bg-muted/40"
-      }`}
-    >
-      {/* Drag handle */}
-      <td className="whitespace-nowrap px-3 py-4">
-        <button
-          {...listeners}
-          type="button"
-          tabIndex={-1}
-          aria-label="Drag to reorder"
-          className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
-        >
-          <IconGripVertical className="h-4 w-4" />
-        </button>
-      </td>
-      {/* Actions */}
-      <td className="whitespace-nowrap px-5 py-4">
-        <button
-          onClick={onEdit}
-          className="rounded-md border border-border bg-card px-3 py-1 text-xs font-medium text-foreground hover:bg-muted hover:border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        >
-          Edit
-        </button>
-      </td>
-      {/* Include toggle */}
-      <td className="whitespace-nowrap px-5 py-4 text-center">
-        <button
-          role="switch"
-          aria-checked={!isChild && isIncluded}
-          disabled={isToggling || isChild}
-          onClick={() => {
-            if (!isChild) onToggleInclude(isIncluded);
-          }}
-          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-            isChild
-              ? "cursor-not-allowed bg-muted"
-              : isToggling
-                ? "cursor-wait bg-primary"
-                : isIncluded
-                  ? "cursor-pointer bg-primary"
-                  : "cursor-pointer bg-muted"
-          }`}
-        >
-          <span
-            className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-              !isChild && isIncluded ? "translate-x-4" : "translate-x-0"
-            }`}
-          />
-        </button>
-        {isChild ? (
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
-            Linked comparison
-          </div>
-        ) : !isIncluded ? (
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Excluded
-          </div>
-        ) : null}
-      </td>
-      {/* Club */}
-      <td className="whitespace-nowrap px-5 py-4">
-        {s.clubName === "Unassigned" ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">
-            <IconAlertTriangle className="h-3 w-3" />
-            Unassigned
-          </span>
-        ) : (
-          <span className="font-medium text-foreground">{s.clubName}</span>
-        )}
-      </td>
-      {/* Tags — for this Club+Tags group */}
-      <td className="px-5 py-4 text-sm">
-        {s.tags.length > 0 ? (
-          <span className="text-foreground">{s.tags.join(", ")}</span>
-        ) : (
-          <span className="text-muted-foreground text-xs">None</span>
-        )}
-      </td>
-      {/* Compare To — select which club should be linked as a comparison child.
-           Child rows (isChild) cannot also be parents, so they show no dropdown. */}
-      <td className="whitespace-nowrap px-5 py-4">
-        {isChild ? (
-          <span className="text-xs text-muted-foreground">
-            {parentSummary
-              ? `Linked to ${parentSummary.clubName} — ${
-                  parentSummary.tags.length > 0
-                    ? parentSummary.tags.join(", ")
-                    : "None"
-                }`
-              : "Linked to unknown club"}
-          </span>
-        ) : (
-          <select
-            disabled={isLinking}
-            value={currentChildId ?? ""}
-            onChange={(e) =>
-              onLinkChange(
-                e.target.value === "" ? null : parseInt(e.target.value, 10),
-              )
-            }
-            className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
-          >
-            <option value="">None</option>
-            {compareOptions.map((opt) => (
-              <option key={opt.id} value={opt.id}>
-                {opt.clubName}
-                {opt.tags.length > 0 ? ` — ${opt.tags.join(", ")}` : ""}
-              </option>
-            ))}
-          </select>
-        )}
-      </td>
-      {/* Est. Price */}
-      <td className="whitespace-nowrap px-5 py-4 text-right text-foreground">
-        {s.estimatedPrice !== null && s.estimatedPrice !== undefined ? (
-          <span className="font-medium">${s.estimatedPrice.toFixed(2)}</span>
-        ) : (
-          <span className="text-muted-foreground text-xs">—</span>
-        )}
-      </td>
-      {/* Shots */}
-      <td className="whitespace-nowrap px-5 py-4 text-center text-muted-foreground">
-        {s.shotCount}
-      </td>
-      <MetricCell value={fmt(s.avgClubSpeed)} valid={s.validClubSpeedCount} total={s.shotCount} unit="mph" />
-      <MetricCell value={fmt(s.avgBallSpeed)} valid={s.validBallSpeedCount} total={s.shotCount} unit="mph" />
-      <MetricCell value={fmtInt(s.avgSpinRate)} valid={s.validSpinRateCount} total={s.shotCount} unit="rpm" />
-      <MetricCell value={fmt(s.avgMaxHeight)} valid={s.validMaxHeightCount} total={s.shotCount} unit="yrd" />
-      <MetricCell value={fmt(s.avgCarry)} valid={s.validCarryCount} total={s.shotCount} unit="yrd" />
-      <MetricCell value={fmt(s.avgTotal)} valid={s.validTotalCount} total={s.shotCount} unit="yrd" />
-    </tr>
   );
 }
