@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
-import { ClubReviewGrid } from "./ClubReviewGrid";
+import {
+  ClubReviewGrid,
+  type ShotReviewSummaryMetrics,
+} from "./ClubReviewGrid";
 import {
   EditClubSummaryModal,
   type SerializedClubSummary,
@@ -250,6 +253,18 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
     if (finalized) setDirty(true);
   }
 
+  function handleShotSummaryUpdated(
+    summaryId: number,
+    metrics: ShotReviewSummaryMetrics,
+  ) {
+    setSummaries((prev) =>
+      prev.map((summary) =>
+        summary.id === summaryId ? { ...summary, ...metrics } : summary,
+      ),
+    );
+    if (finalized) setDirty(true);
+  }
+
   async function handleToggleInclude(id: number, currentIncluded: boolean) {
     // Guard: linked children cannot be toggled — their includeInReport is
     // controlled by the server when linkedToSummaryId is set/cleared.
@@ -409,6 +424,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           onToggleInclude={handleToggleInclude}
           onLinkChange={handleLinkChange}
           onPriceSaved={handlePriceSaved}
+          onShotSummaryUpdated={handleShotSummaryUpdated}
         />
       )}
 

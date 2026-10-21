@@ -23,6 +23,29 @@ interface ShotReviewResponse {
   shots: ShotReviewShot[];
 }
 
+export type ShotReviewSummaryMetrics = Pick<
+  SerializedClubSummary,
+  | "shotCount"
+  | "avgClubSpeed"
+  | "avgBallSpeed"
+  | "avgSpinRate"
+  | "avgMaxHeight"
+  | "avgCarry"
+  | "avgTotal"
+  | "validClubSpeedCount"
+  | "validBallSpeedCount"
+  | "validSpinRateCount"
+  | "validMaxHeightCount"
+  | "validCarryCount"
+  | "validTotalCount"
+>;
+
+interface ShotReviewPatchResponse {
+  success: true;
+  shot: { id: number; included: boolean };
+  summary: { id: number } & ShotReviewSummaryMetrics;
+}
+
 interface ClubReviewGridProps {
   batchId: number;
   parserMode?: string;
@@ -33,9 +56,83 @@ interface ClubReviewGridProps {
   onToggleInclude: (summaryId: number, currentIncluded: boolean) => void;
   onLinkChange: (parentId: number, newChildId: number | null) => void;
   onPriceSaved: (summaryId: number, price: number | null) => void;
+  onShotSummaryUpdated: (
+    summaryId: number,
+    metrics: ShotReviewSummaryMetrics,
+  ) => void;
 }
 
 const sharedTransition = { type: "spring", stiffness: 260, damping: 28 } as const;
+
+const summaryCountKeys = [
+  "shotCount",
+  "validClubSpeedCount",
+  "validBallSpeedCount",
+  "validSpinRateCount",
+  "validMaxHeightCount",
+  "validCarryCount",
+  "validTotalCount",
+] as const;
+
+const summaryAverageKeys = [
+  "avgClubSpeed",
+  "avgBallSpeed",
+  "avgSpinRate",
+  "avgMaxHeight",
+  "avgCarry",
+  "avgTotal",
+] as const;
+
+function isShotReviewPatchResponse(
+  value: unknown,
+): value is ShotReviewPatchResponse {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const result = value as Record<string, unknown>;
+  if (
+    result.success !== true ||
+    result.shot === null ||
+    typeof result.shot !== "object" ||
+    Array.isArray(result.shot) ||
+    result.summary === null ||
+    typeof result.summary !== "object" ||
+    Array.isArray(result.summary)
+  ) {
+    return false;
+  }
+
+  const shot = result.shot as Record<string, unknown>;
+  const summary = result.summary as Record<string, unknown>;
+  return (
+    typeof shot.id === "number" &&
+    Number.isSafeInteger(shot.id) &&
+    typeof shot.included === "boolean" &&
+    typeof summary.id === "number" &&
+    Number.isSafeInteger(summary.id) &&
+    summaryCountKeys.every(
+      (key) =>
+        typeof summary[key] === "number" &&
+        Number.isSafeInteger(summary[key]) &&
+        (summary[key] as number) >= 0,
+    ) &&
+    summaryAverageKeys.every(
+      (key) =>
+        summary[key] === null ||
+        (typeof summary[key] === "number" &&
+          Number.isFinite(summary[key])),
+    )
+  );
+}
+
+function apiErrorMessage(value: unknown): string | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const error = (value as Record<string, unknown>).error;
+  return typeof error === "string" ? error : null;
+}
 
 function metric(value: number | null, decimals = 1): string {
   return value === null ? "—" : value.toFixed(decimals);
@@ -64,15 +161,21 @@ export function ClubReviewGrid({
   onToggleInclude,
   onLinkChange,
   onPriceSaved,
+  onShotSummaryUpdated,
 }: ClubReviewGridProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [shotData, setShotData] = useState<Record<number, ShotReviewResponse>>({});
   const [shotErrors, setShotErrors] = useState<Record<number, string>>({});
+  const [shotActionErrors, setShotActionErrors] = useState<
+    Record<number, string>
+  >({});
+  const [savingShotIds, setSavingShotIds] = useState<Set<number>>(new Set());
   const [loadingIds, setLoadingIds] = useState<Set<number>>(new Set());
   const panelRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const requestsRef = useRef(new Map<number, AbortController>());
+  const savingShotIdsRef = useRef(new Set<number>());
 
   const expandedSummary =
     summaries.find((summary) => summary.id === expandedId) ?? null;
@@ -146,6 +249,80 @@ export function ClubReviewGrid({
     },
     [batchId, loadingIds, parserMode, shotData],
   );
+
+  async function handleShotInclusionChange(
+    summaryId: number,
+    shot: ShotReviewShot,
+    included: boolean,
+  ) {
+    if (savingShotIdsRef.current.has(shot.id)) return;
+
+    savingShotIdsRef.current.add(shot.id);
+    setSavingShotIds((current) => new Set(current).add(shot.id));
+    setShotActionErrors((current) => {
+      const next = { ...current };
+      delete next[shot.id];
+      return next;
+    });
+
+    try {
+      const response = await fetch(
+        `/api/staff/imports/${batchId}/club-summaries/${summaryId}/shots/${shot.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ included }),
+        },
+      );
+      const result: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          apiErrorMessage(result) ?? "Could not update this shot.",
+        );
+      }
+      if (
+        !isShotReviewPatchResponse(result) ||
+        result.shot.id !== shot.id ||
+        result.shot.included !== included ||
+        result.summary.id !== summaryId
+      ) {
+        throw new Error("The shot update response was invalid. Please try again.");
+      }
+
+      setShotData((current) => {
+        const cached = current[summaryId];
+        if (!cached) return current;
+        return {
+          ...current,
+          [summaryId]: {
+            ...cached,
+            shots: cached.shots.map((cachedShot) =>
+              cachedShot.id === shot.id
+                ? { ...cachedShot, included: result.shot.included }
+                : cachedShot,
+            ),
+          },
+        };
+      });
+      onShotSummaryUpdated(summaryId, result.summary);
+    } catch (error: unknown) {
+      setShotActionErrors((current) => ({
+        ...current,
+        [shot.id]:
+          error instanceof Error
+            ? error.message
+            : "Could not update this shot. Please try again.",
+      }));
+    } finally {
+      savingShotIdsRef.current.delete(shot.id);
+      setSavingShotIds((current) => {
+        const next = new Set(current);
+        next.delete(shot.id);
+        return next;
+      });
+    }
+  }
 
   function openSummary(summaryId: number, trigger: HTMLElement) {
     returnFocusRef.current = trigger;
@@ -336,6 +513,8 @@ export function ClubReviewGrid({
                       parserMode={parserMode}
                       summary={expandedSummary}
                       shotData={shotData[expandedSummary.id]}
+                      savingShotIds={savingShotIds}
+                      shotActionErrors={shotActionErrors}
                       loading={loadingIds.has(expandedSummary.id)}
                       error={shotErrors[expandedSummary.id] ?? null}
                       onRetry={() => loadShots(expandedSummary.id, true)}
@@ -376,6 +555,13 @@ export function ClubReviewGrid({
                       }
                       onPriceSaved={(price) =>
                         onPriceSaved(expandedSummary.id, price)
+                      }
+                      onShotInclusionChange={(shot, included) =>
+                        handleShotInclusionChange(
+                          expandedSummary.id,
+                          shot,
+                          included,
+                        )
                       }
                     />
                   </div>
@@ -558,6 +744,8 @@ interface ExpandedClubDetailProps {
   parserMode?: string;
   summary: SerializedClubSummary;
   shotData?: ShotReviewResponse;
+  savingShotIds: Set<number>;
+  shotActionErrors: Record<number, string>;
   loading: boolean;
   error: string | null;
   onRetry: () => void;
@@ -569,6 +757,10 @@ interface ExpandedClubDetailProps {
   parentSummary: SerializedClubSummary | null;
   onEdit: () => void;
   onPriceSaved: (price: number | null) => void;
+  onShotInclusionChange: (
+    shot: ShotReviewShot,
+    included: boolean,
+  ) => void;
   onToggleInclude: () => void;
   onLinkChange: (newChildId: number | null) => void;
 }
@@ -578,6 +770,8 @@ function ExpandedClubDetail({
   parserMode,
   summary,
   shotData,
+  savingShotIds,
+  shotActionErrors,
   loading,
   error,
   onRetry,
@@ -589,6 +783,7 @@ function ExpandedClubDetail({
   parentSummary,
   onEdit,
   onPriceSaved,
+  onShotInclusionChange,
   onToggleInclude,
   onLinkChange,
 }: ExpandedClubDetailProps) {
@@ -688,17 +883,18 @@ function ExpandedClubDetail({
           <div>
             <h3
               id={`shot-review-heading-${summary.id}`}
-              className="font-subheading text-base font-semibold text-foreground"
+              className="font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
-              Individual shots
+              SHOTS
             </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Shot numbers follow the order of rows in the imported file.
             </p>
           </div>
-          {shotData && (
+          {shotData && shotData.shots.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              {shotCountLabel(shotData.shots.length)} loaded
+              {shotData.shots.filter((shot) => shot.included).length} of{" "}
+              {shotData.shots.length} included
             </span>
           )}
         </div>
@@ -737,7 +933,11 @@ function ExpandedClubDetail({
             {shotData.shots.map((shot) => (
               <article
                 key={shot.id}
-                className="rounded-xl border border-border bg-card p-4"
+                className={`rounded-xl border p-4 ${
+                  shot.included
+                    ? "border-border bg-card"
+                    : "border-border bg-muted/35"
+                }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -781,6 +981,38 @@ function ExpandedClubDetail({
                     value={shotMetric(shot.maxHeight)}
                     unit="yd"
                   />
+                </div>
+                <div className="mt-4 border-t border-border pt-3">
+                  <button
+                    type="button"
+                    disabled={savingShotIds.has(shot.id)}
+                    aria-label={`${shot.included ? "Exclude" : "Include"} Shot ${shot.rowIndex + 1}`}
+                    aria-busy={savingShotIds.has(shot.id)}
+                    onClick={() =>
+                      onShotInclusionChange(shot, !shot.included)
+                    }
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-wait disabled:opacity-60 ${
+                      shot.included
+                        ? "border-border bg-card text-foreground hover:bg-muted"
+                        : "border-primary bg-primary text-primary-foreground hover:bg-primary-hover"
+                    }`}
+                  >
+                    {savingShotIds.has(shot.id)
+                      ? shot.included
+                        ? "Excluding…"
+                        : "Including…"
+                      : shot.included
+                        ? "Exclude"
+                        : "Include"}
+                  </button>
+                  {shotActionErrors[shot.id] && (
+                    <p
+                      className="mt-2 text-xs text-red-700 dark:text-red-400"
+                      role="alert"
+                    >
+                      {shotActionErrors[shot.id]}
+                    </p>
+                  )}
                 </div>
               </article>
             ))}
