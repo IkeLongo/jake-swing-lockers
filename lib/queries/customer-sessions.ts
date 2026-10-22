@@ -24,6 +24,7 @@ export interface CustomerClub {
   estimatedPrice: number | null;
   clubRole: string;
   pairIndex: number;
+  currentClubTestId: number | null;
 }
 
 export interface CustomerSessionDetail {
@@ -125,6 +126,7 @@ export async function getCustomerSession(
           estimatedPrice: true,
           clubRole: true,
           pairIndex: true,
+          currentClubTestId: true,
           metrics: {
             select: {
               clubSpeed: true,
@@ -154,6 +156,7 @@ export async function getCustomerSession(
     totalDistance: toNum(ct.metrics?.totalDistance),
     clubRole: ct.clubRole,
     pairIndex: ct.pairIndex,
+    currentClubTestId: ct.currentClubTestId,
   }));
 
   return {

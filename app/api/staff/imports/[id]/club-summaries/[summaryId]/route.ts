@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
+import {
+  assignStagedCurrent,
+  isPositiveInteger,
+} from "@/lib/imports/stagedComparison";
+import { createPrismaComparisonStore } from "@/lib/imports/stagedComparisonStore";
 
 // Editable fields — shotCount and valid*Count are never client-editable
 const EDITABLE_NUMERIC_FIELDS = [
@@ -25,6 +30,9 @@ interface PatchBody {
   avgTotal?: unknown;
   includeInReport?: unknown;
   estimatedPrice?: unknown;
+  currentSummaryId?: unknown;
+  // Legacy (Current → Test) link; no longer writable. Rejected explicitly so
+  // stale clients fail loudly instead of silently doing nothing.
   linkedToSummaryId?: unknown;
 }
 
@@ -151,66 +159,61 @@ export async function PATCH(
       update.estimatedPrice = n;
     }
   }
-  // linkedToSummaryId: null = unlink; positive integer = link to another summary in this batch.
-  // Linking auto-sets includeInReport = false. Does NOT set isManuallyEdited.
-  if ("linkedToSummaryId" in body) {
-    const raw = body.linkedToSummaryId;
-    if (raw === null || raw === undefined) {
-      // Unlink
-      update.linkedToSummaryId = null;
+  // currentSummaryId (Test → Current): null = no Current; positive integer = compare this
+  // summary against that Current. Validated and written transactionally below.
+  // Does NOT touch includeInReport or isManuallyEdited.
+  let currentSummaryId: number | null | undefined;
+  if ("currentSummaryId" in body) {
+    const raw = body.currentSummaryId;
+    if (raw === null) {
+      currentSummaryId = null;
+    } else if (isPositiveInteger(raw)) {
+      currentSummaryId = raw;
     } else {
-      const targetId = typeof raw === "number" ? raw : parseInt(String(raw), 10);
-      if (!Number.isInteger(targetId) || targetId <= 0) {
-        return NextResponse.json(
-          { error: "linkedToSummaryId must be a positive integer or null." },
-          { status: 422 },
-        );
-      }
-      if (targetId === summaryIdNum) {
-        return NextResponse.json(
-          { error: "A summary cannot link to itself." },
-          { status: 422 },
-        );
-      }
-      // Validate target exists in the same batch and is itself not a child
-      const target = await db.importClubSummary.findFirst({
-        where: { id: targetId, importBatchId: batchId },
-        select: { id: true, linkedToSummaryId: true },
-      });
-      if (!target) {
-        return NextResponse.json(
-          { error: "Target summary not found in this batch." },
-          { status: 422 },
-        );
-      }
-      if (target.linkedToSummaryId !== null) {
-        return NextResponse.json(
-          { error: "Cannot link to a summary that is already a comparison child (no chaining)." },
-          { status: 422 },
-        );
-      }
-      // Enforce one child per parent
-      const existingChild = await db.importClubSummary.findFirst({
-        where: { linkedToSummaryId: targetId, id: { not: summaryIdNum } },
-        select: { id: true },
-      });
-      if (existingChild) {
-        return NextResponse.json(
-          { error: "Another summary is already linked to that parent. Only one comparison child per parent is allowed." },
-          { status: 422 },
-        );
-      }
-      update.linkedToSummaryId = targetId;
-      // Auto-exclude child from report (it will be finalized as a comparison club, not a standalone)
-      update.includeInReport = false;
+      return NextResponse.json(
+        { error: "currentSummaryId must be a positive integer or null." },
+        { status: 422 },
+      );
     }
   }
 
+  if ("linkedToSummaryId" in body) {
+    return NextResponse.json(
+      {
+        error:
+          "linkedToSummaryId is no longer supported. Use currentSummaryId (Test → Current).",
+      },
+      { status: 422 },
+    );
+  }
+
   // ── Persist ─────────────────────────────────────────────────────────────────
-  const updated = await db.importClubSummary.update({
-    where: { id: summaryIdNum },
-    data: update,
-  });
+  let updated;
+  if (currentSummaryId === undefined) {
+    updated = await db.importClubSummary.update({
+      where: { id: summaryIdNum },
+      data: update,
+    });
+  } else {
+    const result = await db.$transaction(async (tx) => {
+      const assigned = await assignStagedCurrent(
+        createPrismaComparisonStore(tx),
+        batchId,
+        summaryIdNum,
+        currentSummaryId,
+      );
+      if (!assigned.ok) return assigned;
+      const row = await tx.importClubSummary.update({
+        where: { id: summaryIdNum },
+        data: update,
+      });
+      return { ok: true as const, row };
+    });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    updated = result.row;
+  }
 
   // ── Flag session as needing re-finalization ──────────────────────────────────
   // If the related DemoSession is already finalized, mark it dirty so the UI

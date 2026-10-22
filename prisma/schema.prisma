@@ -84,14 +84,20 @@ model DemoClubTest {
   sortOrder      Int      @default(0)
   clubRole       String   @default("demo")
   pairIndex      Int      @default(0)
+  // Target model (Test -> Current): a finalized Test points at its single Current row.
+  // Null for legacy/manual rows, which are grouped via pairIndex + clubRole.
+  currentClubTestId Int?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   demoSession DemoSession      @relation(fields: [demoSessionId], references: [id])
   metrics     ClubTestMetrics?
   purchaseRequestItems PurchaseRequestItem[]
+  currentClubTest DemoClubTest?  @relation("DemoClubTestCurrent", fields: [currentClubTestId], references: [id], onDelete: SetNull)
+  comparedTests   DemoClubTest[] @relation("DemoClubTestCurrent")
 
   @@index([demoSessionId])
+  @@index([currentClubTestId])
 }
 
 model ClubTestMetrics {
@@ -331,6 +337,12 @@ model ImportClubSummary {
   linkedToSummaryId  Int?
   linkedTo           ImportClubSummary?  @relation("ClubSummaryLink", fields: [linkedToSummaryId], references: [id], onDelete: SetNull)
   linkedBy           ImportClubSummary[] @relation("ClubSummaryLink")
+  // Target model (Test -> Current): a Test points at its Current/baseline summary.
+  // One Current may be referenced by many Tests. Coexists with the legacy
+  // linkedToSummaryId (Current -> Test) during the expand phase; not yet read or written by the app.
+  currentSummaryId   Int?
+  currentSummary     ImportClubSummary?  @relation("ClubSummaryCurrent", fields: [currentSummaryId], references: [id], onDelete: SetNull)
+  comparedTests      ImportClubSummary[] @relation("ClubSummaryCurrent")
   shots              ImportRow[]
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -339,6 +351,7 @@ model ImportClubSummary {
 
   @@index([importBatchId])
   @@index([linkedToSummaryId])
+  @@index([currentSummaryId])
 }
 
 // ── Purchase Requests ─────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { LockerData } from "@/lib/queries/locker";
+import { groupFinalizedClubs } from "@/lib/comparison/groupFinalizedClubs";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -577,15 +578,8 @@ export function LockerView({
   const clientName =
     [client.firstName, client.lastName].filter(Boolean).join(" ") || "Golfer";
 
-  // Group club tests by pairIndex into comparison pairs
-  const pairMap = new Map<number, { demo?: ClubTest; current?: ClubTest }>();
-  for (const club of clubTests) {
-    const entry = pairMap.get(club.pairIndex) ?? {};
-    if (club.clubRole === "demo") entry.demo = club;
-    else entry.current = club;
-    pairMap.set(club.pairIndex, entry);
-  }
-  const pairs = Array.from(pairMap.entries()).sort(([a], [b]) => a - b);
+  const groups = groupFinalizedClubs(clubTests);
+  const testCount = groups.reduce((sum, g) => sum + g.tests.length, 0);
 
   const hasNotes = !!data.notes?.trim();
 
@@ -706,7 +700,7 @@ export function LockerView({
         </div>
 
         {/* Demo Club Comparisons */}
-        {pairs.length > 0 && (
+        {testCount > 0 && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-2 px-1">
               <span className="h-3.5 w-0.5 rounded-full bg-emerald-500 shrink-0" />
@@ -714,12 +708,18 @@ export function LockerView({
                 Demo Clubs
               </h2>
               <span className="ml-auto font-body text-xs text-slate-400">
-                {pairs.length} club{pairs.length !== 1 ? "s" : ""} tested
+                {testCount} club{testCount !== 1 ? "s" : ""} tested
               </span>
             </div>
-            {pairs.map(([pairIndex, { demo, current }]) => (
-              <ComparisonCard key={pairIndex} demo={demo} current={current} />
-            ))}
+            {groups.flatMap(({ pairIndex, current, tests }) =>
+              tests.map((demo, i) => (
+                <ComparisonCard
+                  key={`${pairIndex}-${i}`}
+                  demo={demo}
+                  current={current ?? undefined}
+                />
+              )),
+            )}
           </div>
         )}
 

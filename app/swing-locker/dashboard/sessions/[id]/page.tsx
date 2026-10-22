@@ -9,6 +9,7 @@ import {
   getCustomerSession,
   type CustomerClub,
 } from "@/lib/queries/customer-sessions";
+import { groupFinalizedClubs } from "@/lib/comparison/groupFinalizedClubs";
 import { getExistingPurchaseRequest } from "@/lib/queries/purchase-requests";
 import {
   PurchaseRequestTrigger,
@@ -267,10 +268,10 @@ export default async function SessionDetailPage({
 
   // ── Group clubs by role ────────────────────────────────────────────────────
   const demoClubs = session.clubs.filter((c) => c.clubRole === "demo");
-  const currentByPairIndex = new Map(
-    session.clubs
-      .filter((c) => c.clubRole === "current" && c.pairIndex > 0)
-      .map((c) => [c.pairIndex, c])
+  const currentByTestId = new Map(
+    groupFinalizedClubs(session.clubs).flatMap((g) =>
+      g.current ? g.tests.map((t) => [t.id, g.current!] as const) : [],
+    ),
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -335,11 +336,7 @@ export default async function SessionDetailPage({
               <ClubCard
                 key={club.id}
                 club={club}
-                comparisonClub={
-                  club.pairIndex > 0
-                    ? currentByPairIndex.get(club.pairIndex)
-                    : undefined
-                }
+                comparisonClub={currentByTestId.get(club.id)}
               />
             ))}
           </div>

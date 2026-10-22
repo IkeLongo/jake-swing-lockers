@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
+import {
+  deleteSessionClubs,
+  flattenPlan,
+  persistPlan,
+  planComparisonGroups,
+} from "@/lib/imports/finalizationPlan";
+import { createPrismaFinalizeStore } from "@/lib/imports/finalizationStore";
 
 // ── POST /api/staff/demo-sessions/[id]/finalize ───────────────────────────────
 //
@@ -15,10 +22,12 @@ import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
 //   2. Validate DemoSession exists.
 //   3. If already finalized → return idempotent success (no duplicate writes).
 //   4. Validate ImportBatch exists and belongs to this session.
-//   5. Load ImportClubSummary rows where includeInReport === true.
-//   6. If none included → 400 error.
+//   5. Plan comparison groups from ImportClubSummary.currentSummaryId
+//      (Test → Current); see lib/imports/finalizationPlan.ts.
+//   6. If no included Test → 400 error.
 //   7. Transaction:
-//      a. Create DemoClubTest per included club summary.
+//      a. Create each Current DemoClubTest once, then its Tests with
+//         currentClubTestId pointing at it.
 //      b. Create ClubTestMetrics for each DemoClubTest.
 //      c. Mark DemoSession.status = "finalized".
 //      d. Mark ImportBatch.status = "finalized".
@@ -109,20 +118,16 @@ export async function POST(
     );
   }
 
-  // ── Load included club summaries (two-pass: parents + children) ─────────────
-  // Parent summaries: includeInReport === true AND not a comparison child
-  const parentSummaries = await db.importClubSummary.findMany({
-    where: { importBatchId: batchId, includeInReport: true, linkedToSummaryId: null },
-    orderBy: { clubName: "asc" },
+  // ── Plan comparison groups from currentSummaryId (Test → Current) ───────────
+  const batchSummaries = await db.importClubSummary.findMany({
+    where: { importBatchId: batchId },
+    orderBy: { id: "asc" },
   });
+  const groups = planComparisonGroups(batchSummaries);
+  const plannedRows = flattenPlan(groups);
+  const includedTestCount = plannedRows.filter((r) => r.clubRole === "demo").length;
 
-  // Comparison children: any summary linked to a parent (regardless of includeInReport)
-  const childSummaries = await db.importClubSummary.findMany({
-    where: { importBatchId: batchId, linkedToSummaryId: { not: null } },
-    orderBy: { clubName: "asc" },
-  });
-
-  if (parentSummaries.length === 0) {
+  if (includedTestCount === 0) {
     return NextResponse.json(
       {
         error:
@@ -161,109 +166,15 @@ export async function POST(
 
   try {
     await db.$transaction(async (tx) => {
-      // For re-finalization: delete existing DemoClubTest rows (and their metrics)
-      // for this session before recreating from current ImportClubSummary state.
+      const store = createPrismaFinalizeStore(tx);
+      // Re-finalization: delete existing DemoClubTest rows (Tests before
+      // Currents because of the currentClubTestId self-FK) and their metrics.
       if (isRefinalize) {
-        const existingTests = await tx.demoClubTest.findMany({
-          where: { demoSessionId: sessionId },
-          select: { id: true },
-        });
-        const testIds = existingTests.map((t) => t.id);
-        if (testIds.length > 0) {
-          await tx.clubTestMetrics.deleteMany({
-            where: { clubTestId: { in: testIds } },
-          });
-          await tx.demoClubTest.deleteMany({
-            where: { id: { in: testIds } },
-          });
-        }
+        await deleteSessionClubs(store, sessionId);
       }
 
-      // Pass 1: create parent DemoClubTests (clubRole = "demo")
-      // summaryIdToPairIndex maps each parent's DB id → its sequential pairIndex
-      const summaryIdToPairIndex = new Map<number, number>();
-      for (let i = 0; i < parentSummaries.length; i++) {
-        const s = parentSummaries[i]!;
-
-        // Round Decimal spinRate to Int for ClubTestMetrics
-        const spinRateInt =
-          s.avgSpinRate !== null
-            ? Math.round(s.avgSpinRate.toNumber())
-            : null;
-
-        // a. Create DemoClubTest
-        const clubTest = await tx.demoClubTest.create({
-          data: {
-            demoSessionId: sessionId,
-            clubType: s.clubName,
-            estimatedPrice: s.estimatedPrice ?? null,
-            sortOrder: i,
-            clubRole: "demo",
-            pairIndex: i, // sequential — fixes historical pairIndex: 0 bug
-            isRecommended: false,
-          },
-          select: { id: true },
-        });
-
-        // b. Create ClubTestMetrics
-        await tx.clubTestMetrics.create({
-          data: {
-            clubTestId: clubTest.id,
-            clubSpeed: s.avgClubSpeed,
-            ballSpeed: s.avgBallSpeed,
-            spinRate: spinRateInt,
-            carryDistance: s.avgCarry,
-            totalDistance: s.avgTotal,
-          },
-        });
-
-        summaryIdToPairIndex.set(s.id, i);
-      }
-
-      // Pass 2: create comparison DemoClubTests (clubRole = "current")
-      // Children inherit pairIndex from their linked parent so the locker
-      // ComparisonCard groups them correctly via pairMap.
-      let childSortOrder = parentSummaries.length;
-      for (const s of childSummaries) {
-        const parentPairIndex = summaryIdToPairIndex.get(s.linkedToSummaryId!);
-        if (parentPairIndex === undefined) continue; // parent was excluded — skip child
-
-        const tagsArray = Array.isArray(s.tags) ? (s.tags as string[]) : [];
-        // Build a descriptive label: "Club Name - Tag1, Tag2" or just "Club Name"
-        const comparisonLabel =
-          tagsArray.length > 0
-            ? `${s.clubName} - ${tagsArray.join(", ")}`
-            : s.clubName;
-
-        const spinRateInt =
-          s.avgSpinRate !== null
-            ? Math.round(s.avgSpinRate.toNumber())
-            : null;
-
-        const clubTest = await tx.demoClubTest.create({
-          data: {
-            demoSessionId: sessionId,
-            clubType: comparisonLabel,
-            estimatedPrice: s.estimatedPrice ?? null,
-            sortOrder: childSortOrder++,
-            clubRole: "current", // V1 assumption: comparison clubs are labelled "current"
-            pairIndex: parentPairIndex, // pairs with parent on locker page
-            isRecommended: false,
-          },
-          select: { id: true },
-        });
-
-        await tx.clubTestMetrics.create({
-          data: {
-            clubTestId: clubTest.id,
-            clubSpeed: s.avgClubSpeed,
-            ballSpeed: s.avgBallSpeed,
-            spinRate: spinRateInt,
-            carryDistance: s.avgCarry,
-            totalDistance: s.avgTotal,
-          },
-        });
-      }
+      // Create each Current once, then its Tests with currentClubTestId.
+      await persistPlan(store, sessionId, plannedRows);
 
       // c. Mark session as finalized and clear the dirty flag
       await tx.demoSession.update({
@@ -306,7 +217,7 @@ export async function POST(
     success: true,
     alreadyFinalized: false,
     isRefinalize,
-    clubCount: parentSummaries.length,
+    clubCount: includedTestCount,
     message: isRefinalize
       ? "Demo session re-finalized successfully. Club data has been updated."
       : "Demo session finalized successfully. Club averages have been saved.",

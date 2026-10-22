@@ -24,6 +24,8 @@ const LOCKER_SELECT = {
       isRecommended: true,
       clubRole: true,
       pairIndex: true,
+      id: true,
+      currentClubTestId: true,
       metrics: {
         select: {
           clubSpeed: true,
