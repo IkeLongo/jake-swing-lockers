@@ -79,7 +79,7 @@ export async function POST(
         where: { id: batchId },
         data: { status: "reviewing" },
       });
-    });
+    }, { timeout: 15_000 });
 
     const created = await db.importClubSummary.findMany({
       where: { importBatchId: batchId },

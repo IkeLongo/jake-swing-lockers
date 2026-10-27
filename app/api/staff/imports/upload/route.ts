@@ -128,16 +128,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         throw new Error("TrackMan shot rows could not be mapped to their import order.");
       }
 
-      clubSummaryCount = await db.$transaction((tx) =>
-        createTrackManClubSummaries(
-          tx,
-          batch.id,
-          persistedRows.map((row) => ({
-            id: row.id,
-            rowIndex: row.rowIndex,
-            rawData: rows[row.rowIndex] as Record<string, unknown>,
-          })),
-        ),
+      clubSummaryCount = await db.$transaction(
+        (tx) =>
+          createTrackManClubSummaries(
+            tx,
+            batch.id,
+            persistedRows.map((row) => ({
+              id: row.id,
+              rowIndex: row.rowIndex,
+              rawData: rows[row.rowIndex] as Record<string, unknown>,
+            })),
+          ),
+        { timeout: 15_000 },
       );
     }
 

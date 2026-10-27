@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconAlertTriangle, IconArrowUpRight, IconX } from "@tabler/icons-react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { useOutsideClick } from "@/hooks/use-outside-click";
+import { buildClubFlightModel } from "@/lib/golf/flight/modeledFlight";
+import { toModeledShotInput } from "@/lib/golf/flight/shotReviewFlightInput";
+import { yardsToFeet } from "@/lib/golf/flight/units";
+import type { ShotReviewMeasurements } from "@/lib/imports/golfShotMeasurements";
+import { ClubFlightVisualization } from "./ClubFlightVisualization";
 import {
   canSelectTest,
   getCurrentForTest,
@@ -21,9 +26,9 @@ interface ShotReviewShot {
   clubSpeed: string | null;
   ballSpeed: string | null;
   spinRate: string | null;
-  maxHeight: string | null;
   carry: string | null;
   total: string | null;
+  measurementData: ShotReviewMeasurements;
 }
 
 interface ShotReviewResponse {
@@ -956,6 +961,34 @@ function ExpandedClubDetail({
   const isIncluded = summary.includeInReport !== false;
   const current = getCurrentForTest(summaries, summary);
   const tests = getTestsForCurrent(summaries, summary.id);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const flightInputs = useMemo(
+    () => shotData?.shots.map(toModeledShotInput) ?? [],
+    [shotData?.shots],
+  );
+  const clubFlightModel = useMemo(
+    () => buildClubFlightModel(flightInputs, { includedOnly: true }),
+    [flightInputs],
+  );
+  const includedShotCount =
+    shotData?.shots.filter((shot) => shot.included).length ?? 0;
+  const averageMaxHeightFt = useMemo(() => {
+    const heightsYd =
+      shotData?.shots.flatMap((shot) => {
+        const height = shot.measurementData.measurements.apexHeightYd;
+        return shot.included && height !== null ? [height] : [];
+      }) ?? [];
+    if (heightsYd.length === 0) return null;
+    return yardsToFeet(
+      heightsYd.reduce((total, height) => total + height, 0) / heightsYd.length,
+    );
+  }, [shotData?.shots]);
+  const visibleSelectedShotId =
+    shotData?.shots.some(
+      (shot) => String(shot.id) === selectedShotId && shot.included,
+    )
+      ? selectedShotId
+      : null;
 
   return (
     <div className="p-5 sm:p-8">
@@ -1024,11 +1057,20 @@ function ExpandedClubDetail({
           <DetailMetric
             key={`${summary.id}-height`}
             label="Max height"
-            value={summary.avgMaxHeight}
-            unit="yd"
+            value={averageMaxHeightFt}
+            unit="ft"
           />
         </div>
       </section>
+
+      {parserMode === "trackman-result" && shotData && (
+        <ClubFlightVisualization
+          flights={clubFlightModel.flights}
+          includedShotCount={includedShotCount}
+          selectedShotId={visibleSelectedShotId}
+          onSelectedShotChange={setSelectedShotId}
+        />
+      )}
 
       <section aria-labelledby={`shot-review-heading-${summary.id}`}>
         <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border pb-3">
@@ -1105,21 +1147,57 @@ function ExpandedClubDetail({
                 {shotData.shots.map((shot) => {
                   const saving = savingShotIds.has(shot.id);
                   return (
-                    <tr key={shot.id} className="bg-card">
+                    <tr
+                      key={shot.id}
+                      className={
+                        visibleSelectedShotId === String(shot.id)
+                          ? "bg-primary/5"
+                          : "bg-card"
+                      }
+                    >
                       <th
                         scope="row"
-                        className="sticky left-0 z-10 bg-card px-4 py-3 text-sm font-semibold tabular-nums text-foreground"
+                        className={`sticky left-0 z-10 px-4 py-3 text-sm font-semibold tabular-nums text-foreground ${
+                          visibleSelectedShotId === String(shot.id)
+                            ? "bg-primary/5"
+                            : "bg-card"
+                        }`}
                       >
-                        <span className={shot.included ? undefined : "opacity-60"}>
+                        <button
+                          type="button"
+                          disabled={!shot.included}
+                          aria-pressed={visibleSelectedShotId === String(shot.id)}
+                          aria-label={`Highlight Shot ${shot.rowIndex + 1} flight`}
+                          onClick={() =>
+                            setSelectedShotId(
+                              visibleSelectedShotId === String(shot.id)
+                                ? null
+                                : String(shot.id),
+                            )
+                          }
+                          className={`rounded px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-default disabled:opacity-60 ${
+                            selectedShotId === String(shot.id)
+                              ? "bg-primary/10 text-primary"
+                              : "hover:bg-muted"
+                          }`}
+                        >
                           {shot.rowIndex + 1}
-                        </span>
+                        </button>
                       </th>
                       <ShotCell value={shotMetric(shot.carry)} unit="yd" muted={!shot.included} />
                       <ShotCell value={shotMetric(shot.total)} unit="yd" muted={!shot.included} />
                       <ShotCell value={shotMetric(shot.ballSpeed)} unit="mph" muted={!shot.included} />
                       <ShotCell value={shotMetric(shot.clubSpeed)} unit="mph" muted={!shot.included} />
                       <ShotCell value={shotMetric(shot.spinRate, 0)} unit="rpm" muted={!shot.included} />
-                      <ShotCell value={shotMetric(shot.maxHeight)} unit="yd" muted={!shot.included} />
+                      <ShotCell
+                        value={shotMetric(
+                          yardsToFeet(
+                            shot.measurementData.measurements.apexHeightYd,
+                          )?.toString() ?? null,
+                        )}
+                        unit="ft"
+                        muted={!shot.included}
+                      />
                       <td className="px-3 py-3">
                         <span
                           className={`inline-block rounded-full border px-2 py-1 text-[10px] font-semibold ${

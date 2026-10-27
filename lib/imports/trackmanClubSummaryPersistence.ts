@@ -16,6 +16,40 @@ export interface TrackManAssociatedShot {
   includedInSummary: boolean | null;
 }
 
+type TrackManClubSummaryCreateData = Pick<
+  Prisma.ImportClubSummaryUncheckedCreateInput,
+  | "importBatchId"
+  | "originalClubName"
+  | "clubName"
+  | "tags"
+  | "shotCount"
+  | "avgClubSpeed"
+  | "avgBallSpeed"
+  | "avgSpinRate"
+  | "avgMaxHeight"
+  | "avgCarry"
+  | "avgTotal"
+  | "validClubSpeedCount"
+  | "validBallSpeedCount"
+  | "validSpinRateCount"
+  | "validMaxHeightCount"
+  | "validCarryCount"
+  | "validTotalCount"
+  | "isManuallyEdited"
+  | "includeInReport"
+>;
+
+export interface TrackManClubSummaryPersistenceOperations {
+  createSummary(
+    data: TrackManClubSummaryCreateData,
+  ): Promise<{ id: number } | null>;
+  associateRows(
+    batchId: number,
+    rowIds: readonly number[],
+    summaryId: number,
+  ): Promise<number>;
+}
+
 export function calculateIncludedTrackManSummaryMetrics(
   shots: readonly TrackManAssociatedShot[],
 ): TrackManSummaryMetrics {
@@ -35,41 +69,76 @@ export async function createTrackManClubSummaries(
   batchId: number,
   shots: readonly TrackManShotRowInput[],
 ): Promise<number> {
+  return persistTrackManClubSummaries(
+    {
+      createSummary: (data) =>
+        tx.importClubSummary.create({ data, select: { id: true } }),
+      async associateRows(associatedBatchId, rowIds, summaryId) {
+        const result = await tx.importRow.updateMany({
+          where: { importBatchId: associatedBatchId, id: { in: [...rowIds] } },
+          data: { clubSummaryId: summaryId, includedInSummary: true },
+        });
+        return result.count;
+      },
+    },
+    batchId,
+    shots,
+  );
+}
+
+export async function persistTrackManClubSummaries(
+  operations: TrackManClubSummaryPersistenceOperations,
+  batchId: number,
+  shots: readonly TrackManShotRowInput[],
+): Promise<number> {
   const groups = aggregateTrackManClubGroups(
     shots.map((shot) => shot.rawData),
   );
 
-  for (const group of groups) {
-    const summary = await tx.importClubSummary.create({
-      data: {
-        importBatchId: batchId,
-        originalClubName: group.summary.originalClubName,
-        clubName: group.summary.clubName,
-        tags: group.summary.tags,
-        shotCount: group.summary.shotCount,
-        avgClubSpeed: group.summary.avgClubSpeed,
-        avgBallSpeed: group.summary.avgBallSpeed,
-        avgSpinRate: group.summary.avgSpinRate,
-        avgMaxHeight: group.summary.avgMaxHeight,
-        avgCarry: group.summary.avgCarry,
-        avgTotal: group.summary.avgTotal,
-        validClubSpeedCount: group.summary.validClubSpeedCount,
-        validBallSpeedCount: group.summary.validBallSpeedCount,
-        validSpinRateCount: group.summary.validSpinRateCount,
-        validMaxHeightCount: group.summary.validMaxHeightCount,
-        validCarryCount: group.summary.validCarryCount,
-        validTotalCount: group.summary.validTotalCount,
-        isManuallyEdited: false,
-        includeInReport: true,
-      },
-      select: { id: true },
+  for (const [groupIndex, group] of groups.entries()) {
+    const summary = await operations.createSummary({
+      importBatchId: batchId,
+      originalClubName: group.summary.originalClubName,
+      clubName: group.summary.clubName,
+      tags: group.summary.tags,
+      shotCount: group.summary.shotCount,
+      avgClubSpeed: group.summary.avgClubSpeed,
+      avgBallSpeed: group.summary.avgBallSpeed,
+      avgSpinRate: group.summary.avgSpinRate,
+      avgMaxHeight: group.summary.avgMaxHeight,
+      avgCarry: group.summary.avgCarry,
+      avgTotal: group.summary.avgTotal,
+      validClubSpeedCount: group.summary.validClubSpeedCount,
+      validBallSpeedCount: group.summary.validBallSpeedCount,
+      validSpinRateCount: group.summary.validSpinRateCount,
+      validMaxHeightCount: group.summary.validMaxHeightCount,
+      validCarryCount: group.summary.validCarryCount,
+      validTotalCount: group.summary.validTotalCount,
+      isManuallyEdited: false,
+      includeInReport: true,
     });
 
+    if (
+      summary === null ||
+      !Number.isSafeInteger(summary.id) ||
+      summary.id <= 0
+    ) {
+      throw new Error(
+        `TrackMan club summary creation returned no valid record for group ${groupIndex + 1} of ${groups.length}.`,
+      );
+    }
+
     const rowIds = group.rowIndexes.map((index) => shots[index]!.id);
-    await tx.importRow.updateMany({
-      where: { importBatchId: batchId, id: { in: rowIds } },
-      data: { clubSummaryId: summary.id, includedInSummary: true },
-    });
+    const associatedCount = await operations.associateRows(
+      batchId,
+      rowIds,
+      summary.id,
+    );
+    if (associatedCount !== rowIds.length) {
+      throw new Error(
+        `TrackMan shot association failed for summary group ${groupIndex + 1} of ${groups.length}: expected ${rowIds.length} rows, associated ${associatedCount}.`,
+      );
+    }
   }
 
   return groups.length;

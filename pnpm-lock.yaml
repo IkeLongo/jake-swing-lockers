@@ -32,6 +32,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      golf-shot-viz:
+        specifier: 0.2.0
+        version: 0.2.0(react@19.2.4)(three@0.186.1)
       lucide-react:
         specifier: ^1.14.0
         version: 1.14.0(react@19.2.4)
@@ -62,6 +65,9 @@ importers:
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.5.0
+      three:
+        specifier: ^0.186.1
+        version: 0.186.1
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -1709,6 +1715,16 @@ packages:
     resolution: {integrity: sha512-DpLKbNU4WylpxJykQujfCcwYWiV/Jhm50Goo0wrVILAv5jOr9d+H+UR3PhSCD2rCCEIg0uc+G+muBTwD54JhDQ==}
     engines: {node: '>= 0.4'}
 
+  golf-shot-viz@0.2.0:
+    resolution: {integrity: sha512-i4PHyVceqgGkX+9hpiw0Syj/fixAv8kgAVNMZTud9md/NAz0dYpxe5gF2B3LRJNrVROzvbLvMync1IB4PaAO9g==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: '>=18'
+      three: '>=0.160.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
@@ -2525,6 +2541,9 @@ packages:
   tapable@2.3.3:
     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
     engines: {node: '>=6'}
+
+  three@0.186.1:
+    resolution: {integrity: sha512-blFeqb49wRCSGUGj7gtpfnSGHy2lwDk94RhUmS1c/hTby70kvChbWpkJ4Pm1390LqzzvTmzgXKHPEafJwCb8jA==}
 
   tinyglobby@0.2.16:
     resolution: {integrity: sha512-pn99VhoACYR8nFHhxqix+uvsbXineAasWm5ojXoN8xEwK5Kd3/TrhNn1wByuD52UxWRLy8pu+kRMniEi6Eq9Zg==}
@@ -4349,6 +4368,12 @@ snapshots:
       define-properties: 1.2.1
       gopd: 1.2.0
 
+  golf-shot-viz@0.2.0(react@19.2.4)(three@0.186.1):
+    dependencies:
+      three: 0.186.1
+    optionalDependencies:
+      react: 19.2.4
+
   gopd@1.2.0: {}
 
   graceful-fs@4.2.11: {}
@@ -5190,6 +5215,8 @@ snapshots:
   tailwindcss@4.2.4: {}
 
   tapable@2.3.3: {}
+
+  three@0.186.1: {}
 
   tinyglobby@0.2.16:
     dependencies:
