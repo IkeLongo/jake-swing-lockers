@@ -551,8 +551,8 @@ function ClubCard({
   onOpen,
 }: ClubCardProps) {
   const isIncluded = summary.includeInReport !== false;
-  const tests = getTestsForCurrent(summaries, summary.id);
   const current = getCurrentForTest(summaries, summary);
+  const hasStatusBadges = !isIncluded || summary.clubName === "Unassigned";
 
   return (
     <motion.button
@@ -569,17 +569,8 @@ function ClubCard({
             : "border-border hover:border-primary/30"
         }`}
       >
+        {hasStatusBadges && (
         <div className="flex flex-wrap items-center gap-2">
-          {tests.length > 0 && (
-            <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              Current · {tests.length} {tests.length === 1 ? "Test" : "Tests"}
-            </span>
-          )}
-          {current && (
-            <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              Test
-            </span>
-          )}
           {!isIncluded && (
             <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
               Excluded
@@ -592,8 +583,9 @@ function ClubCard({
             </span>
           )}
         </div>
+        )}
 
-        <h3 className="mt-2 line-clamp-1 pr-1 font-heading text-lg font-bold tracking-tight">
+        <h3 className={`${hasStatusBadges ? "mt-2 " : ""}line-clamp-1 pr-1 font-heading text-lg font-bold tracking-tight`}>
           {summary.clubName}
         </h3>
         {summary.tags.length > 0 ? (
