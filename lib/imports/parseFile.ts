@@ -1,10 +1,16 @@
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
+import {
+  createTrackManMeasuredShot,
+  type MeasuredShotV1,
+} from "./trackmanMeasurements";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** A single parsed row: column name → raw value (string, number, null, etc.) */
 export type ParsedRow = Record<string, unknown>;
+
+const TRACKMAN_MEASURED_SHOT_KEY = "measuredShot";
 
 /** Parser mode stored on ImportBatch to drive downstream UI decisions. */
 export type ParserMode = "trackman-result" | "generic";
@@ -94,10 +100,7 @@ const TRACKMAN_SIGNATURE_COLS = [
   "Measurement.BallSpeed",
 ];
 
-/**
- * The only fields we store in rawData for a TrackMan shot row.
- * All other columns are dropped to keep the payload lean.
- */
+/** Legacy flat fields retained for existing TrackMan consumers. */
 const TRACKMAN_FIELDS_OF_INTEREST = new Set([
   "Club.Type",
   "Measurement.ClubSpeed",
@@ -106,6 +109,25 @@ const TRACKMAN_FIELDS_OF_INTEREST = new Set([
   "MaxHeight.Height",
   "Measurement.Carry",
   "Measurement.Total",
+]);
+
+const TRACKMAN_SHOT_MEASUREMENT_HEADERS = new Set([
+  ...TRACKMAN_FIELDS_OF_INTEREST,
+  "Measurement.LaunchAngle",
+  "Measurement.LaunchDirection",
+  "Measurement.SpinAxis",
+  "MaxHeight.Dist",
+  "MaxHeight.Side",
+  "Measurement.CarrySide",
+  "Measurement.LandingAngle",
+  "Measurement.CarryBallSpeed",
+  "Measurement.HangTime",
+  "Measurement.TotalSide",
+  "Measurement.AttackAngle",
+  "Measurement.ClubPath",
+  "Measurement.FaceAngle",
+  "Measurement.DynamicLoft",
+  "Measurement.SmashFactor",
 ]);
 
 /**
@@ -331,7 +353,7 @@ export function parseFileBuffer(buffer: Buffer, fileName: string): ParseResult {
   }
 
   if (ext === "xlsx" || ext === "xls") {
-    return parseXlsx(buffer);
+    return parseXlsx(buffer, ext);
   }
 
   throw new Error(
@@ -364,7 +386,7 @@ function parseCsv(buffer: Buffer): ParsedRow[] {
 
 // ── XLSX ──────────────────────────────────────────────────────────────────────
 
-function parseXlsx(buffer: Buffer): ParseResult {
+function parseXlsx(buffer: Buffer, exportFormat: string): ParseResult {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
 
   // Prefer TrackMan-specific parsing when the workbook layout matches.
@@ -393,7 +415,10 @@ function parseXlsx(buffer: Buffer): ParseResult {
           `imperial units=row ${TRACKMAN_IMPERIAL_UNIT_ROW_INDEX + 1} (skipped), ` +
           `data starts row ${TRACKMAN_DATA_START_INDEX + 1}`,
       );
-      const rows = parseTrackManSheet(raw, headerStrings);
+      const rows = parseTrackManSheet(raw, headerStrings, {
+        exportFormat,
+        selectedUnitSystem: readTrackManSelectedUnitSystem(workbook),
+      });
       const { metadata, error: metadataError } = extractTrackManSessionMetadata(raw, headerStrings);
       return {
         rows,
@@ -425,6 +450,27 @@ function parseXlsx(buffer: Buffer): ParseResult {
   return { rows, parserMode: "generic" };
 }
 
+function readTrackManSelectedUnitSystem(workbook: XLSX.WorkBook): string | null {
+  const unitsSheet = workbook.Sheets["Units"];
+  if (!unitsSheet) return null;
+
+  const rows = XLSX.utils.sheet_to_json<(string | null)[]>(unitsSheet, {
+    header: 1,
+    defval: null,
+    raw: false,
+  });
+
+  for (const row of rows) {
+    for (let column = 0; column < row.length; column++) {
+      if (row[column]?.trim() === "Select Unit:") {
+        return row[column + 1]?.trim() || null;
+      }
+    }
+  }
+
+  return null;
+}
+
 // ── TrackMan sheet parser ─────────────────────────────────────────────────────
 
 /**
@@ -435,15 +481,15 @@ function parseXlsx(buffer: Buffer): ParseResult {
  * metric unit row, imperial unit row, and all metadata rows — are NEVER
  * processed as shot data.
  *
- * Each returned object maps header string → cell value (string | null).
- * Only fields listed in TRACKMAN_FIELDS_OF_INTEREST are stored; all other
- * columns (units, group labels, metadata, etc.) are dropped.
+ * Legacy fields are retained as flat key/value pairs and normalized measured
+ * fields are added under `measuredShot`. Other source columns are dropped.
  * Columns with a blank header are omitted.
  * Completely empty rows are omitted.
  */
 function parseTrackManSheet(
   raw: (string | null)[][],
   headers: string[],
+  source: { exportFormat: string; selectedUnitSystem: string | null },
 ): ParsedRow[] {
   // Explicitly slice from DATA_START_INDEX.
   // This is the authoritative guarantee that rows 0–6 are never processed.
@@ -467,6 +513,9 @@ function parseTrackManSheet(
           cellVal !== null ? String(cellVal).trim() : null;
         rowObj[header] = strVal === "" ? null : strVal;
         if (strVal && strVal !== "") hasValue = true;
+      } else if (TRACKMAN_SHOT_MEASUREMENT_HEADERS.has(header)) {
+        const cellVal = rowArr[col] ?? null;
+        if (cellVal !== null && String(cellVal).trim() !== "") hasValue = true;
       } else if (header === TRACKMAN_TAGS_COLUMN) {
         // Tags field — parse into a string array.
         // Tags alone do not count toward hasValue; measurement data determines row validity.
@@ -484,6 +533,17 @@ function parseTrackManSheet(
 
     // Skip rows that are entirely empty.
     if (!hasValue) continue;
+
+    const measuredShot: MeasuredShotV1 = createTrackManMeasuredShot({
+      headers,
+      shotRow: rowArr,
+      siUnitRow: raw[4] ?? [],
+      conversionFactorRow: raw[5] ?? [],
+      displayUnitRow: raw[TRACKMAN_IMPERIAL_UNIT_ROW_INDEX] ?? [],
+      exportFormat: source.exportFormat,
+      selectedUnitSystem: source.selectedUnitSystem,
+    });
+    rowObj[TRACKMAN_MEASURED_SHOT_KEY] = measuredShot;
 
     results.push(rowObj);
   }
@@ -542,4 +602,3 @@ function parseTrackManSheet(
 
   return results;
 }
-
