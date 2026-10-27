@@ -22,6 +22,6 @@ export interface SerializedClubSummary {
   includeInReport: boolean;
   /** Optional price entered during review; copied into DemoClubTest on finalization. */
   estimatedPrice: number | null;
-  /** Non-null when this summary is a "current" comparison child linked to another summary (its parent). */
-  linkedToSummaryId: number | null;
+  /** Current summary ID when this summary is a Test in a comparison group. */
+  currentSummaryId: number | null;
 }

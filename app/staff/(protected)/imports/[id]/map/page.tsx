@@ -112,7 +112,7 @@ export default async function ImportMapPage({
     isManuallyEdited: s.isManuallyEdited,
     includeInReport: s.includeInReport,
     estimatedPrice: toNum(s.estimatedPrice),
-    linkedToSummaryId: s.linkedToSummaryId ?? null,
+    currentSummaryId: s.currentSummaryId ?? null,
   }));
 
   const backHref = "/staff/imports";

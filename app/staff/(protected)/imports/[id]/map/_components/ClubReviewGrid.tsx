@@ -1,10 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconAlertTriangle, IconArrowUpRight, IconX } from "@tabler/icons-react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { useOutsideClick } from "@/hooks/use-outside-click";
+import {
+  canSelectTest,
+  getCurrentForTest,
+  getTestsForCurrent,
+  type SetCurrentTestsResponse,
+} from "./clubComparison";
 import type { SerializedClubSummary } from "./clubSummaryTypes";
 
 interface ShotReviewShot {
@@ -51,13 +58,15 @@ interface ClubReviewGridProps {
   parserMode?: string;
   summaries: SerializedClubSummary[];
   toggling: Set<number>;
-  linking: Set<number>;
   onIdentitySaved: (
     summaryId: number,
     identity: ClubIdentity,
   ) => void;
   onToggleInclude: (summaryId: number, currentIncluded: boolean) => void;
-  onLinkChange: (parentId: number, newChildId: number | null) => void;
+  onSaveTests: (
+    currentSummaryId: number,
+    testSummaryIds: number[],
+  ) => Promise<SetCurrentTestsResponse>;
   onPriceSaved: (summaryId: number, price: number | null) => void;
   onShotSummaryUpdated: (
     summaryId: number,
@@ -159,10 +168,9 @@ export function ClubReviewGrid({
   parserMode,
   summaries,
   toggling,
-  linking,
   onIdentitySaved,
   onToggleInclude,
-  onLinkChange,
+  onSaveTests,
   onPriceSaved,
   onShotSummaryUpdated,
 }: ClubReviewGridProps) {
@@ -182,11 +190,6 @@ export function ClubReviewGrid({
 
   const expandedSummary =
     summaries.find((summary) => summary.id === expandedId) ?? null;
-  const parentIds = new Set(
-    summaries
-      .filter((summary) => summary.linkedToSummaryId !== null)
-      .map((summary) => summary.linkedToSummaryId!),
-  );
 
   const closeSummary = useCallback(() => {
     setExpandedId(null);
@@ -435,32 +438,12 @@ export function ClubReviewGrid({
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {summaries.map((summary) => {
-          const currentChild =
-            summaries.find((candidate) => candidate.linkedToSummaryId === summary.id) ??
-            null;
-          const compareOptions = summaries.filter(
-            (candidate) =>
-              candidate.id !== summary.id &&
-              (candidate.linkedToSummaryId === null ||
-                candidate.linkedToSummaryId === summary.id) &&
-              !parentIds.has(candidate.id),
-          );
-          const parentSummary =
-            summary.linkedToSummaryId === null
-              ? null
-              : summaries.find(
-                  (candidate) => candidate.id === summary.linkedToSummaryId,
-                ) ?? null;
-
           return (
             <ClubCard
               key={summary.id}
               summary={summary}
               isExpanded={expandedId === summary.id}
-              isParent={parentIds.has(summary.id)}
-              currentChildId={currentChild?.id ?? null}
-              compareOptions={compareOptions}
-              parentSummary={parentSummary}
+              summaries={summaries}
               onOpen={openSummary}
             />
           );
@@ -516,31 +499,7 @@ export function ClubReviewGrid({
                       loading={loadingIds.has(expandedSummary.id)}
                       error={shotErrors[expandedSummary.id] ?? null}
                       onRetry={() => loadShots(expandedSummary.id, true)}
-                      isParent={parentIds.has(expandedSummary.id)}
                       isToggling={toggling.has(expandedSummary.id)}
-                      isLinking={linking.has(expandedSummary.id)}
-                      currentChildId={
-                        summaries.find(
-                          (candidate) =>
-                            candidate.linkedToSummaryId === expandedSummary.id,
-                        )?.id ?? null
-                      }
-                      compareOptions={summaries.filter(
-                        (candidate) =>
-                          candidate.id !== expandedSummary.id &&
-                          (candidate.linkedToSummaryId === null ||
-                            candidate.linkedToSummaryId === expandedSummary.id) &&
-                          !parentIds.has(candidate.id),
-                      )}
-                      parentSummary={
-                        expandedSummary.linkedToSummaryId === null
-                          ? null
-                          : summaries.find(
-                              (candidate) =>
-                                candidate.id ===
-                                expandedSummary.linkedToSummaryId,
-                            ) ?? null
-                      }
                       onIdentitySaved={(identity) =>
                         onIdentitySaved(expandedSummary.id, identity)
                       }
@@ -550,9 +509,12 @@ export function ClubReviewGrid({
                           expandedSummary.includeInReport !== false,
                         )
                       }
-                      onLinkChange={(newChildId) =>
-                        onLinkChange(expandedSummary.id, newChildId)
-                      }
+                      summaries={summaries}
+                      onSaveTests={onSaveTests}
+                      onOpenSummary={(summaryId) => {
+                        setExpandedId(summaryId);
+                        loadShots(summaryId);
+                      }}
                       onPriceSaved={(price) =>
                         onPriceSaved(expandedSummary.id, price)
                       }
@@ -578,24 +540,19 @@ export function ClubReviewGrid({
 interface ClubCardProps {
   summary: SerializedClubSummary;
   isExpanded: boolean;
-  isParent: boolean;
-  currentChildId: number | null;
-  compareOptions: SerializedClubSummary[];
-  parentSummary: SerializedClubSummary | null;
+  summaries: SerializedClubSummary[];
   onOpen: (summaryId: number, trigger: HTMLElement) => void;
 }
 
 function ClubCard({
   summary,
   isExpanded,
-  isParent,
-  currentChildId,
-  compareOptions,
-  parentSummary,
+  summaries,
   onOpen,
 }: ClubCardProps) {
   const isIncluded = summary.includeInReport !== false;
-  const isChild = summary.linkedToSummaryId !== null;
+  const tests = getTestsForCurrent(summaries, summary.id);
+  const current = getCurrentForTest(summaries, summary);
 
   return (
     <motion.button
@@ -607,20 +564,23 @@ function ClubCard({
         aria-expanded={isExpanded}
         aria-label={`View ${summary.clubName} details, ${shotCountLabel(summary.shotCount)}`}
         className={`group flex h-full w-full cursor-pointer flex-col rounded-2xl border bg-card p-5 text-left text-foreground shadow-xs transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-          isChild
-            ? "border-primary/30 bg-primary/[0.03]"
-            : !isIncluded
-              ? "border-border opacity-65"
-              : "border-border hover:border-primary/30"
+          !isIncluded
+            ? "border-border opacity-65"
+            : "border-border hover:border-primary/30"
         }`}
       >
         <div className="flex flex-wrap items-center gap-2">
-          {isChild && (
+          {tests.length > 0 && (
             <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              Linked comparison
+              Current · {tests.length} {tests.length === 1 ? "Test" : "Tests"}
             </span>
           )}
-          {!isIncluded && !isChild && (
+          {current && (
+            <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              Test
+            </span>
+          )}
+          {!isIncluded && (
             <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
               Excluded
             </span>
@@ -693,15 +653,9 @@ function ClubCard({
 
         <div className="mt-auto flex items-center justify-between gap-2 pt-5 text-xs">
           <span className="text-muted-foreground">{shotCountLabel(summary.shotCount)}</span>
-          {parentSummary ? (
+          {current ? (
             <span className="max-w-[60%] truncate text-right text-muted-foreground">
-              Compared to {parentSummary.clubName}
-            </span>
-          ) : isParent && currentChildId !== null ? (
-            <span className="max-w-[60%] truncate text-right text-muted-foreground">
-              Compared to{" "}
-              {compareOptions.find((option) => option.id === currentChildId)
-                ?.clubName ?? "linked club"}
+              Compared with {current.clubName}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 font-semibold text-primary">
@@ -972,12 +926,7 @@ interface ExpandedClubDetailProps {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  isParent: boolean;
   isToggling: boolean;
-  isLinking: boolean;
-  currentChildId: number | null;
-  compareOptions: SerializedClubSummary[];
-  parentSummary: SerializedClubSummary | null;
   onIdentitySaved: (identity: ClubIdentity) => void;
   onPriceSaved: (price: number | null) => void;
   onShotInclusionChange: (
@@ -985,7 +934,12 @@ interface ExpandedClubDetailProps {
     included: boolean,
   ) => void;
   onToggleInclude: () => void;
-  onLinkChange: (newChildId: number | null) => void;
+  summaries: SerializedClubSummary[];
+  onSaveTests: (
+    currentSummaryId: number,
+    testSummaryIds: number[],
+  ) => Promise<SetCurrentTestsResponse>;
+  onOpenSummary: (summaryId: number) => void;
 }
 
 function ExpandedClubDetail({
@@ -998,20 +952,18 @@ function ExpandedClubDetail({
   loading,
   error,
   onRetry,
-  isParent,
   isToggling,
-  isLinking,
-  currentChildId,
-  compareOptions,
-  parentSummary,
   onIdentitySaved,
   onPriceSaved,
   onShotInclusionChange,
   onToggleInclude,
-  onLinkChange,
+  summaries,
+  onSaveTests,
+  onOpenSummary,
 }: ExpandedClubDetailProps) {
-  const isChild = summary.linkedToSummaryId !== null;
   const isIncluded = summary.includeInReport !== false;
+  const current = getCurrentForTest(summaries, summary);
+  const tests = getTestsForCurrent(summaries, summary.id);
 
   return (
     <div className="p-5 sm:p-8">
@@ -1024,12 +976,7 @@ function ExpandedClubDetail({
                 Unassigned
               </span>
             )}
-            {isChild && (
-              <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-                Linked comparison
-              </span>
-            )}
-            {!isIncluded && !isChild && (
+            {!isIncluded && (
               <span className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
                 Excluded from report
               </span>
@@ -1238,33 +1185,42 @@ function ExpandedClubDetail({
       </section>
 
       <div className="mt-7 border-t border-border pt-5">
+        <ComparisonEditor
+          summary={summary}
+          summaries={summaries}
+          current={current}
+          tests={tests}
+          onSaveTests={onSaveTests}
+          onOpenSummary={onOpenSummary}
+        />
+      </div>
+
+      <div className="mt-7 border-t border-border pt-5">
         <h3 className="font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Club actions
         </h3>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="mt-3 grid grid-cols-1 gap-3">
           <div className="rounded-xl border border-border bg-muted/30 p-4">
             <p className="text-sm font-medium text-foreground">Report inclusion</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {isChild
-                ? "Linked comparison clubs are excluded from the standalone report."
-                : isIncluded
-                  ? "This club will be included when the fitting is finalized."
-                  : "This club is currently excluded from the report."}
+              {isIncluded
+                ? "This club will be included when the fitting is finalized."
+                : "This club is currently excluded from the report."}
             </p>
             <button
               type="button"
               role="switch"
-              aria-checked={!isChild && isIncluded}
+              aria-checked={isIncluded}
               aria-label={`Include ${summary.clubName} in report`}
-              disabled={isToggling || isChild}
+              disabled={isToggling}
               onClick={onToggleInclude}
               className={`relative mt-3 inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-55 ${
-                !isChild && isIncluded ? "bg-primary" : "bg-muted-foreground/35"
+                isIncluded ? "bg-primary" : "bg-muted-foreground/35"
               }`}
             >
               <span
                 className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                  !isChild && isIncluded ? "translate-x-6" : "translate-x-1"
+                  isIncluded ? "translate-x-6" : "translate-x-1"
                 }`}
               />
             </button>
@@ -1275,56 +1231,6 @@ function ExpandedClubDetail({
             )}
           </div>
 
-          <div className="rounded-xl border border-border bg-muted/30 p-4">
-            <label
-              htmlFor={`compare-to-${summary.id}`}
-              className="text-sm font-medium text-foreground"
-            >
-              Compare to
-            </label>
-            {isChild ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Linked to {parentSummary?.clubName ?? "another club"}
-                {parentSummary?.tags.length
-                  ? ` · ${parentSummary.tags.join(", ")}`
-                  : ""}
-              </p>
-            ) : isParent ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Select one club to link as its comparison.
-              </p>
-            ) : (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Link another club as a comparison for this one.
-              </p>
-            )}
-            {!isChild && (
-              <select
-                id={`compare-to-${summary.id}`}
-                disabled={isLinking}
-                value={currentChildId ?? ""}
-                onChange={(event) =>
-                  onLinkChange(
-                    event.target.value === "" ? null : Number(event.target.value),
-                  )
-                }
-                className="mt-3 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-              >
-                <option value="">None</option>
-                {compareOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.clubName}
-                    {option.tags.length > 0 ? ` — ${option.tags.join(", ")}` : ""}
-                  </option>
-                ))}
-              </select>
-            )}
-            {isLinking && (
-              <p className="mt-2 text-xs text-muted-foreground" role="status">
-                Updating comparison…
-              </p>
-            )}
-          </div>
         </div>
 
         <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -1334,6 +1240,195 @@ function ExpandedClubDetail({
         </div>
       </div>
     </div>
+  );
+}
+
+interface ComparisonEditorProps {
+  summary: SerializedClubSummary;
+  summaries: SerializedClubSummary[];
+  current: SerializedClubSummary | null;
+  tests: SerializedClubSummary[];
+  onSaveTests: (
+    currentSummaryId: number,
+    testSummaryIds: number[],
+  ) => Promise<SetCurrentTestsResponse>;
+  onOpenSummary: (summaryId: number) => void;
+}
+
+function ComparisonEditor({
+  summary,
+  summaries,
+  current,
+  tests,
+  onSaveTests,
+  onOpenSummary,
+}: ComparisonEditorProps) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmedIds = tests.map((test) => test.id).sort((a, b) => a - b);
+  const confirmedKey = confirmedIds.join(",");
+  const [selectionDraft, setSelectionDraft] = useState<{
+    confirmedKey: string;
+    ids: number[];
+  }>(() => ({ confirmedKey, ids: confirmedIds }));
+  const selectedIds =
+    selectionDraft.confirmedKey === confirmedKey
+      ? selectionDraft.ids
+      : confirmedIds;
+
+  if (current) {
+    return (
+      <ComparisonSection summaryId={summary.id}>
+        <p className="mt-1 text-xs text-muted-foreground">
+          This club is being compared against the customer&apos;s {current.clubName}.
+        </p>
+        <button
+          type="button"
+          onClick={() => onOpenSummary(current.id)}
+          className="mt-2 text-xs font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          View comparison
+        </button>
+      </ComparisonSection>
+    );
+  }
+
+  const candidates = summaries.filter((candidate) =>
+    canSelectTest(summaries, summary.id, candidate.id),
+  );
+  const selectedKey = [...selectedIds].sort((a, b) => a - b).join(",");
+  const hasChanges = selectedKey !== confirmedKey;
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await onSaveTests(summary.id, [...selectedIds]);
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Failed to save comparisons. Please try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ComparisonSection
+      summaryId={summary.id}
+      onClick={(event) => event.stopPropagation()}
+      aside={
+        tests.length > 0 ? (
+          <span className="text-xs font-medium text-primary">
+            Current · {tests.length} {tests.length === 1 ? "Test" : "Tests"}
+          </span>
+        ) : null
+      }
+    >
+      <p className="mt-1 text-xs text-muted-foreground">
+        Choose the clubs you want to compare against this club.
+      </p>
+      {candidates.length > 0 ? (
+        <fieldset disabled={saving} className="mt-3 space-y-2">
+          <legend className="sr-only">Choose test clubs</legend>
+          {candidates.map((candidate) => {
+            const existingCurrent = getCurrentForTest(summaries, candidate);
+            return (
+              <label
+                key={candidate.id}
+                className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-muted"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(candidate.id)}
+                  onChange={(event) => {
+                    setSelectionDraft({
+                      confirmedKey,
+                      ids: event.target.checked
+                        ? [...selectedIds, candidate.id]
+                        : selectedIds.filter((id) => id !== candidate.id),
+                    });
+                    setError(null);
+                  }}
+                  className="mt-0.5 accent-primary"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate">{candidate.clubName}</span>
+                  {candidate.tags.length > 0 && (
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {candidate.tags.join(", ")}
+                    </span>
+                  )}
+                  {existingCurrent && existingCurrent.id !== summary.id && (
+                    <span className="block text-xs text-muted-foreground">
+                      Currently compared with {existingCurrent.clubName}; saving will move it.
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
+      ) : (
+        <p className="mt-3 text-xs text-muted-foreground">
+          No eligible test clubs are available.
+        </p>
+      )}
+      {error && (
+        <p className="mt-3 text-xs text-red-600 dark:text-red-400" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          type="button"
+          disabled={saving || !hasChanges}
+          onClick={save}
+          className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save comparison"}
+        </button>
+        {saving && (
+          <span className="text-xs text-muted-foreground" role="status">
+            Saving comparison…
+          </span>
+        )}
+      </div>
+    </ComparisonSection>
+  );
+}
+
+function ComparisonSection({
+  summaryId,
+  aside,
+  onClick,
+  children,
+}: {
+  summaryId: number;
+  aside?: ReactNode;
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
+  children: ReactNode;
+}) {
+  const headingId = `comparison-heading-${summaryId}`;
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="rounded-xl border border-border bg-muted/30 p-4"
+      onClick={onClick}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3
+          id={headingId}
+          className="font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+        >
+          Comparison
+        </h3>
+        {aside}
+      </div>
+      {children}
+    </section>
   );
 }
 

@@ -6,6 +6,12 @@ import {
   ClubReviewGrid,
   type ShotReviewSummaryMetrics,
 } from "./ClubReviewGrid";
+import {
+  isSetCurrentTestsResponse,
+  reconcileCurrentTests,
+  shouldMarkComparisonDirty,
+  type SetCurrentTestsResponse,
+} from "./clubComparison";
 import type { SerializedClubSummary } from "./clubSummaryTypes";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -34,9 +40,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   // IDs currently awaiting a PATCH toggle response
   const [toggling, setToggling] = useState<Set<number>>(new Set());
   const [toggleError, setToggleError] = useState<string | null>(null);
-  // IDs currently awaiting a PATCH link response
-  const [linking, setLinking] = useState<Set<number>>(new Set());
-  const [linkError, setLinkError] = useState<string | null>(null);
 
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
@@ -97,10 +100,12 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           includeInReport: s.includeInReport === undefined ? true : Boolean(s.includeInReport),
           estimatedPrice: toN(s.estimatedPrice),
           tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
-          linkedToSummaryId:
-            s.linkedToSummaryId === null || s.linkedToSummaryId === undefined
-              ? null
-              : Number(s.linkedToSummaryId),
+          currentSummaryId:
+            typeof s.currentSummaryId === "number" &&
+            Number.isSafeInteger(s.currentSummaryId) &&
+            s.currentSummaryId > 0
+              ? s.currentSummaryId
+              : null,
         }),
       );
 
@@ -109,127 +114,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       setGenerateError("Network error — please try again.");
     } finally {
       setGenerating(false);
-    }
-  }
-
-  // parentId: the row whose "Compare To" dropdown changed.
-  // newChildId: the newly selected comparison club (null = unlink).
-  //
-  // Relationship direction: the CHILD row stores linkedToSummaryId pointing at
-  // the parent. So we PATCH the child row, not the parent row.
-  //   Old child (if any) → PATCH { linkedToSummaryId: null }
-  //   New child (if any) → PATCH { linkedToSummaryId: parentId }
-  async function handleLinkChange(parentId: number, newChildId: number | null) {
-    setLinkError(null);
-
-    // Find the row currently linked to this parent (if any)
-    const oldChild = summaries.find((s) => s.linkedToSummaryId === parentId) ?? null;
-
-    if (oldChild?.id === newChildId) return; // no change
-
-    // Optimistic update
-    setSummaries((prev) =>
-      prev.map((s) => {
-        if (oldChild && s.id === oldChild.id) {
-          // Unlink old child — leave includeInReport as-is (user re-enables manually)
-          return { ...s, linkedToSummaryId: null };
-        }
-        if (newChildId !== null && s.id === newChildId) {
-          // Link new child, force includeInReport = false
-          return { ...s, linkedToSummaryId: parentId, includeInReport: false };
-        }
-        return s;
-      }),
-    );
-    setLinking((prev) => new Set(prev).add(parentId));
-
-    try {
-      // Step 1: unlink old child (if any)
-      if (oldChild) {
-        const res = await fetch(
-          `/api/staff/imports/${batchId}/club-summaries/${oldChild.id}`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ linkedToSummaryId: null }),
-          },
-        );
-        if (!res.ok) {
-          // Revert optimistic unlink
-          setSummaries((prev) =>
-            prev.map((s) =>
-              s.id === oldChild.id ? { ...s, linkedToSummaryId: parentId } : s,
-            ),
-          );
-          const json = (await res.json().catch(() => ({}))) as { error?: string };
-          setLinkError(json.error ?? "Failed to update comparison link.");
-          return;
-        }
-      }
-
-      // Step 2: link new child (if selected)
-      if (newChildId !== null) {
-        const res = await fetch(
-          `/api/staff/imports/${batchId}/club-summaries/${newChildId}`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ linkedToSummaryId: parentId }),
-          },
-        );
-        if (!res.ok) {
-          // Revert both optimistic changes
-          setSummaries((prev) =>
-            prev.map((s) => {
-              if (oldChild && s.id === oldChild.id)
-                return { ...s, linkedToSummaryId: parentId };
-              if (s.id === newChildId) return { ...s, linkedToSummaryId: null };
-              return s;
-            }),
-          );
-          const json = (await res.json().catch(() => ({}))) as { error?: string };
-          setLinkError(json.error ?? "Failed to update comparison link.");
-          return;
-        }
-        // Sync server response for the newly linked child
-        const json = (await res.json().catch(() => null)) as {
-          summary?: { linkedToSummaryId?: number | null; includeInReport?: boolean };
-        } | null;
-        if (json?.summary) {
-          setSummaries((prev) =>
-            prev.map((s) =>
-              s.id === newChildId
-                ? {
-                    ...s,
-                    linkedToSummaryId: json!.summary!.linkedToSummaryId ?? null,
-                    includeInReport:
-                      json!.summary!.includeInReport ?? s.includeInReport,
-                  }
-                : s,
-            ),
-          );
-        }
-      }
-
-      if (finalized) setDirty(true);
-    } catch {
-      // Revert both optimistic changes on network error
-      setSummaries((prev) =>
-        prev.map((s) => {
-          if (oldChild && s.id === oldChild.id)
-            return { ...s, linkedToSummaryId: parentId };
-          if (newChildId !== null && s.id === newChildId)
-            return { ...s, linkedToSummaryId: null };
-          return s;
-        }),
-      );
-      setLinkError("Network error — please try again.");
-    } finally {
-      setLinking((prev) => {
-        const next = new Set(prev);
-        next.delete(parentId);
-        return next;
-      });
     }
   }
 
@@ -266,11 +150,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
   }
 
   async function handleToggleInclude(id: number, currentIncluded: boolean) {
-    // Guard: linked children cannot be toggled — their includeInReport is
-    // controlled by the server when linkedToSummaryId is set/cleared.
-    const summary = summaries.find((s) => s.id === id);
-    if (summary?.linkedToSummaryId !== null && summary?.linkedToSummaryId !== undefined) return;
-
     const nextValue = !currentIncluded;
     setToggleError(null);
     // Optimistic update
@@ -310,6 +189,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
             ),
           );
         }
+
         // If the session was finalized, mark it as needing re-finalization
         if (finalized) setDirty(true);
       }
@@ -326,6 +206,55 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
         return next;
       });
     }
+  }
+
+  async function handleSaveTests(
+    currentSummaryId: number,
+    testSummaryIds: number[],
+  ): Promise<SetCurrentTestsResponse> {
+    const response = await fetch(
+      `/api/staff/imports/${batchId}/club-summaries/${currentSummaryId}/tests`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testSummaryIds }),
+      },
+    );
+    let result: unknown;
+    try {
+      result = await response.json();
+    } catch {
+      throw new Error("The comparison response could not be read.");
+    }
+
+    if (!response.ok) {
+      const error =
+        result !== null && typeof result === "object" && !Array.isArray(result)
+          ? (result as Record<string, unknown>).error
+          : null;
+      throw new Error(
+        typeof error === "string" ? error : "Failed to save comparisons.",
+      );
+    }
+
+    if (
+      !isSetCurrentTestsResponse(result, currentSummaryId) ||
+      result.testSummaryIds.some(
+        (id) => !summaries.some((summary) => summary.id === id),
+      )
+    ) {
+      throw new Error("The server returned an invalid comparison response.");
+    }
+
+    setSummaries((previous) =>
+      reconcileCurrentTests(
+        previous,
+        result.currentSummaryId,
+        result.testSummaryIds,
+      ),
+    );
+    if (shouldMarkComparisonDirty(result.changed, finalized)) setDirty(true);
+    return result;
   }
 
   return (
@@ -408,12 +337,6 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           {toggleError}
         </div>
       )}
-      {/* ── Link error ───────────────────────────────────────────────────── */}
-      {linkError && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 font-body dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
-          {linkError}
-        </div>
-      )}
       {/* ── Club review grid ────────────────────────────────────────────────── */}
       {hasSummaries && (
         <ClubReviewGrid
@@ -421,10 +344,9 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           parserMode={parserMode}
           summaries={summaries}
           toggling={toggling}
-          linking={linking}
           onIdentitySaved={handleIdentitySaved}
           onToggleInclude={handleToggleInclude}
-          onLinkChange={handleLinkChange}
+          onSaveTests={handleSaveTests}
           onPriceSaved={handlePriceSaved}
           onShotSummaryUpdated={handleShotSummaryUpdated}
         />
