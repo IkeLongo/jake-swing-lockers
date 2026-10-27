@@ -322,9 +322,8 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
             <span className="font-semibold font-subheading">
               Unassigned shots detected.
             </span>{" "}
-            Some shots had a blank{" "}
-            <code className="rounded bg-muted px-1 text-xs">Club.Type</code>{" "}
-            column. Open the Unassigned club card and choose{" "}
+            Some shots had no club type recorded. Open the Unassigned club card
+            and choose{" "}
             <span className="font-semibold">Edit</span> to name it before
             confirming.
           </p>

@@ -1,30 +1,19 @@
 /**
  * TrackMan Club-Level Aggregation
  *
- * Groups TrackMan shot rows (from ImportRow.rawData) by Club.Type and
- * calculates per-metric averages, ignoring blank/null/non-numeric values.
+ * Groups shot rows through the application-owned shot reader and calculates
+ * the existing summary metrics, ignoring blank/null/non-numeric values.
  *
  * Rules:
- * - Blank / null Club.Type → grouped as "Unassigned"
+ * - Blank / null club type → grouped as "Unassigned"
  * - Only valid finite numbers contribute to averages
  * - Blank values are NEVER treated as zero
  * - avg* is null when no valid values exist for that metric
  * - valid*Count tracks how many shots contributed to each average
  */
+import { readGolfShotMeasurements } from "./golfShotMeasurements";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-/** The TrackMan fields we aggregate. Keys match column names in rawData. */
-const METRIC_FIELDS = [
-  "Measurement.ClubSpeed",
-  "Measurement.BallSpeed",
-  "Measurement.SpinRate",
-  "MaxHeight.Height",
-  "Measurement.Carry",
-  "Measurement.Total",
-] as const;
-
-type MetricField = (typeof METRIC_FIELDS)[number];
 
 /** Normalized summary for one club+tags group, ready to be inserted into ImportClubSummary. */
 export interface ClubSummaryInput {
@@ -103,51 +92,51 @@ export function averageValidNumbers(values: number[]): number | null {
 export function calculateTrackManSummaryMetrics(
   rows: readonly Record<string, unknown>[],
 ): TrackManSummaryMetrics {
-  const values: Record<MetricField, number[]> = {
-    "Measurement.ClubSpeed": [],
-    "Measurement.BallSpeed": [],
-    "Measurement.SpinRate": [],
-    "MaxHeight.Height": [],
-    "Measurement.Carry": [],
-    "Measurement.Total": [],
+  const values = {
+    clubSpeed: [] as number[],
+    ballSpeed: [] as number[],
+    spinRate: [] as number[],
+    maxHeight: [] as number[],
+    carry: [] as number[],
+    total: [] as number[],
   };
 
   for (const row of rows) {
-    for (const field of METRIC_FIELDS) {
-      const value = safeNumber(row[field]);
-      if (value !== null) values[field].push(value);
+    const metrics = readGolfShotMeasurements(row).summaryMetrics;
+    for (const key of Object.keys(values) as (keyof typeof values)[]) {
+      const value = metrics[key];
+      if (value !== null) values[key].push(value);
     }
   }
 
   return {
     shotCount: rows.length,
-    avgClubSpeed: averageValidNumbers(values["Measurement.ClubSpeed"]),
-    avgBallSpeed: averageValidNumbers(values["Measurement.BallSpeed"]),
-    avgSpinRate: averageValidNumbers(values["Measurement.SpinRate"]),
-    avgMaxHeight: averageValidNumbers(values["MaxHeight.Height"]),
-    avgCarry: averageValidNumbers(values["Measurement.Carry"]),
-    avgTotal: averageValidNumbers(values["Measurement.Total"]),
-    validClubSpeedCount: values["Measurement.ClubSpeed"].length,
-    validBallSpeedCount: values["Measurement.BallSpeed"].length,
-    validSpinRateCount: values["Measurement.SpinRate"].length,
-    validMaxHeightCount: values["MaxHeight.Height"].length,
-    validCarryCount: values["Measurement.Carry"].length,
-    validTotalCount: values["Measurement.Total"].length,
+    avgClubSpeed: averageValidNumbers(values.clubSpeed),
+    avgBallSpeed: averageValidNumbers(values.ballSpeed),
+    avgSpinRate: averageValidNumbers(values.spinRate),
+    avgMaxHeight: averageValidNumbers(values.maxHeight),
+    avgCarry: averageValidNumbers(values.carry),
+    avgTotal: averageValidNumbers(values.total),
+    validClubSpeedCount: values.clubSpeed.length,
+    validBallSpeedCount: values.ballSpeed.length,
+    validSpinRateCount: values.spinRate.length,
+    validMaxHeightCount: values.maxHeight.length,
+    validCarryCount: values.carry.length,
+    validTotalCount: values.total.length,
   };
 }
 
 // ── Aggregation ───────────────────────────────────────────────────────────────
 
 /**
- * Group shot rows by Club.Type + Tags and return per-group summaries and the
+ * Group shot rows by club type + tags and return per-group summaries and the
  * input row indexes that belong to each group.
  *
  * Rows with the same club but different tags produce separate summary rows.
  * Tags are normalized (trimmed, sorted) before grouping so that whitespace
  * differences never create phantom groups.
  *
- * @param rows - Array of rawData objects from ImportRow (or any similar
- *               Record<string, unknown> from the parsed XLSX).
+ * @param rows - Array of ImportRow rawData objects.
  * @returns Groups sorted alphabetically by clubName then tags, with "Unassigned" last.
  */
 export function aggregateTrackManClubGroups(
@@ -166,7 +155,8 @@ export function aggregateTrackManClubGroups(
   >();
 
   for (const [rowIndex, row] of rows.entries()) {
-    const rawClub = row["Club.Type"];
+    const shot = readGolfShotMeasurements(row);
+    const rawClub = shot.clubType;
     const clubStr =
       rawClub !== null && rawClub !== undefined
         ? String(rawClub).trim()
@@ -176,8 +166,7 @@ export function aggregateTrackManClubGroups(
     const clubName = isUnassigned ? "Unassigned" : clubStr;
 
     // Normalize tags: trim, filter blanks, sort for a stable group key
-    const rawTags = Array.isArray(row["tags"]) ? (row["tags"] as unknown[]) : [];
-    const normalizedTags = rawTags
+    const normalizedTags = shot.tags
       .filter((t): t is string => typeof t === "string")
       .map((t) => t.trim())
       .filter((t) => t.length > 0)

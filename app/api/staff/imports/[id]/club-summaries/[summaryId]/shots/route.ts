@@ -2,22 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { isStagedTrackManBatch, parsePositiveRouteId } from "@/lib/imports/trackmanShotReview";
-
-type RawShotData = Record<string, unknown>;
-
-function asRawShotData(value: unknown): RawShotData {
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    return value as RawShotData;
-  }
-  return {};
-}
-
-function textValue(value: unknown): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return null;
-}
+import { getShotReviewShotData } from "@/lib/imports/golfShotMeasurements";
 
 function numberValue(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -95,22 +80,11 @@ export async function GET(
       avgTotal: numberValue(summary.avgTotal),
     },
     shots: rows.map((row) => {
-      const rawData = asRawShotData(row.rawData);
-      const rawTags = rawData.tags;
       return {
         id: row.id,
         rowIndex: row.rowIndex,
         included: row.includedInSummary !== false,
-        clubType: textValue(rawData["Club.Type"]),
-        tags: Array.isArray(rawTags)
-          ? rawTags.filter((tag): tag is string => typeof tag === "string")
-          : [],
-        clubSpeed: textValue(rawData["Measurement.ClubSpeed"]),
-        ballSpeed: textValue(rawData["Measurement.BallSpeed"]),
-        spinRate: textValue(rawData["Measurement.SpinRate"]),
-        maxHeight: textValue(rawData["MaxHeight.Height"]),
-        carry: textValue(rawData["Measurement.Carry"]),
-        total: textValue(rawData["Measurement.Total"]),
+        ...getShotReviewShotData(row.rawData),
       };
     }),
   });
