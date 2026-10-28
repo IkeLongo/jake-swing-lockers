@@ -133,6 +133,10 @@ export function ClubFlightVisualization({
               embedded ? "h-[18rem] min-h-[18rem]" : "h-64 sm:h-80"
             } min-w-0 overflow-hidden rounded-xl border border-border bg-muted/30`}
           >
+            {/* TODO: golf-shot-viz@0.2.0 hardcodes trajectory line width, so the
+                70% canvas opacity below is a temporary visual workaround. Once
+                configurable width is exposed, use thinner lines and restore
+                normal canvas opacity. */}
             <GolfShotViz
               ref={sceneRef}
               key={resolvedTheme ?? "light"}
