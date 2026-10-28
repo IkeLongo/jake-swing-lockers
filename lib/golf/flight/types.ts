@@ -18,6 +18,7 @@ export interface ModeledShotInput {
   shotId: string;
   rowIndex: number;
   included: boolean;
+  clubSummaryId?: number;
   measurements: FlightMeasurementInput;
 }
 
@@ -63,6 +64,7 @@ export interface ModeledShotFlight {
   shotId: string;
   rowIndex: number;
   included: boolean;
+  clubSummaryId?: number;
   status: "modeled" | "insufficient-data";
   insufficientReasons: InsufficientFlightReason[];
   lateralStatus: "modeled" | "insufficient-data";

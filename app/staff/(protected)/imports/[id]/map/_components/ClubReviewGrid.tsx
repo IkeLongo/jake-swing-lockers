@@ -10,6 +10,8 @@ import { buildClubFlightModel } from "@/lib/golf/flight/modeledFlight";
 import { toModeledShotInput } from "@/lib/golf/flight/shotReviewFlightInput";
 import { yardsToFeet } from "@/lib/golf/flight/units";
 import type { ShotReviewMeasurements } from "@/lib/imports/golfShotMeasurements";
+import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
+import { isFittingVisualizationData } from "./reviewFittingDashboardState";
 import { ClubFlightVisualization } from "./ClubFlightVisualization";
 import {
   canSelectTest,
@@ -19,7 +21,6 @@ import {
 } from "./clubComparison";
 import type { SerializedClubSummary } from "./clubSummaryTypes";
 import { ReviewFittingDashboard } from "./ReviewFittingDashboard";
-import { resolveSelectedClubId } from "./reviewFittingDashboardState";
 
 interface ShotReviewShot {
   id: number;
@@ -182,7 +183,6 @@ export function ClubReviewGrid({
   onShotSummaryUpdated,
 }: ClubReviewGridProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
   const [shotData, setShotData] = useState<Record<number, ShotReviewResponse>>({});
   const [shotErrors, setShotErrors] = useState<Record<number, string>>({});
   const [shotActionErrors, setShotActionErrors] = useState<
@@ -190,30 +190,98 @@ export function ClubReviewGrid({
   >({});
   const [savingShotIds, setSavingShotIds] = useState<Set<number>>(new Set());
   const [loadingIds, setLoadingIds] = useState<Set<number>>(new Set());
+  const [visualizationData, setVisualizationData] =
+    useState<FittingVisualizationData | null>(null);
+  const [visualizationLoading, setVisualizationLoading] = useState(false);
+  const [visualizationError, setVisualizationError] = useState<string | null>(
+    null,
+  );
   const panelRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const requestsRef = useRef(new Map<number, AbortController>());
   const savingShotIdsRef = useRef(new Set<number>());
+  const visualizationRequestRef = useRef<AbortController | null>(null);
+  const visualizationLoadedBatchIdRef = useRef<number | null>(null);
+  const visualizationRequestBatchIdRef = useRef<number | null>(null);
+  const dashboardInclusionOverridesRef = useRef(new Map<string, boolean>());
 
   const expandedSummary =
     summaries.find((summary) => summary.id === expandedId) ?? null;
-  const resolvedSelectedClubId = resolveSelectedClubId(
-    selectedClubId,
-    summaries,
-  );
-
-  useEffect(() => {
-    if (selectedClubId !== resolvedSelectedClubId) {
-      setSelectedClubId(resolvedSelectedClubId);
-    }
-  }, [resolvedSelectedClubId, selectedClubId]);
-
   const closeSummary = useCallback(() => {
     setExpandedId(null);
   }, []);
 
   useOutsideClick(panelRef, closeSummary);
+
+  const loadVisualizationData = useCallback(
+    (force = false) => {
+      if (parserMode !== "trackman-result") return;
+      if (
+        !force &&
+        (visualizationLoadedBatchIdRef.current === batchId ||
+          visualizationRequestBatchIdRef.current === batchId)
+      ) {
+        return;
+      }
+
+      visualizationRequestRef.current?.abort();
+      const controller = new AbortController();
+      visualizationRequestRef.current = controller;
+      visualizationRequestBatchIdRef.current = batchId;
+      setVisualizationLoading(true);
+      setVisualizationError(null);
+      setVisualizationData(null);
+      dashboardInclusionOverridesRef.current.clear();
+
+      void fetch(`/api/staff/imports/${batchId}/visualization-data`, {
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          const result: unknown = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(
+              apiErrorMessage(result) ??
+                "Could not load fitting visualization data.",
+            );
+          }
+          if (!isFittingVisualizationData(result)) {
+            throw new Error(
+              "The fitting visualization response was invalid. Please try again.",
+            );
+          }
+          visualizationLoadedBatchIdRef.current = batchId;
+          setVisualizationData({
+            shots: result.shots.map((shot) => ({
+              ...shot,
+              included:
+                dashboardInclusionOverridesRef.current.get(shot.shotId) ??
+                shot.included,
+            })),
+          });
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setVisualizationError(
+            error instanceof Error
+              ? error.message
+              : "Could not load fitting visualization data.",
+          );
+        })
+        .finally(() => {
+          if (visualizationRequestRef.current === controller) {
+            visualizationRequestRef.current = null;
+            visualizationRequestBatchIdRef.current = null;
+            setVisualizationLoading(false);
+          }
+        });
+    },
+    [batchId, parserMode],
+  );
+
+  useEffect(() => {
+    loadVisualizationData();
+  }, [loadVisualizationData]);
 
   const loadShots = useCallback(
     (summaryId: number, force = false) => {
@@ -329,6 +397,22 @@ export function ClubReviewGrid({
           },
         };
       });
+      dashboardInclusionOverridesRef.current.set(
+        String(shot.id),
+        result.shot.included,
+      );
+      setVisualizationData((current) =>
+        current
+          ? {
+              ...current,
+              shots: current.shots.map((dashboardShot) =>
+                dashboardShot.shotId === String(shot.id)
+                  ? { ...dashboardShot, included: result.shot.included }
+                  : dashboardShot,
+              ),
+            }
+          : current,
+      );
       onShotSummaryUpdated(summaryId, result.summary);
     } catch (error: unknown) {
       setShotActionErrors((current) => ({
@@ -358,6 +442,9 @@ export function ClubReviewGrid({
     () => () => {
       requestsRef.current.forEach((controller) => controller.abort());
       requestsRef.current.clear();
+      visualizationRequestRef.current?.abort();
+      visualizationRequestRef.current = null;
+      visualizationRequestBatchIdRef.current = null;
     },
     [],
   );
@@ -457,9 +544,11 @@ export function ClubReviewGrid({
       {parserMode === "trackman-result" ? (
         <ReviewFittingDashboard
           summaries={summaries}
-          selectedClubId={resolvedSelectedClubId}
-          onSelectedClubIdChange={setSelectedClubId}
           onOpenSummary={openSummary}
+          visualizationData={visualizationData}
+          visualizationLoading={visualizationLoading}
+          visualizationError={visualizationError}
+          onRetryVisualizationData={() => loadVisualizationData(true)}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">

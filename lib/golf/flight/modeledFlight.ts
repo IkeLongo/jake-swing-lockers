@@ -279,6 +279,9 @@ function buildShotFlight(
       shotId: shot.shotId,
       rowIndex: shot.rowIndex,
       included: shot.included,
+      ...(shot.clubSummaryId === undefined
+        ? {}
+        : { clubSummaryId: shot.clubSummaryId }),
       status: "insufficient-data",
       insufficientReasons: reasons,
       lateralStatus: "insufficient-data",
@@ -305,6 +308,9 @@ function buildShotFlight(
     shotId: shot.shotId,
     rowIndex: shot.rowIndex,
     included: shot.included,
+    ...(shot.clubSummaryId === undefined
+      ? {}
+      : { clubSummaryId: shot.clubSummaryId }),
     status: "modeled",
     insufficientReasons: [],
     lateralStatus: lateral.segments ? "modeled" : "insufficient-data",

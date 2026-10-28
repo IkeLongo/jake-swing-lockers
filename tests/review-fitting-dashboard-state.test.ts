@@ -2,13 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   formatClubResultMetric,
-  resolveSelectedClubId,
+  normalizeClubFilterSelection,
+  toggleClubFilterSelection,
 } from "../app/staff/(protected)/imports/[id]/map/_components/reviewFittingDashboardState";
 
-test("selected club remains valid across summary updates", () => {
-  assert.equal(resolveSelectedClubId(12, [{ id: 12 }, { id: 18 }]), 12);
-  assert.equal(resolveSelectedClubId(12, [{ id: 18 }]), null);
-  assert.equal(resolveSelectedClubId(null, [{ id: 12 }]), null);
+test("club filter defaults to all and normalizes stale and complete selections", () => {
+  assert.equal(normalizeClubFilterSelection(null, [12, 18]), null);
+  assert.deepEqual(
+    [...normalizeClubFilterSelection(new Set([12, 99]), [12, 18])!],
+    [12],
+  );
+  assert.equal(normalizeClubFilterSelection(new Set([12]), [12]), null);
+  assert.equal(normalizeClubFilterSelection(new Set([12, 18]), [12, 18]), null);
+});
+
+test("All Clubs resets partial multi-club selections", () => {
+  assert.equal(toggleClubFilterSelection(new Set([12, 18]), [12, 18, 24], null), null);
 });
 
 test("club result metrics format null and non-finite values neutrally", () => {

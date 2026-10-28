@@ -1,30 +1,100 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
+import { useMemo, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
+import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
+import { ClubFlightVisualization, FLIGHT_PALETTE } from "./ClubFlightVisualization";
 import {
+  buildFittingFlightModel,
+  buildFittingClubLegend,
+  createClubColorMap,
   formatClubResultMetric,
+  normalizeClubFilterSelection,
+  toggleClubFilterSelection,
+  type ClubFilterSelection,
   type ClubResultSummary,
 } from "./reviewFittingDashboardState";
 
 interface ReviewFittingDashboardProps {
   summaries: readonly ClubResultSummary[];
-  selectedClubId: number | null;
-  onSelectedClubIdChange: (clubId: number | null) => void;
   onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
+  visualizationData: FittingVisualizationData | null;
+  visualizationLoading: boolean;
+  visualizationError: string | null;
+  onRetryVisualizationData: () => void;
 }
 
 export function ReviewFittingDashboard({
   summaries,
-  selectedClubId,
-  onSelectedClubIdChange,
   onOpenSummary,
+  visualizationData,
+  visualizationLoading,
+  visualizationError,
+  onRetryVisualizationData,
 }: ReviewFittingDashboardProps) {
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [selectedSummaryIds, setSelectedSummaryIds] =
+    useState<ClubFilterSelection>(null);
+  const summaryIds = useMemo(
+    () => summaries.map((summary) => summary.id),
+    [summaries],
+  );
+  const normalizedSelection = useMemo(
+    () => normalizeClubFilterSelection(selectedSummaryIds, summaryIds),
+    [selectedSummaryIds, summaryIds],
+  );
+  const colorsBySummaryId = useMemo(
+    () =>
+      createClubColorMap(
+        summaries.map((summary) => summary.id),
+        FLIGHT_PALETTE,
+      ),
+    [summaries],
+  );
+  const namesBySummaryId = useMemo(
+    () => new Map(summaries.map((summary) => [summary.id, clubLabel(summary, summaries)])),
+    [summaries],
+  );
+  const clubOptions = useMemo(
+    () => ({ colorsBySummaryId, namesBySummaryId }),
+    [colorsBySummaryId, namesBySummaryId],
+  );
+  const selectedFlightData = useMemo(
+    () =>
+      buildFittingFlightModel(
+        visualizationData?.shots ?? [],
+        normalizedSelection,
+      ),
+    [normalizedSelection, visualizationData],
+  );
+  const clubLegend = useMemo(() => {
+    return buildFittingClubLegend(
+      selectedFlightData.flights,
+      summaries,
+      colorsBySummaryId,
+      namesBySummaryId,
+    );
+  }, [
+    colorsBySummaryId,
+    selectedFlightData.flights,
+    namesBySummaryId,
+    summaries,
+  ]);
+  const handleClubFilterChange = (summaryId: number | null) => {
+    setSelectedSummaryIds((current) =>
+      toggleClubFilterSelection(current, summaryIds, summaryId),
+    );
+  };
+  const handleShotSelectionChange = (shotId: string | null) => {
+    setSelectedShotId(shotId);
+  };
   return (
     <div className="space-y-5">
       <ClubFilter
         summaries={summaries}
-        selectedClubId={selectedClubId}
-        onSelectedClubIdChange={onSelectedClubIdChange}
+        selectedSummaryIds={normalizedSelection}
+        colorsBySummaryId={colorsBySummaryId}
+        onSelectionChange={handleClubFilterChange}
       />
 
       <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.52fr)_minmax(0,1fr)]">
@@ -38,11 +108,42 @@ export function ReviewFittingDashboard({
         <VisualizationPanel
           title="Shot Analyzer"
           description="How the shots flew."
-          detail="Modeled flight from measured TrackMan data"
-          dataLabel="Modeled trajectories"
           featured
-          className="min-h-64"
-        />
+          className="min-h-[25rem]"
+        >
+          {visualizationLoading ? (
+            <p
+              className="flex min-h-64 flex-1 items-center justify-center text-sm text-muted-foreground"
+              role="status"
+            >
+              Loading fitting flights…
+            </p>
+          ) : visualizationError ? (
+            <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 text-center">
+              <p className="text-sm text-muted-foreground" role="alert">
+                {visualizationError}
+              </p>
+              <button
+                type="button"
+                onClick={onRetryVisualizationData}
+                className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <ClubFlightVisualization
+              flights={selectedFlightData.flights}
+              includedShotCount={selectedFlightData.shots.length}
+              selectedShotId={selectedShotId}
+              onSelectedShotChange={handleShotSelectionChange}
+              embedded
+              showSelectedFlightDetail={false}
+              clubOptions={clubOptions}
+              clubLegend={clubLegend}
+            />
+          )}
+        </VisualizationPanel>
         <VisualizationPanel
           title="Gapping"
           description="Distance separation between clubs."
@@ -54,7 +155,7 @@ export function ReviewFittingDashboard({
 
       <ClubResults
         summaries={summaries}
-        selectedClubId={selectedClubId}
+        selectedSummaryIds={normalizedSelection}
         onOpenSummary={onOpenSummary}
       />
     </div>
@@ -63,12 +164,14 @@ export function ReviewFittingDashboard({
 
 function ClubFilter({
   summaries,
-  selectedClubId,
-  onSelectedClubIdChange,
+  selectedSummaryIds,
+  colorsBySummaryId,
+  onSelectionChange,
 }: {
   summaries: readonly ClubResultSummary[];
-  selectedClubId: number | null;
-  onSelectedClubIdChange: (clubId: number | null) => void;
+  selectedSummaryIds: ClubFilterSelection;
+  colorsBySummaryId: ReadonlyMap<number, string>;
+  onSelectionChange: (summaryId: number | null) => void;
 }) {
   const clubNameCounts = new Map<string, number>();
   for (const summary of summaries) {
@@ -86,10 +189,10 @@ function ClubFilter({
       <div className="flex max-w-full gap-2 overflow-x-auto pb-1">
         <button
           type="button"
-          aria-pressed={selectedClubId === null}
-          onClick={() => onSelectedClubIdChange(null)}
+          aria-pressed={selectedSummaryIds === null}
+          onClick={() => onSelectionChange(null)}
           className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-            selectedClubId === null
+            selectedSummaryIds === null
               ? "border-primary bg-primary text-primary-foreground"
               : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
@@ -100,21 +203,30 @@ function ClubFilter({
           <button
             key={summary.id}
             type="button"
-            aria-pressed={selectedClubId === summary.id}
-            onClick={() => onSelectedClubIdChange(summary.id)}
+            aria-pressed={selectedSummaryIds?.has(summary.id) ?? false}
+            onClick={() => onSelectionChange(summary.id)}
             className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-              selectedClubId === summary.id
-                ? "border-primary bg-primary text-primary-foreground"
+              selectedSummaryIds?.has(summary.id)
+                ? "bg-muted text-foreground shadow-sm"
                 : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
+            style={
+              selectedSummaryIds?.has(summary.id)
+                ? { borderColor: colorsBySummaryId.get(summary.id) }
+                : undefined
+            }
           >
-              <span className="block max-w-56 truncate">
-                {summary.clubName}
-                {(clubNameCounts.get(summary.clubName) ?? 0) > 1 &&
-                  summary.tags.length > 0 &&
-                  ` · ${summary.tags.join(", ")}`}
-              </span>
-            </button>
+            <span className="flex max-w-56 items-center gap-1.5 truncate">
+              {selectedSummaryIds?.has(summary.id) && (
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: colorsBySummaryId.get(summary.id) }}
+                />
+              )}
+              {clubLabel(summary, summaries, clubNameCounts)}
+            </span>
+          </button>
         ))}
       </div>
     </section>
@@ -128,13 +240,15 @@ function VisualizationPanel({
   dataLabel,
   featured = false,
   className,
+  children,
 }: {
   title: string;
   description: string;
-  detail: string;
-  dataLabel: string;
+  detail?: string;
+  dataLabel?: string;
   featured?: boolean;
   className: string;
+  children?: ReactNode;
 }) {
   return (
     <section
@@ -154,29 +268,39 @@ function VisualizationPanel({
         <p className="mt-1 text-xs text-muted-foreground">{description}</p>
       </header>
       <div
-        className={`flex min-h-0 flex-1 items-center justify-center border-t border-border/70 bg-muted/20 px-4 py-5 text-center ${
+        className={`flex min-h-0 flex-1 border-t border-border/70 ${
+          children
+            ? "min-w-0 p-3 sm:p-4"
+            : "items-center justify-center bg-muted/20 px-4 py-5 text-center"
+        } ${
           featured ? "min-h-44" : "min-h-32"
         }`}
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, color-mix(in srgb, var(--border) 35%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--border) 35%, transparent) 1px, transparent 1px)",
-          backgroundSize: "52px 52px",
-        }}
+        style={children ? undefined : {
+            backgroundImage:
+              "linear-gradient(to right, color-mix(in srgb, var(--border) 35%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--border) 35%, transparent) 1px, transparent 1px)",
+            backgroundSize: "52px 52px",
+          }}
       >
-        <div className="flex flex-col items-center gap-2">
-          <span className="rounded-full border border-border bg-card/90 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {dataLabel}
-          </span>
-          <p
-            className={`font-medium ${
-              featured
-                ? "text-sm text-foreground"
-                : "text-xs text-muted-foreground"
-            }`}
-          >
-            {detail}
-          </p>
-        </div>
+        {children ?? (
+          <div className="flex flex-col items-center gap-2">
+            {dataLabel && (
+              <span className="rounded-full border border-border bg-card/90 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {dataLabel}
+              </span>
+            )}
+            {detail && (
+              <p
+                className={`font-medium ${
+                  featured
+                    ? "text-sm text-foreground"
+                    : "text-xs text-muted-foreground"
+                }`}
+              >
+                {detail}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -184,11 +308,11 @@ function VisualizationPanel({
 
 function ClubResults({
   summaries,
-  selectedClubId,
+  selectedSummaryIds,
   onOpenSummary,
 }: {
   summaries: readonly ClubResultSummary[];
-  selectedClubId: number | null;
+  selectedSummaryIds: ClubFilterSelection;
   onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
 }) {
   return (
@@ -276,7 +400,9 @@ function ClubResults({
                   onOpenSummary(summary.id, event.currentTarget);
                 }}
                 className={`cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 ${
-                  selectedClubId === summary.id ? "bg-primary/[0.035]" : ""
+                  selectedSummaryIds?.has(summary.id)
+                    ? "bg-primary/[0.035]"
+                    : ""
                 } ${summary.includeInReport === false ? "opacity-60" : ""}`}
               >
                 <th
@@ -352,4 +478,19 @@ function ResultMetric({
       )}
     </>
   );
+}
+
+function clubLabel(
+  summary: Pick<ClubResultSummary, "clubName" | "tags" | "id">,
+  summaries: readonly ClubResultSummary[],
+  existingCounts?: ReadonlyMap<string, number>,
+): string {
+  const name = summary.clubName.trim() || "Unknown Club";
+  const duplicateCount =
+    existingCounts?.get(summary.clubName) ??
+    summaries.filter((candidate) => candidate.clubName === summary.clubName)
+      .length;
+  return duplicateCount > 1 && summary.tags.length > 0
+    ? `${name} · ${summary.tags.join(", ")}`
+    : name;
 }
