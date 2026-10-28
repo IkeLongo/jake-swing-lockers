@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
 import { ClubFlightVisualization, FLIGHT_PALETTE } from "./ClubFlightVisualization";
+import { DispersionChart } from "./DispersionChart";
+import { buildDispersionPoints } from "./reviewFittingDispersion";
 import {
   buildFittingFlightModel,
   buildFittingClubLegend,
@@ -67,6 +69,10 @@ export function ReviewFittingDashboard({
       ),
     [normalizedSelection, visualizationData],
   );
+  const dispersion = useMemo(
+    () => buildDispersionPoints(visualizationData?.shots ?? [], normalizedSelection),
+    [normalizedSelection, visualizationData],
+  );
   const clubLegend = useMemo(() => {
     return buildFittingClubLegend(
       selectedFlightData.flights,
@@ -88,6 +94,28 @@ export function ReviewFittingDashboard({
   const handleShotSelectionChange = (shotId: string | null) => {
     setSelectedShotId(shotId);
   };
+  const dataState = visualizationLoading ? (
+    <p
+      className="flex min-h-64 flex-1 items-center justify-center text-sm text-muted-foreground"
+      role="status"
+    >
+      Loading fitting shots…
+    </p>
+  ) : visualizationError ? (
+    <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 text-center">
+      <p className="text-sm text-muted-foreground" role="alert">
+        {visualizationError}
+      </p>
+      <button
+        type="button"
+        onClick={onRetryVisualizationData}
+        className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        Retry
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-5">
       <ClubFilter
@@ -101,37 +129,24 @@ export function ReviewFittingDashboard({
         <VisualizationPanel
           title="Dispersion"
           description="Where the shots finished."
-          detail="Measured landing pattern"
-          dataLabel="TrackMan measured"
           className="min-h-56 xl:row-span-2 xl:min-h-[34rem]"
-        />
+        >
+          {dataState ?? (
+            <DispersionChart
+              points={dispersion.points}
+              includedShotCount={dispersion.includedShotCount}
+              colorsBySummaryId={colorsBySummaryId}
+              namesBySummaryId={namesBySummaryId}
+            />
+          )}
+        </VisualizationPanel>
         <VisualizationPanel
           title="Shot Analyzer"
           description="How the shots flew."
           featured
           className="min-h-[25rem]"
         >
-          {visualizationLoading ? (
-            <p
-              className="flex min-h-64 flex-1 items-center justify-center text-sm text-muted-foreground"
-              role="status"
-            >
-              Loading fitting flights…
-            </p>
-          ) : visualizationError ? (
-            <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 text-center">
-              <p className="text-sm text-muted-foreground" role="alert">
-                {visualizationError}
-              </p>
-              <button
-                type="button"
-                onClick={onRetryVisualizationData}
-                className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                Retry
-              </button>
-            </div>
-          ) : (
+          {dataState ?? (
             <ClubFlightVisualization
               flights={selectedFlightData.flights}
               includedShotCount={selectedFlightData.shots.length}
