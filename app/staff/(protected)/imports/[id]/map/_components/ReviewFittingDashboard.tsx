@@ -5,6 +5,8 @@ import type { KeyboardEvent, ReactNode } from "react";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
 import { ClubFlightVisualization, FLIGHT_PALETTE } from "./ClubFlightVisualization";
 import { DispersionChart } from "./DispersionChart";
+import { GappingChart } from "./GappingChart";
+import { buildGappingRows } from "./reviewFittingGapping";
 import { buildDispersionPoints } from "./reviewFittingDispersion";
 import {
   buildFittingFlightModel,
@@ -73,6 +75,10 @@ export function ReviewFittingDashboard({
     () => buildDispersionPoints(visualizationData?.shots ?? [], normalizedSelection),
     [normalizedSelection, visualizationData],
   );
+  const gapping = useMemo(
+    () => buildGappingRows(visualizationData?.shots ?? [], normalizedSelection),
+    [normalizedSelection, visualizationData],
+  );
   const clubLegend = useMemo(() => {
     return buildFittingClubLegend(
       selectedFlightData.flights,
@@ -125,11 +131,11 @@ export function ReviewFittingDashboard({
         onSelectionChange={handleClubFilterChange}
       />
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.52fr)_minmax(0,1fr)]">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <VisualizationPanel
           title="Dispersion"
           description="Where the shots finished."
-          className="min-h-56 xl:row-span-2 xl:min-h-[34rem]"
+          className="min-h-56"
         >
           {dataState ?? (
             <DispersionChart
@@ -162,10 +168,17 @@ export function ReviewFittingDashboard({
         <VisualizationPanel
           title="Gapping"
           description="Distance separation between clubs."
-          detail="Carry distance by club"
-          dataLabel="Carry distance"
-          className="min-h-52"
-        />
+          className="min-h-52 xl:col-span-2"
+        >
+          {dataState ?? (
+            <GappingChart
+              rows={gapping.rows}
+              includedShotCount={gapping.includedShotCount}
+              colorsBySummaryId={colorsBySummaryId}
+              namesBySummaryId={namesBySummaryId}
+            />
+          )}
+        </VisualizationPanel>
       </div>
 
       <ClubResults

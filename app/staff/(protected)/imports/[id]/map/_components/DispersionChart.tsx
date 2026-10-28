@@ -25,7 +25,7 @@ interface DispersionChartProps {
 // 5. Before implementing, choose and document the statistical coverage level
 //    (e.g. 1σ covariance ellipse vs another confidence/coverage level).
 const WIDTH = 360;
-const HEIGHT = 460;
+const HEIGHT = 380;
 const MARGIN = { top: 14, right: 16, bottom: 40, left: 46 };
 const PLOT_WIDTH = WIDTH - MARGIN.left - MARGIN.right;
 const PLOT_HEIGHT = HEIGHT - MARGIN.top - MARGIN.bottom;
@@ -78,12 +78,12 @@ export function DispersionChart({
       aria-label="Measured carry dispersion"
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex min-h-0 flex-1 items-center justify-center">
+      <div className="flex min-h-0 items-start justify-center">
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           role="img"
           aria-label="Top-down scatter of measured carry distance and lateral carry position"
-          className="h-full max-h-[34rem] w-full min-w-0 text-muted-foreground"
+          className="h-auto max-h-[34rem] w-full min-w-0 text-muted-foreground"
           preserveAspectRatio="xMidYMid meet"
         >
           {bounds.carryTicks.map((tick) => (
