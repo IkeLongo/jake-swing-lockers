@@ -18,6 +18,8 @@ import {
   type SetCurrentTestsResponse,
 } from "./clubComparison";
 import type { SerializedClubSummary } from "./clubSummaryTypes";
+import { ReviewFittingDashboard } from "./ReviewFittingDashboard";
+import { resolveSelectedClubId } from "./reviewFittingDashboardState";
 
 interface ShotReviewShot {
   id: number;
@@ -180,6 +182,7 @@ export function ClubReviewGrid({
   onShotSummaryUpdated,
 }: ClubReviewGridProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
   const [shotData, setShotData] = useState<Record<number, ShotReviewResponse>>({});
   const [shotErrors, setShotErrors] = useState<Record<number, string>>({});
   const [shotActionErrors, setShotActionErrors] = useState<
@@ -195,6 +198,16 @@ export function ClubReviewGrid({
 
   const expandedSummary =
     summaries.find((summary) => summary.id === expandedId) ?? null;
+  const resolvedSelectedClubId = resolveSelectedClubId(
+    selectedClubId,
+    summaries,
+  );
+
+  useEffect(() => {
+    if (selectedClubId !== resolvedSelectedClubId) {
+      setSelectedClubId(resolvedSelectedClubId);
+    }
+  }, [resolvedSelectedClubId, selectedClubId]);
 
   const closeSummary = useCallback(() => {
     setExpandedId(null);
@@ -441,9 +454,16 @@ export function ClubReviewGrid({
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {summaries.map((summary) => {
-          return (
+      {parserMode === "trackman-result" ? (
+        <ReviewFittingDashboard
+          summaries={summaries}
+          selectedClubId={resolvedSelectedClubId}
+          onSelectedClubIdChange={setSelectedClubId}
+          onOpenSummary={openSummary}
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {summaries.map((summary) => (
             <ClubCard
               key={summary.id}
               summary={summary}
@@ -451,9 +471,9 @@ export function ClubReviewGrid({
               summaries={summaries}
               onOpen={openSummary}
             />
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
 
       {typeof document !== "undefined" &&
         createPortal(

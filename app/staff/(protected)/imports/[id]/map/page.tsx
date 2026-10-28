@@ -123,7 +123,7 @@ export default async function ImportMapPage({
   return (
     <div>
       {/* ── Back nav ───────────────────────────────────────────────────────── */}
-      <div className={`max-w-3xl ${isTrackManReview ? "mb-5" : "mb-6"}`}>
+      <div className={`${isTrackManReview ? "mb-6 max-w-4xl" : "mb-6 max-w-3xl"}`}>
         <Link
           href={backHref}
           className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
@@ -172,7 +172,7 @@ export default async function ImportMapPage({
               </div>
             )}
             <p className="mt-2 text-sm text-muted-foreground font-body">
-              Open a card to review its metrics and shots.
+              Fitting analysis for the recorded clubs and shots.
             </p>
           </div>
         ) : (
