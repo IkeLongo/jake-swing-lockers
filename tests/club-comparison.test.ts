@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import {
   canSelectTest,
   getComparisonGroupForSummary,
+  getComparisonSelectionForSummary,
   getCurrentForTest,
   getTestsForCurrent,
   reconcileCurrentTests,
   shouldMarkComparisonDirty,
+  toCurrentTestsSelection,
 } from "@/app/staff/(protected)/imports/[id]/map/_components/clubComparison";
 import type { SerializedClubSummary } from "@/app/staff/(protected)/imports/[id]/map/_components/clubSummaryTypes";
 
@@ -61,6 +63,17 @@ test("an unlinked summary opens as a single-club group", () => {
   );
 });
 
+test("an unlinked summary starts with no compared clubs and may select an eligible club", () => {
+  const summaries = [summary(10), summary(20), summary(30)];
+
+  assert.deepEqual(getComparisonSelectionForSummary(summaries, 20), {
+    anchorSummaryId: 20,
+    selectedSummaryIds: [],
+    requiredSummaryId: null,
+  });
+  assert.equal(canSelectTest(summaries, 20, 10), true);
+});
+
 test("opening a Current resolves one linked Test", () => {
   const summaries = [summary(10), summary(20, 10), summary(30)];
 
@@ -85,6 +98,17 @@ test("opening a Current resolves its Current and one or multiple Tests only", ()
   );
 });
 
+test("selection from the stored Current edits its complete group", () => {
+  const summaries = [summary(10), summary(20, 10), summary(21, 10)];
+
+  assert.deepEqual(getComparisonSelectionForSummary(summaries, 10), {
+    anchorSummaryId: 10,
+    selectedSummaryIds: [20, 21],
+    requiredSummaryId: null,
+  });
+  assert.deepEqual(toCurrentTestsSelection(10, 10, [20, 21]), [20, 21]);
+});
+
 test("opening any linked Test resolves the same complete comparison group", () => {
   const summaries = [
     summary(10),
@@ -102,6 +126,42 @@ test("opening any linked Test resolves the same complete comparison group", () =
     getComparisonGroupForSummary(summaries, 21).map(({ id }) => id),
     expectedIds,
   );
+});
+
+test("selection from a linked club keeps the stored group connected internally", () => {
+  const summaries = [
+    summary(10),
+    summary(20, 10),
+    summary(21, 10),
+    summary(22),
+  ];
+
+  assert.deepEqual(getComparisonSelectionForSummary(summaries, 20), {
+    anchorSummaryId: 10,
+    selectedSummaryIds: [10, 21],
+    requiredSummaryId: 10,
+  });
+  assert.deepEqual(toCurrentTestsSelection(20, 10, [10, 21]), [20, 21]);
+  assert.deepEqual(
+    toCurrentTestsSelection(20, 10, [10, 21, 22]),
+    [20, 21, 22],
+  );
+  assert.deepEqual(toCurrentTestsSelection(20, 10, [10]), [20]);
+});
+
+test("selection cannot create chains or include the opened club as its own option", () => {
+  const summaries = [
+    summary(10),
+    summary(20, 10),
+    summary(21, 10),
+    summary(30),
+    summary(31, 30),
+  ];
+
+  assert.equal(canSelectTest(summaries, 10, 10), false);
+  assert.equal(canSelectTest(summaries, 10, 20), true);
+  assert.equal(canSelectTest(summaries, 10, 30), false);
+  assert.equal(canSelectTest(summaries, 10, 31), true);
 });
 
 test("derives a Test's Current", () => {

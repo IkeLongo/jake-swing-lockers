@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconAlertTriangle, IconArrowUpRight, IconX } from "@tabler/icons-react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
@@ -24,8 +23,9 @@ import {
 import {
   canSelectTest,
   getComparisonGroupForSummary,
+  getComparisonSelectionForSummary,
   getCurrentForTest,
-  getTestsForCurrent,
+  toCurrentTestsSelection,
   type SetCurrentTestsResponse,
 } from "./clubComparison";
 import type { SerializedClubSummary } from "./clubSummaryTypes";
@@ -650,10 +650,6 @@ export function ClubReviewGrid({
                       summaries={summaries}
                       colorsBySummaryId={colorsBySummaryId}
                       onSaveTests={onSaveTests}
-                      onOpenSummary={(summaryId) => {
-                        setExpandedId(summaryId);
-                        loadShots(summaryId);
-                      }}
                       onPriceSaved={(price) =>
                         onPriceSaved(expandedSummary.id, price)
                       }
@@ -1075,7 +1071,6 @@ interface ExpandedClubDetailProps {
     currentSummaryId: number,
     testSummaryIds: number[],
   ) => Promise<SetCurrentTestsResponse>;
-  onOpenSummary: (summaryId: number) => void;
 }
 
 function ExpandedClubDetail({
@@ -1100,11 +1095,8 @@ function ExpandedClubDetail({
   summaries,
   colorsBySummaryId,
   onSaveTests,
-  onOpenSummary,
 }: ExpandedClubDetailProps) {
   const isIncluded = summary.includeInReport !== false;
-  const current = getCurrentForTest(summaries, summary);
-  const tests = getTestsForCurrent(summaries, summary.id);
   const comparisonSummaries = useMemo(
     () => getComparisonGroupForSummary(summaries, summary.id),
     [summaries, summary.id],
@@ -1225,6 +1217,13 @@ function ExpandedClubDetail({
           onSaved={onPriceSaved}
         />
       </div>
+
+      <CompareWithSelector
+        summary={summary}
+        summaries={summaries}
+        colorsBySummaryId={colorsBySummaryId}
+        onSaveTests={onSaveTests}
+      />
 
       <section aria-label="Club summary metrics" className="py-6">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -1482,17 +1481,6 @@ function ExpandedClubDetail({
       </section>
 
       <div className="mt-7 border-t border-border pt-5">
-        <ComparisonEditor
-          summary={summary}
-          summaries={summaries}
-          current={current}
-          tests={tests}
-          onSaveTests={onSaveTests}
-          onOpenSummary={onOpenSummary}
-        />
-      </div>
-
-      <div className="mt-7 border-t border-border pt-5">
         <h3 className="font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Club actions
         </h3>
@@ -1540,29 +1528,28 @@ function ExpandedClubDetail({
   );
 }
 
-interface ComparisonEditorProps {
+interface CompareWithSelectorProps {
   summary: SerializedClubSummary;
   summaries: SerializedClubSummary[];
-  current: SerializedClubSummary | null;
-  tests: SerializedClubSummary[];
+  colorsBySummaryId: ReadonlyMap<number, string>;
   onSaveTests: (
     currentSummaryId: number,
     testSummaryIds: number[],
   ) => Promise<SetCurrentTestsResponse>;
-  onOpenSummary: (summaryId: number) => void;
 }
 
-function ComparisonEditor({
+function CompareWithSelector({
   summary,
   summaries,
-  current,
-  tests,
+  colorsBySummaryId,
   onSaveTests,
-  onOpenSummary,
-}: ComparisonEditorProps) {
+}: CompareWithSelectorProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const confirmedIds = tests.map((test) => test.id).sort((a, b) => a - b);
+  const selection = getComparisonSelectionForSummary(summaries, summary.id);
+  const anchorSummaryId = selection?.anchorSummaryId ?? summary.id;
+  const requiredSummaryId = selection?.requiredSummaryId ?? null;
+  const confirmedIds = selection?.selectedSummaryIds.sort((a, b) => a - b) ?? [];
   const confirmedKey = confirmedIds.join(",");
   const [selectionDraft, setSelectionDraft] = useState<{
     confirmedKey: string;
@@ -1573,39 +1560,26 @@ function ComparisonEditor({
       ? selectionDraft.ids
       : confirmedIds;
 
-  if (current) {
-    return (
-      <ComparisonSection summaryId={summary.id}>
-        <p className="mt-1 text-xs text-muted-foreground">
-          This club is being compared against the customer&apos;s {current.clubName}.
-        </p>
-        <button
-          type="button"
-          onClick={() => onOpenSummary(current.id)}
-          className="mt-2 text-xs font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        >
-          View comparison
-        </button>
-      </ComparisonSection>
-    );
-  }
-
   const candidates = summaries.filter((candidate) =>
-    canSelectTest(summaries, summary.id, candidate.id),
+    candidate.id !== summary.id &&
+    (candidate.id === requiredSummaryId ||
+      canSelectTest(summaries, anchorSummaryId, candidate.id)),
   );
   const selectedKey = [...selectedIds].sort((a, b) => a - b).join(",");
   const hasChanges = selectedKey !== confirmedKey;
 
-  async function save() {
+  async function save(testSummaryIds: number[]) {
     setSaving(true);
     setError(null);
     try {
-      await onSaveTests(summary.id, [...selectedIds]);
+      await onSaveTests(anchorSummaryId, testSummaryIds);
     } catch (saveError) {
+      const message =
+        saveError instanceof Error ? saveError.message : null;
       setError(
-        saveError instanceof Error
-          ? saveError.message
-          : "Failed to save comparisons. Please try again.",
+        message && /current|test|chain/i.test(message)
+          ? "That selection is not supported. Choose a different set of clubs and try again."
+          : message ?? "Could not update comparisons. Please try again.",
       );
     } finally {
       setSaving(false);
@@ -1613,118 +1587,118 @@ function ComparisonEditor({
   }
 
   return (
-    <ComparisonSection
-      summaryId={summary.id}
+    <section
+      aria-labelledby={`compare-with-heading-${summary.id}`}
+      className="border-b border-border py-4"
       onClick={(event) => event.stopPropagation()}
-      aside={
-        tests.length > 0 ? (
-          <span className="text-xs font-medium text-primary">
-            Current · {tests.length} {tests.length === 1 ? "Test" : "Tests"}
-          </span>
-        ) : null
-      }
     >
-      <p className="mt-1 text-xs text-muted-foreground">
-        Choose the clubs you want to compare against this club.
-      </p>
-      {candidates.length > 0 ? (
-        <fieldset disabled={saving} className="mt-3 space-y-2">
-          <legend className="sr-only">Choose test clubs</legend>
-          {candidates.map((candidate) => {
-            const existingCurrent = getCurrentForTest(summaries, candidate);
-            return (
-              <label
-                key={candidate.id}
-                className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-muted"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(candidate.id)}
-                  onChange={(event) => {
-                    setSelectionDraft({
-                      confirmedKey,
-                      ids: event.target.checked
-                        ? [...selectedIds, candidate.id]
-                        : selectedIds.filter((id) => id !== candidate.id),
-                    });
-                    setError(null);
-                  }}
-                  className="mt-0.5 accent-primary"
-                />
-                <span className="min-w-0">
-                  <span className="block truncate">{candidate.clubName}</span>
-                  {candidate.tags.length > 0 && (
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {candidate.tags.join(", ")}
-                    </span>
-                  )}
-                  {existingCurrent && existingCurrent.id !== summary.id && (
-                    <span className="block text-xs text-muted-foreground">
-                      Currently compared with {existingCurrent.clubName}; saving will move it.
-                    </span>
-                  )}
-                </span>
-              </label>
-            );
-          })}
-        </fieldset>
-      ) : (
-        <p className="mt-3 text-xs text-muted-foreground">
-          No eligible test clubs are available.
-        </p>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h3
+            id={`compare-with-heading-${summary.id}`}
+            className="font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            Compare with
+          </h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {candidates.length > 0 ? (
+              candidates.map((candidate) => {
+                const checked = selectedIds.includes(candidate.id);
+                const required = candidate.id === requiredSummaryId;
+                const label =
+                  candidate.tags.length > 0
+                    ? `${candidate.clubName} · ${candidate.tags.join(", ")}`
+                    : candidate.clubName;
+                return (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    aria-pressed={checked}
+                    aria-label={
+                      required
+                        ? `${label}, selected and required to keep this comparison group connected`
+                        : label
+                    }
+                    title={
+                      required
+                        ? "Keep this club selected to maintain the comparison."
+                        : undefined
+                    }
+                    disabled={saving || required}
+                    onClick={() => {
+                      setSelectionDraft({
+                        confirmedKey,
+                        ids: checked
+                          ? selectedIds.filter((id) => id !== candidate.id)
+                          : [...selectedIds, candidate.id],
+                      });
+                      setError(null);
+                    }}
+                    className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed ${
+                      checked
+                        ? "border-primary/40 bg-primary/10 text-foreground"
+                        : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                    } disabled:opacity-80`}
+                  >
+                    {colorsBySummaryId.get(candidate.id) && (
+                      <span
+                        aria-hidden="true"
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: colorsBySummaryId.get(candidate.id),
+                        }}
+                      />
+                    )}
+                    <span className="truncate">{label}</span>
+                    {checked && (
+                      <span aria-hidden="true" className="font-bold">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No other clubs are available to compare.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            disabled={saving || !hasChanges}
+            onClick={() =>
+              save(
+                toCurrentTestsSelection(
+                  summary.id,
+                  anchorSummaryId,
+                  selectedIds,
+                ),
+              )
+            }
+            className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save comparisons"}
+          </button>
+          {confirmedIds.length > 0 && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => save([])}
+              className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Clear comparisons
+            </button>
+          )}
+        </div>
+      </div>
       {error && (
-        <p className="mt-3 text-xs text-red-600 dark:text-red-400" role="alert">
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
           {error}
         </p>
       )}
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          type="button"
-          disabled={saving || !hasChanges}
-          onClick={save}
-          className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save comparison"}
-        </button>
-        {saving && (
-          <span className="text-xs text-muted-foreground" role="status">
-            Saving comparison…
-          </span>
-        )}
-      </div>
-    </ComparisonSection>
-  );
-}
-
-function ComparisonSection({
-  summaryId,
-  aside,
-  onClick,
-  children,
-}: {
-  summaryId: number;
-  aside?: ReactNode;
-  onClick?: (event: MouseEvent<HTMLElement>) => void;
-  children: ReactNode;
-}) {
-  const headingId = `comparison-heading-${summaryId}`;
-  return (
-    <section
-      aria-labelledby={headingId}
-      className="rounded-xl border border-border bg-muted/30 p-4"
-      onClick={onClick}
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3
-          id={headingId}
-          className="font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-        >
-          Comparison
-        </h3>
-        {aside}
-      </div>
-      {children}
     </section>
   );
 }

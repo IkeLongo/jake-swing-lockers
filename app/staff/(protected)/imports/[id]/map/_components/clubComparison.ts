@@ -40,6 +40,45 @@ export function getComparisonGroupForSummary(
   return [current, ...getTestsForCurrent(summaries, current.id)];
 }
 
+export function getComparisonSelectionForSummary(
+  summaries: readonly SerializedClubSummary[],
+  summaryId: number,
+): {
+  anchorSummaryId: number;
+  selectedSummaryIds: number[];
+  requiredSummaryId: number | null;
+} | null {
+  const group = getComparisonGroupForSummary(summaries, summaryId);
+  if (group.length === 0) return null;
+
+  const anchorSummaryId = group[0]!.id;
+  return {
+    anchorSummaryId,
+    selectedSummaryIds: group
+      .filter((summary) => summary.id !== summaryId)
+      .map((summary) => summary.id),
+    requiredSummaryId:
+      anchorSummaryId === summaryId ? null : anchorSummaryId,
+  };
+}
+
+export function toCurrentTestsSelection(
+  summaryId: number,
+  currentSummaryId: number,
+  selectedSummaryIds: readonly number[],
+): number[] {
+  if (summaryId === currentSummaryId) {
+    return [...new Set(selectedSummaryIds)];
+  }
+
+  return [
+    ...new Set([
+      summaryId,
+      ...selectedSummaryIds.filter((id) => id !== currentSummaryId),
+    ]),
+  ];
+}
+
 export function canSelectTest(
   summaries: readonly SerializedClubSummary[],
   currentId: number,
