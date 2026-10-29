@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
-import { ClubFlightVisualization, FLIGHT_PALETTE } from "./ClubFlightVisualization";
+import { ClubFlightVisualization } from "./ClubFlightVisualization";
 import { DispersionChart } from "./DispersionChart";
 import { GappingChart } from "./GappingChart";
 import { buildGappingRows } from "./reviewFittingGapping";
@@ -11,7 +11,6 @@ import { buildDispersionPoints } from "./reviewFittingDispersion";
 import {
   buildFittingFlightModel,
   buildFittingClubLegend,
-  createClubColorMap,
   formatClubResultMetric,
   normalizeClubFilterSelection,
   toggleClubFilterSelection,
@@ -21,6 +20,7 @@ import {
 
 interface ReviewFittingDashboardProps {
   summaries: readonly ClubResultSummary[];
+  colorsBySummaryId: ReadonlyMap<number, string>;
   onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
   visualizationData: FittingVisualizationData | null;
   visualizationLoading: boolean;
@@ -30,6 +30,7 @@ interface ReviewFittingDashboardProps {
 
 export function ReviewFittingDashboard({
   summaries,
+  colorsBySummaryId,
   onOpenSummary,
   visualizationData,
   visualizationLoading,
@@ -46,14 +47,6 @@ export function ReviewFittingDashboard({
   const normalizedSelection = useMemo(
     () => normalizeClubFilterSelection(selectedSummaryIds, summaryIds),
     [selectedSummaryIds, summaryIds],
-  );
-  const colorsBySummaryId = useMemo(
-    () =>
-      createClubColorMap(
-        summaries.map((summary) => summary.id),
-        FLIGHT_PALETTE,
-      ),
-    [summaries],
   );
   const namesBySummaryId = useMemo(
     () => new Map(summaries.map((summary) => [summary.id, clubLabel(summary, summaries)])),

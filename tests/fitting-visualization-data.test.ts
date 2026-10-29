@@ -228,7 +228,7 @@ test("club colors are stable by summary ID regardless of order or filtering", ()
   assert.equal(createClubColorMap([3, 5, 9, 12], palette).get(12), "green");
 });
 
-test("same-club shots share a stable color and selection preserves base color", () => {
+test("detailed club shots use dashboard summary colors independent of shot order", () => {
   const colors = createClubColorMap([21, 22], ["green", "blue"]);
   const flights = [
     buildModeledShotFlight({
@@ -260,6 +260,10 @@ test("same-club shots share a stable color and selection preserves base color", 
       [22, "Unknown Club"],
     ]),
   });
+  const reversedRendererFlights = toGolfShotVizFlights(
+    [...flights].reverse(),
+    { colorsBySummaryId: colors },
+  );
   const selectedShotId = "42";
 
   assert.deepEqual(
@@ -277,6 +281,10 @@ test("same-club shots share a stable color and selection preserves base color", 
   assert.equal(
     rendererFlights.find((flight) => flight.id === selectedShotId)?.color,
     "green",
+  );
+  assert.deepEqual(
+    new Map(reversedRendererFlights.map(({ id, color }) => [id, color])),
+    new Map(rendererFlights.map(({ id, color }) => [id, color])),
   );
   assert.equal(rendererFlights[0]?.meta?.club, "3 Wood · Mens");
   assert.equal(rendererFlights[2]?.meta?.club, "Unknown Club");

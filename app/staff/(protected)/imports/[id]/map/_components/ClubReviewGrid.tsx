@@ -11,8 +11,14 @@ import { toModeledShotInput } from "@/lib/golf/flight/shotReviewFlightInput";
 import { yardsToFeet } from "@/lib/golf/flight/units";
 import type { ShotReviewMeasurements } from "@/lib/imports/golfShotMeasurements";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
-import { isFittingVisualizationData } from "./reviewFittingDashboardState";
-import { ClubFlightVisualization } from "./ClubFlightVisualization";
+import {
+  createClubColorMap,
+  isFittingVisualizationData,
+} from "./reviewFittingDashboardState";
+import {
+  ClubFlightVisualization,
+  FLIGHT_PALETTE,
+} from "./ClubFlightVisualization";
 import {
   canSelectTest,
   getCurrentForTest,
@@ -208,6 +214,14 @@ export function ClubReviewGrid({
 
   const expandedSummary =
     summaries.find((summary) => summary.id === expandedId) ?? null;
+  const colorsBySummaryId = useMemo(
+    () =>
+      createClubColorMap(
+        summaries.map((summary) => summary.id),
+        FLIGHT_PALETTE,
+      ),
+    [summaries],
+  );
   const closeSummary = useCallback(() => {
     setExpandedId(null);
   }, []);
@@ -544,6 +558,7 @@ export function ClubReviewGrid({
       {parserMode === "trackman-result" ? (
         <ReviewFittingDashboard
           summaries={summaries}
+          colorsBySummaryId={colorsBySummaryId}
           onOpenSummary={openSummary}
           visualizationData={visualizationData}
           visualizationLoading={visualizationLoading}
@@ -624,6 +639,7 @@ export function ClubReviewGrid({
                         )
                       }
                       summaries={summaries}
+                      colorsBySummaryId={colorsBySummaryId}
                       onSaveTests={onSaveTests}
                       onOpenSummary={(summaryId) => {
                         setExpandedId(summaryId);
@@ -1041,6 +1057,7 @@ interface ExpandedClubDetailProps {
   ) => void;
   onToggleInclude: () => void;
   summaries: SerializedClubSummary[];
+  colorsBySummaryId: ReadonlyMap<number, string>;
   onSaveTests: (
     currentSummaryId: number,
     testSummaryIds: number[],
@@ -1064,6 +1081,7 @@ function ExpandedClubDetail({
   onShotInclusionChange,
   onToggleInclude,
   summaries,
+  colorsBySummaryId,
   onSaveTests,
   onOpenSummary,
 }: ExpandedClubDetailProps) {
@@ -1072,8 +1090,11 @@ function ExpandedClubDetail({
   const tests = getTestsForCurrent(summaries, summary.id);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const flightInputs = useMemo(
-    () => shotData?.shots.map(toModeledShotInput) ?? [],
-    [shotData?.shots],
+    () =>
+      shotData?.shots.map((shot) =>
+        toModeledShotInput({ ...shot, clubSummaryId: summary.id }),
+      ) ?? [],
+    [shotData?.shots, summary.id],
   );
   const clubFlightModel = useMemo(
     () => buildClubFlightModel(flightInputs, { includedOnly: true }),
@@ -1098,6 +1119,10 @@ function ExpandedClubDetail({
     )
       ? selectedShotId
       : null;
+  const clubOptions = useMemo(
+    () => ({ colorsBySummaryId }),
+    [colorsBySummaryId],
+  );
 
   return (
     <div className="p-5 sm:p-8">
@@ -1178,6 +1203,7 @@ function ExpandedClubDetail({
           includedShotCount={includedShotCount}
           selectedShotId={visibleSelectedShotId}
           onSelectedShotChange={setSelectedShotId}
+          clubOptions={clubOptions}
         />
       )}
 
