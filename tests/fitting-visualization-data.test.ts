@@ -213,6 +213,55 @@ test("insufficient measurements are omitted while valid flights remain renderabl
   assert.equal(data.shots.length, 2);
 });
 
+test("combined comparison flight keeps group shots, inclusion, modelability, and club colors", () => {
+  const colors = createClubColorMap([21, 22, 23, 24], [
+    "green",
+    "blue",
+    "gold",
+    "red",
+  ]);
+  const comparison = buildFittingFlightModel(
+    [
+      visualizationShot("41", 21),
+      visualizationShot("42", 22),
+      visualizationShot("43", 22, false),
+      visualizationShot("44", 23, true, {
+        ...MEASUREMENTS,
+        apexDistanceYd: null,
+        apexHeightYd: null,
+        carryYd: null,
+        launchAngleDeg: null,
+        landingAngleDeg: null,
+      }),
+      visualizationShot("45", 24),
+    ],
+    new Set([21, 22, 23]),
+  );
+  const rendererFlights = toGolfShotVizFlights(comparison.flights, {
+    colorsBySummaryId: colors,
+  });
+
+  assert.deepEqual(
+    comparison.shots.map(({ shotId, summaryId }) => [shotId, summaryId]),
+    [
+      ["41", 21],
+      ["42", 22],
+      ["44", 23],
+    ],
+  );
+  assert.deepEqual(
+    rendererFlights.map(({ id, clubSummaryId, color }) => [
+      id,
+      clubSummaryId,
+      color,
+    ]),
+    [
+      ["41", 21, "green"],
+      ["42", 22, "blue"],
+    ],
+  );
+});
+
 test("club colors are stable by summary ID regardless of order or filtering", () => {
   const palette = ["green", "blue", "gold"];
   const colors = createClubColorMap([9, 3, 5], palette);

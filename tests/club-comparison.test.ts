@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   canSelectTest,
+  getComparisonGroupForSummary,
   getCurrentForTest,
   getTestsForCurrent,
   reconcileCurrentTests,
@@ -48,6 +49,58 @@ test("derives multiple Tests for one Current", () => {
   assert.deepEqual(
     getTestsForCurrent(summaries, 10).map(({ id }) => id),
     [20, 21, 22],
+  );
+});
+
+test("an unlinked summary opens as a single-club group", () => {
+  const summaries = [summary(10), summary(20, 10), summary(30)];
+
+  assert.deepEqual(
+    getComparisonGroupForSummary(summaries, 30).map(({ id }) => id),
+    [30],
+  );
+});
+
+test("opening a Current resolves one linked Test", () => {
+  const summaries = [summary(10), summary(20, 10), summary(30)];
+
+  assert.deepEqual(
+    getComparisonGroupForSummary(summaries, 10).map(({ id }) => id),
+    [10, 20],
+  );
+});
+
+test("opening a Current resolves its Current and one or multiple Tests only", () => {
+  const summaries = [
+    summary(10),
+    summary(20, 10),
+    summary(21, 10),
+    summary(22, 10),
+    summary(30),
+  ];
+
+  assert.deepEqual(
+    getComparisonGroupForSummary(summaries, 10).map(({ id }) => id),
+    [10, 20, 21, 22],
+  );
+});
+
+test("opening any linked Test resolves the same complete comparison group", () => {
+  const summaries = [
+    summary(10),
+    summary(20, 10),
+    summary(21, 10),
+    summary(30),
+  ];
+  const expectedIds = [10, 20, 21];
+
+  assert.deepEqual(
+    getComparisonGroupForSummary(summaries, 20).map(({ id }) => id),
+    expectedIds,
+  );
+  assert.deepEqual(
+    getComparisonGroupForSummary(summaries, 21).map(({ id }) => id),
+    expectedIds,
   );
 });
 

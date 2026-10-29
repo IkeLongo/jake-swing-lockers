@@ -29,6 +29,17 @@ export function getTestsForCurrent(
   );
 }
 
+export function getComparisonGroupForSummary(
+  summaries: readonly SerializedClubSummary[],
+  summaryId: number,
+): SerializedClubSummary[] {
+  const summary = summaries.find((candidate) => candidate.id === summaryId);
+  if (!summary) return [];
+
+  const current = getCurrentForTest(summaries, summary) ?? summary;
+  return [current, ...getTestsForCurrent(summaries, current.id)];
+}
+
 export function canSelectTest(
   summaries: readonly SerializedClubSummary[],
   currentId: number,

@@ -12,6 +12,8 @@ import { yardsToFeet } from "@/lib/golf/flight/units";
 import type { ShotReviewMeasurements } from "@/lib/imports/golfShotMeasurements";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
 import {
+  buildFittingClubLegend,
+  buildFittingFlightModel,
   createClubColorMap,
   isFittingVisualizationData,
 } from "./reviewFittingDashboardState";
@@ -21,6 +23,7 @@ import {
 } from "./ClubFlightVisualization";
 import {
   canSelectTest,
+  getComparisonGroupForSummary,
   getCurrentForTest,
   getTestsForCurrent,
   type SetCurrentTestsResponse,
@@ -623,6 +626,12 @@ export function ClubReviewGrid({
                       parserMode={parserMode}
                       summary={expandedSummary}
                       shotData={shotData[expandedSummary.id]}
+                      visualizationData={visualizationData}
+                      visualizationLoading={visualizationLoading}
+                      visualizationError={visualizationError}
+                      onRetryVisualizationData={() =>
+                        loadVisualizationData(true)
+                      }
                       savingShotIds={savingShotIds}
                       shotActionErrors={shotActionErrors}
                       loading={loadingIds.has(expandedSummary.id)}
@@ -1043,6 +1052,10 @@ interface ExpandedClubDetailProps {
   parserMode?: string;
   summary: SerializedClubSummary;
   shotData?: ShotReviewResponse;
+  visualizationData: FittingVisualizationData | null;
+  visualizationLoading: boolean;
+  visualizationError: string | null;
+  onRetryVisualizationData: () => void;
   savingShotIds: Set<number>;
   shotActionErrors: Record<number, string>;
   loading: boolean;
@@ -1070,6 +1083,10 @@ function ExpandedClubDetail({
   parserMode,
   summary,
   shotData,
+  visualizationData,
+  visualizationLoading,
+  visualizationError,
+  onRetryVisualizationData,
   savingShotIds,
   shotActionErrors,
   loading,
@@ -1088,20 +1105,75 @@ function ExpandedClubDetail({
   const isIncluded = summary.includeInReport !== false;
   const current = getCurrentForTest(summaries, summary);
   const tests = getTestsForCurrent(summaries, summary.id);
+  const comparisonSummaries = useMemo(
+    () => getComparisonGroupForSummary(summaries, summary.id),
+    [summaries, summary.id],
+  );
+  const comparisonSummaryIds = useMemo(
+    () => new Set(comparisonSummaries.map(({ id }) => id)),
+    [comparisonSummaries],
+  );
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
-  const flightInputs = useMemo(
+  const singleClubFlightInputs = useMemo(
     () =>
       shotData?.shots.map((shot) =>
         toModeledShotInput({ ...shot, clubSummaryId: summary.id }),
       ) ?? [],
     [shotData?.shots, summary.id],
   );
-  const clubFlightModel = useMemo(
-    () => buildClubFlightModel(flightInputs, { includedOnly: true }),
-    [flightInputs],
+  const singleClubFlightModel = useMemo(
+    () =>
+      buildClubFlightModel(singleClubFlightInputs, { includedOnly: true }),
+    [singleClubFlightInputs],
   );
+  const comparisonFlightData = useMemo(
+    () =>
+      visualizationData
+        ? buildFittingFlightModel(
+            visualizationData.shots,
+            comparisonSummaryIds,
+          )
+        : null,
+    [comparisonSummaryIds, visualizationData],
+  );
+  const flights =
+    comparisonFlightData?.flights ?? singleClubFlightModel.flights;
   const includedShotCount =
-    shotData?.shots.filter((shot) => shot.included).length ?? 0;
+    comparisonFlightData?.shots.length ??
+    shotData?.shots.filter((shot) => shot.included).length ??
+    0;
+  const clubLegend = useMemo(() => {
+    if (comparisonSummaries.length < 2) return [];
+
+    const namesBySummaryId = new Map(
+      comparisonSummaries.map((club) => [
+        club.id,
+        club.tags.length > 0
+          ? `${club.clubName} · ${club.tags.join(", ")}`
+          : club.clubName,
+      ]),
+    );
+    return buildFittingClubLegend(
+      flights,
+      comparisonSummaries,
+      colorsBySummaryId,
+      namesBySummaryId,
+    );
+  }, [
+    colorsBySummaryId,
+    comparisonSummaries,
+    flights,
+  ]);
+  const chartCanRender =
+    comparisonFlightData !== null ||
+    (comparisonSummaries.length === 1 && shotData !== undefined);
+  const chartLoading =
+    !chartCanRender &&
+    (visualizationLoading || (comparisonSummaries.length === 1 && loading));
+  const chartError =
+    !chartCanRender && !chartLoading && visualizationError
+      ? visualizationError
+      : null;
   const averageMaxHeightFt = useMemo(() => {
     const heightsYd =
       shotData?.shots.flatMap((shot) => {
@@ -1197,14 +1269,34 @@ function ExpandedClubDetail({
         </div>
       </section>
 
-      {parserMode === "trackman-result" && shotData && (
+      {parserMode === "trackman-result" && chartCanRender && (
         <ClubFlightVisualization
-          flights={clubFlightModel.flights}
+          flights={flights}
           includedShotCount={includedShotCount}
-          selectedShotId={visibleSelectedShotId}
+          selectedShotId={selectedShotId}
           onSelectedShotChange={setSelectedShotId}
           clubOptions={clubOptions}
+          clubLegend={clubLegend}
         />
+      )}
+      {parserMode === "trackman-result" && chartLoading && (
+        <p className="py-5 text-sm text-muted-foreground" role="status">
+          Loading comparison shots…
+        </p>
+      )}
+      {parserMode === "trackman-result" && chartError && (
+        <div className="flex flex-wrap items-center gap-3 py-5">
+          <p className="text-sm text-muted-foreground" role="alert">
+            {chartError}
+          </p>
+          <button
+            type="button"
+            onClick={onRetryVisualizationData}
+            className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            Retry
+          </button>
+        </div>
       )}
 
       <section aria-labelledby={`shot-review-heading-${summary.id}`}>

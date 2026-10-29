@@ -24,7 +24,11 @@ interface ClubFlightVisualizationProps {
   embedded?: boolean;
   showSelectedFlightDetail?: boolean;
   clubOptions?: GolfShotVizClubOptions;
-  clubLegend?: readonly { label: string; color: string }[];
+  clubLegend?: readonly {
+    summaryId?: number;
+    label: string;
+    color: string;
+  }[];
 }
 
 type CameraView = "broadcast" | "side";
@@ -178,8 +182,11 @@ export function ClubFlightVisualization({
               aria-label="Club colors"
               className="mt-2 flex max-h-12 min-w-0 flex-wrap gap-x-3 gap-y-1 overflow-y-auto text-[11px] text-muted-foreground"
             >
-              {clubLegend.map(({ label, color }) => (
-                <li key={label} className="inline-flex min-w-0 items-center gap-1.5">
+              {clubLegend.map(({ summaryId, label, color }) => (
+                <li
+                  key={summaryId ?? label}
+                  className="inline-flex min-w-0 items-center gap-1.5"
+                >
                   <span
                     aria-hidden="true"
                     className="h-2 w-2 shrink-0 rounded-full"
