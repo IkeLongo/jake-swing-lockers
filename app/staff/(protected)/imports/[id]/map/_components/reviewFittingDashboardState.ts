@@ -21,6 +21,51 @@ export type ClubResultSummary = Pick<
 
 export type ClubFilterSelection = ReadonlySet<number> | null;
 
+export interface ClubComparisonMetricRow {
+  summaryId: number;
+  clubName: string;
+  color: string | undefined;
+  avgCarry: number | null;
+  avgTotal: number | null;
+  avgBallSpeed: number | null;
+  avgClubSpeed: number | null;
+  avgSpinRate: number | null;
+}
+
+export function buildClubComparisonMetricRows(
+  summaries: readonly Pick<
+    SerializedClubSummary,
+    | "id"
+    | "clubName"
+    | "avgCarry"
+    | "avgTotal"
+    | "avgBallSpeed"
+    | "avgClubSpeed"
+    | "avgSpinRate"
+  >[],
+  comparisonSummaryIds: readonly number[],
+  colorsBySummaryId: ReadonlyMap<number, string>,
+): ClubComparisonMetricRow[] {
+  const uniqueIds = [...new Set(comparisonSummaryIds)];
+  if (uniqueIds.length < 2) return [];
+
+  const summariesById = new Map(summaries.map((summary) => [summary.id, summary]));
+  return uniqueIds.flatMap((summaryId) => {
+    const summary = summariesById.get(summaryId);
+    if (!summary) return [];
+    return [{
+      summaryId,
+      clubName: summary.clubName,
+      color: colorsBySummaryId.get(summaryId),
+      avgCarry: summary.avgCarry,
+      avgTotal: summary.avgTotal,
+      avgBallSpeed: summary.avgBallSpeed,
+      avgClubSpeed: summary.avgClubSpeed,
+      avgSpinRate: summary.avgSpinRate,
+    }];
+  });
+}
+
 export function normalizeClubFilterSelection(
   selection: ClubFilterSelection,
   summaryIds: readonly number[],

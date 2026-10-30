@@ -23,6 +23,7 @@ interface ClubFlightVisualizationProps {
   onSelectedShotChange: (shotId: string | null) => void;
   embedded?: boolean;
   showSelectedFlightDetail?: boolean;
+  showBottomBorder?: boolean;
   clubOptions?: GolfShotVizClubOptions;
   clubLegend?: readonly {
     summaryId?: number;
@@ -53,6 +54,7 @@ export function ClubFlightVisualization({
   onSelectedShotChange,
   embedded = false,
   showSelectedFlightDetail = true,
+  showBottomBorder = true,
   clubOptions,
   clubLegend = [],
 }: ClubFlightVisualizationProps) {
@@ -218,7 +220,9 @@ export function ClubFlightVisualization({
   return (
     <section
       aria-label="Modeled club flight visualization"
-      className="min-w-0 border-y border-border py-5"
+      className={`min-w-0 border-t border-border py-5 ${
+        showBottomBorder ? "border-b" : ""
+      }`}
     >
       {header}
       {visualization}

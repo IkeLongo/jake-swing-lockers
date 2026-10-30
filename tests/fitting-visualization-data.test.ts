@@ -11,10 +11,12 @@ import {
   type FittingVisualizationShot,
 } from "@/lib/imports/fittingVisualizationData";
 import {
+  buildClubComparisonMetricRows,
   buildFittingClubLegend,
   buildFittingFlightModel,
   createClubColorMap,
   filterIncludedVisualizationShots,
+  formatClubResultMetric,
   toggleClubFilterSelection,
 } from "../app/staff/(protected)/imports/[id]/map/_components/reviewFittingDashboardState";
 import type { ShotReviewMeasurements } from "@/lib/imports/golfShotMeasurements";
@@ -275,6 +277,135 @@ test("club colors are stable by summary ID regardless of order or filtering", ()
   assert.equal(filtered.get(9), colors.get(9));
   assert.equal(new Set(colors.values()).size, 3);
   assert.equal(createClubColorMap([3, 5, 9, 12], palette).get(12), "green");
+});
+
+test("comparison metrics are hidden for one club and use only the selected group", () => {
+  const summaries = [
+    {
+      id: 21,
+      clubName: "3 Hybrid",
+      avgCarry: 186,
+      avgTotal: 198,
+      avgBallSpeed: 139,
+      avgClubSpeed: 96,
+      avgSpinRate: 3850,
+    },
+    {
+      id: 22,
+      clubName: "3 Wood",
+      avgCarry: 201,
+      avgTotal: 215,
+      avgBallSpeed: 146,
+      avgClubSpeed: 98,
+      avgSpinRate: 3300,
+    },
+    {
+      id: 23,
+      clubName: "Unrelated",
+      avgCarry: 150,
+      avgTotal: 170,
+      avgBallSpeed: 120,
+      avgClubSpeed: 80,
+      avgSpinRate: 3000,
+    },
+  ];
+  const colors = createClubColorMap(
+    summaries.map(({ id }) => id),
+    ["green", "blue", "gold"],
+  );
+
+  assert.deepEqual(buildClubComparisonMetricRows(summaries, [21], colors), []);
+  assert.deepEqual(
+    buildClubComparisonMetricRows(summaries, [21, 22], colors),
+    [
+      {
+        summaryId: 21,
+        clubName: "3 Hybrid",
+        color: "green",
+        avgCarry: 186,
+        avgTotal: 198,
+        avgBallSpeed: 139,
+        avgClubSpeed: 96,
+        avgSpinRate: 3850,
+      },
+      {
+        summaryId: 22,
+        clubName: "3 Wood",
+        color: "blue",
+        avgCarry: 201,
+        avgTotal: 215,
+        avgBallSpeed: 146,
+        avgClubSpeed: 98,
+        avgSpinRate: 3300,
+      },
+    ],
+  );
+});
+
+test("comparison metric rows follow group updates and preserve missing measured values", () => {
+  const summaries = [
+    {
+      id: 21,
+      clubName: "3 Hybrid",
+      avgCarry: 186,
+      avgTotal: null,
+      avgBallSpeed: 139,
+      avgClubSpeed: null,
+      avgSpinRate: 3850,
+    },
+    {
+      id: 22,
+      clubName: "3 Wood",
+      avgCarry: 201,
+      avgTotal: 215,
+      avgBallSpeed: 146,
+      avgClubSpeed: 98,
+      avgSpinRate: 3300,
+    },
+    {
+      id: 23,
+      clubName: "4 Hybrid",
+      avgCarry: 175,
+      avgTotal: 194,
+      avgBallSpeed: 132,
+      avgClubSpeed: 89,
+      avgSpinRate: 3600,
+    },
+  ];
+  const colors = createClubColorMap([21, 22, 23], ["green", "blue", "gold"]);
+
+  const originalGroup = buildClubComparisonMetricRows(
+    summaries,
+    [21, 22],
+    colors,
+  );
+  const updatedGroup = buildClubComparisonMetricRows(
+    summaries,
+    [21, 23],
+    colors,
+  );
+
+  assert.deepEqual(
+    originalGroup.map(({ summaryId }) => summaryId),
+    [21, 22],
+  );
+  assert.deepEqual(
+    updatedGroup.map(({ summaryId }) => summaryId),
+    [21, 23],
+  );
+  assert.equal(originalGroup[0]?.avgTotal, null);
+  assert.equal(
+    formatClubResultMetric(originalGroup[0]?.avgTotal ?? null),
+    "—",
+  );
+  assert.equal(
+    formatClubResultMetric(originalGroup[0]?.avgSpinRate ?? null, 0),
+    "3,850",
+  );
+  assert.deepEqual(
+    updatedGroup.map(({ color }) => color),
+    ["green", "gold"],
+  );
 });
 
 test("detailed club shots use dashboard summary colors independent of shot order", () => {

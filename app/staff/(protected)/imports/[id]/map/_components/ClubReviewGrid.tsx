@@ -11,9 +11,11 @@ import { yardsToFeet } from "@/lib/golf/flight/units";
 import type { ShotReviewMeasurements } from "@/lib/imports/golfShotMeasurements";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
 import {
+  buildClubComparisonMetricRows,
   buildFittingClubLegend,
   buildFittingFlightModel,
   createClubColorMap,
+  formatClubResultMetric,
   isFittingVisualizationData,
 } from "./reviewFittingDashboardState";
 import {
@@ -650,6 +652,7 @@ export function ClubReviewGrid({
                       summaries={summaries}
                       colorsBySummaryId={colorsBySummaryId}
                       onSaveTests={onSaveTests}
+                      onOpenSummary={openSummary}
                       onPriceSaved={(price) =>
                         onPriceSaved(expandedSummary.id, price)
                       }
@@ -1067,6 +1070,7 @@ interface ExpandedClubDetailProps {
   onToggleInclude: () => void;
   summaries: SerializedClubSummary[];
   colorsBySummaryId: ReadonlyMap<number, string>;
+  onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
   onSaveTests: (
     currentSummaryId: number,
     testSummaryIds: number[],
@@ -1094,6 +1098,7 @@ function ExpandedClubDetail({
   onToggleInclude,
   summaries,
   colorsBySummaryId,
+  onOpenSummary,
   onSaveTests,
 }: ExpandedClubDetailProps) {
   const isIncluded = summary.includeInReport !== false;
@@ -1156,6 +1161,15 @@ function ExpandedClubDetail({
     comparisonSummaries,
     flights,
   ]);
+  const comparisonMetricRows = useMemo(
+    () =>
+      buildClubComparisonMetricRows(
+        summaries,
+        comparisonSummaries.map(({ id }) => id),
+        colorsBySummaryId,
+      ),
+    [colorsBySummaryId, comparisonSummaries, summaries],
+  );
   const chartCanRender =
     comparisonFlightData !== null ||
     (comparisonSummaries.length === 1 && shotData !== undefined);
@@ -1276,6 +1290,7 @@ function ExpandedClubDetail({
           onSelectedShotChange={setSelectedShotId}
           clubOptions={clubOptions}
           clubLegend={clubLegend}
+          showBottomBorder={comparisonMetricRows.length < 2}
         />
       )}
       {parserMode === "trackman-result" && chartLoading && (
@@ -1296,6 +1311,85 @@ function ExpandedClubDetail({
             Retry
           </button>
         </div>
+      )}
+      {comparisonMetricRows.length > 1 && (
+        <section
+          aria-label="Compared club metrics"
+          className="mb-5 rounded-xl border border-border bg-muted/20 p-3 sm:p-4"
+        >
+          <h3 className="mb-3 font-subheading text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Compared clubs
+          </h3>
+          <div className="space-y-2 sm:hidden">
+            {comparisonMetricRows.map((row) => (
+              <article
+                key={row.summaryId}
+                className="rounded-lg border border-border bg-card p-3"
+              >
+                <h4 className="mb-2 text-sm">
+                  <ComparisonClubButton
+                    summaryId={row.summaryId}
+                    clubName={row.clubName}
+                    color={row.color}
+                    onOpenSummary={onOpenSummary}
+                  />
+                </h4>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+                  <ComparisonMetric label="Avg Carry" value={row.avgCarry} unit="yd" />
+                  <ComparisonMetric label="Avg Total" value={row.avgTotal} unit="yd" />
+                  <ComparisonMetric label="Avg Ball Speed" value={row.avgBallSpeed} unit="mph" />
+                  <ComparisonMetric label="Avg Club Speed" value={row.avgClubSpeed} unit="mph" />
+                  <ComparisonMetric
+                    label="Spin"
+                    value={row.avgSpinRate}
+                    unit="rpm"
+                    decimals={0}
+                  />
+                </dl>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th scope="col" className="px-2 py-2">Club</th>
+                  <th scope="col" className="px-2 py-2 text-right">Avg Carry</th>
+                  <th scope="col" className="px-2 py-2 text-right">Avg Total</th>
+                  <th scope="col" className="px-2 py-2 text-right">Avg Ball Speed</th>
+                  <th scope="col" className="px-2 py-2 text-right">Avg Club Speed</th>
+                  <th scope="col" className="px-2 py-2 text-right">Spin</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {comparisonMetricRows.map((row) => (
+                  <tr key={row.summaryId}>
+                    <th
+                      scope="row"
+                      className="whitespace-nowrap px-2 py-2 text-left font-semibold text-foreground"
+                    >
+                      <ComparisonClubButton
+                        summaryId={row.summaryId}
+                        clubName={row.clubName}
+                        color={row.color}
+                        onOpenSummary={onOpenSummary}
+                      />
+                    </th>
+                    <ComparisonTableValue value={row.avgCarry} unit="yd" />
+                    <ComparisonTableValue value={row.avgTotal} unit="yd" />
+                    <ComparisonTableValue value={row.avgBallSpeed} unit="mph" />
+                    <ComparisonTableValue value={row.avgClubSpeed} unit="mph" />
+                    <ComparisonTableValue
+                      value={row.avgSpinRate}
+                      unit="rpm"
+                      decimals={0}
+                    />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       <section aria-labelledby={`shot-review-heading-${summary.id}`}>
@@ -1700,6 +1794,93 @@ function CompareWithSelector({
         </p>
       )}
     </section>
+  );
+}
+
+function ClubColorDot({ color }: { color: string | undefined }) {
+  if (!color) return null;
+
+  return (
+    <span
+      aria-hidden="true"
+      className="h-2 w-2 shrink-0 rounded-full"
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
+function ComparisonClubButton({
+  summaryId,
+  clubName,
+  color,
+  onOpenSummary,
+}: {
+  summaryId: number;
+  clubName: string;
+  color: string | undefined;
+  onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      onClick={(event) =>
+        onOpenSummary(summaryId, event.currentTarget)
+      }
+      className="inline-flex max-w-full cursor-pointer items-center gap-2 rounded-sm text-left font-semibold text-foreground transition-colors hover:text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+    >
+      <ClubColorDot color={color} />
+      <span className="truncate">{clubName}</span>
+    </button>
+  );
+}
+
+function ComparisonMetric({
+  label,
+  value,
+  unit,
+  decimals = 1,
+}: {
+  label: string;
+  value: number | null;
+  unit: string;
+  decimals?: number;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-[10px] font-medium text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="truncate text-sm font-semibold tabular-nums text-foreground">
+        {formatClubResultMetric(value, decimals)}
+        {value !== null && Number.isFinite(value) && (
+          <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+            {unit}
+          </span>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+function ComparisonTableValue({
+  value,
+  unit,
+  decimals = 1,
+}: {
+  value: number | null;
+  unit: string;
+  decimals?: number;
+}) {
+  return (
+    <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-foreground">
+      {formatClubResultMetric(value, decimals)}
+      {value !== null && Number.isFinite(value) && (
+        <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+          {unit}
+        </span>
+      )}
+    </td>
   );
 }
 
