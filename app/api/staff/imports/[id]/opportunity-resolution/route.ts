@@ -13,6 +13,7 @@ import {
   parseOpportunityResolution,
 } from "@/lib/imports/opportunity-resolution";
 import type { CustomerResolutionState } from "@/lib/imports/customer-resolution";
+import { normalizeOpportunityCreatedAt } from "@/lib/imports/opportunity-page";
 
 const BATCH_FIELDS = {
   id: true,
@@ -132,14 +133,13 @@ export async function GET(
       demoSessionId: batch.demoSessionId,
     }),
     canSelectExisting,
-    opportunities: opportunities.map(
-      ({ id: opportunityId, name, pipelineStageId, status }) => ({
-        id: opportunityId,
-        name,
-        pipelineStageId,
-        status,
-      }),
-    ),
+    opportunities: opportunities.map((opportunity) => ({
+      id: opportunity.id,
+      name: opportunity.name,
+      pipelineStageId: opportunity.pipelineStageId,
+      status: opportunity.status,
+      createdAt: normalizeOpportunityCreatedAt(opportunity.createdAt),
+    })),
   });
 }
 

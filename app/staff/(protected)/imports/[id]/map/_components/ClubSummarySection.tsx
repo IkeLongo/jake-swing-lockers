@@ -28,11 +28,12 @@ interface Props {
   needsRefinalization?: boolean;
   /** Hides the section heading/intro when the page already provides one. */
   hideHeading?: boolean;
+  hideFinalize?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization, hideHeading = false }: Props) {
+export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization, hideHeading = false, hideFinalize = false }: Props) {
   const [summaries, setSummaries] =
     useState<SerializedClubSummary[]>(initialSummaries);
   const [generating, setGenerating] = useState(false);
@@ -352,7 +353,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       )}
 
       {/* ── Finalize section ────────────────────────────────────────────────── */}
-      {hasSummaries && (
+      {hasSummaries && !hideFinalize && (
         <div className="rounded-xl border border-border bg-card px-5 py-5 shadow-xs">
           {finalized && !dirty ? (
             // ── Clean finalized state ────────────────────────────────────────────

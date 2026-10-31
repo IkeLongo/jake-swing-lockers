@@ -4,6 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { db } from "@/lib/db";
 import { getReviewPageRedirect } from "@/lib/imports/customer-workflow-routing";
+import { getStagedCustomerSummary } from "@/lib/imports/staged-customer-summary";
+import { StagedFittingHeader } from "../../_components/StagedFittingHeader";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/clubSummaryTypes";
 import SessionDetailsCard from "./_components/SessionDetailsCard";
@@ -58,6 +60,9 @@ export default async function ImportMapPage({
         trackmanPlayerName: true,
         trackmanPlayerEmail: true,
         createdAt: true,
+        selectedGolfClient: {
+          select: { firstName: true, lastName: true, email: true, phone: true },
+        },
         demoSession: {
           select: {
             id: true,
@@ -123,7 +128,14 @@ export default async function ImportMapPage({
   return (
     <div>
       {/* ── Back nav ───────────────────────────────────────────────────────── */}
-      <div className={`${isTrackManReview ? "mb-6 max-w-4xl" : "mb-6 max-w-3xl"}`}>
+      {isTrackManReview ? (
+        <StagedFittingHeader
+          title="Review Fitting"
+          description="Review the recorded clubs and shots before continuing."
+          customer={getStagedCustomerSummary(batch)}
+        />
+      ) : (
+      <div className="mb-6 max-w-3xl">
         <Link
           href={backHref}
           className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
@@ -149,43 +161,14 @@ export default async function ImportMapPage({
           />
         )}
 
-        {isTrackManReview ? (
-          <div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <h1 className="text-lg font-bold text-foreground font-heading">
-                Review Fitting
-              </h1>
-              <StatusBadge status={batch.status} />
-            </div>
-            {(batch.trackmanPlayerName || batch.trackmanPlayerEmail) && (
-              <div className="mt-2">
-                {batch.trackmanPlayerName && (
-                  <p className="text-base font-semibold text-foreground font-subheading">
-                    {batch.trackmanPlayerName}
-                  </p>
-                )}
-                {batch.trackmanPlayerEmail && (
-                  <p className="text-sm text-muted-foreground font-body">
-                    {batch.trackmanPlayerEmail}
-                  </p>
-                )}
-              </div>
-            )}
-            <p className="mt-2 text-sm text-muted-foreground font-body">
-              Fitting analysis for the recorded clubs and shots.
-            </p>
-          </div>
-        ) : (
-          <>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
-              Club Averages
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground font-body">
-              {batch.originalFileName}
-            </p>
-          </>
-        )}
+        <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
+          Club Averages
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground font-body">
+          {batch.originalFileName}
+        </p>
       </div>
+      )}
 
       {/* ── Batch summary cards ──────────────────────────────────────────────── */}
       {!isTrackManReview && (
@@ -236,7 +219,26 @@ export default async function ImportMapPage({
         sessionStatus={batch.demoSession?.status}
         needsRefinalization={batch.demoSession?.needsRefinalization ?? false}
         hideHeading={isTrackManReview}
+        hideFinalize={isTrackManReview}
       />
+
+      {isTrackManReview && (
+        <div className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-3">
+          <Link
+            href="/staff/imports"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground font-subheading"
+          >
+            <IconArrowLeft className="h-4 w-4" />
+            Back to Imports
+          </Link>
+          <Link
+            href={`/staff/imports/${batchId}/opportunity`}
+            className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover font-subheading"
+          >
+            Continue →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
@@ -280,21 +282,6 @@ const STATUS_STYLES: Record<string, { className: string; label: string }> = {
     label: "Uploaded",
   },
 };
-
-function StatusBadge({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] ?? {
-    className: "border-border bg-muted text-muted-foreground",
-    label: status,
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold font-subheading ${style.className}`}
-    >
-      {style.label}
-    </span>
-  );
-}
 
 function StatusCard({ status }: { status: string }) {
   const style = STATUS_STYLES[status] ?? {
