@@ -9,6 +9,28 @@ export interface CustomerResolutionState {
   proposedPhone: string | null;
 }
 
+export function hasSameCustomerIdentity(
+  current: CustomerResolutionState,
+  next: CustomerResolutionState,
+): boolean {
+  if (current.customerResolution !== next.customerResolution) return false;
+
+  if (current.customerResolution === "existing") {
+    return current.selectedGolfClientId === next.selectedGolfClientId;
+  }
+
+  if (current.customerResolution === "new") {
+    return (
+      current.proposedFirstName === next.proposedFirstName &&
+      current.proposedLastName === next.proposedLastName &&
+      current.proposedEmail === next.proposedEmail &&
+      current.proposedPhone === next.proposedPhone
+    );
+  }
+
+  return true;
+}
+
 export type CustomerResolutionParseResult =
   | { success: true; state: CustomerResolutionState }
   | { success: false; error: string };

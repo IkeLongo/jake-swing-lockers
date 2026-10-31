@@ -249,12 +249,14 @@ model ImportBatch {
   trackmanMetadataError String?   @db.Text
   customerResolution    String?
   selectedGolfClientId  Int?
-  proposedFirstName     String?
-  proposedLastName      String?
-  proposedEmail         String?
-  proposedPhone         String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  proposedFirstName        String?
+  proposedLastName         String?
+  proposedEmail            String?
+  proposedPhone            String?
+  opportunityResolution    String?
+  selectedGhlOpportunityId String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   selectedGolfClient GolfClient? @relation(fields: [selectedGolfClientId], references: [id], onDelete: Restrict)
 

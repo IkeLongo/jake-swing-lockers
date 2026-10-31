@@ -43,12 +43,13 @@ export const STAGE_CLOSED_NO_PURCHASE = () => {
 
 // ── GHL Opportunity shapes (minimal) ─────────────────────────────────────────
 
-interface GhlOpportunity {
+export interface GhlOpportunity {
   id: string;
   name: string;
   pipelineId: string;
   pipelineStageId: string;
   contactId: string;
+  locationId: string;
   status: string;
   [key: string]: unknown;
 }
@@ -82,6 +83,67 @@ export async function findOpenOpportunityForContact(
     `/opportunities/search?${params.toString()}`
   );
   return res.opportunities?.[0] ?? null;
+}
+
+export async function listOpenOpportunitiesForContact(
+  ghlContactId: string,
+): Promise<GhlOpportunity[]> {
+  const params = new URLSearchParams({
+    location_id: LOCATION_ID(),
+    pipeline_id: PIPELINE_ID(),
+    contact_id: ghlContactId,
+    status: "open",
+    limit: "100",
+  });
+  const res = await ghlFetch<OpportunitiesListResponse>(
+    `/opportunities/search?${params.toString()}`,
+  );
+  if (!Array.isArray(res.opportunities)) {
+    throw new Error("GHL opportunity search returned an invalid response.");
+  }
+  const locationId = LOCATION_ID();
+  const pipelineId = PIPELINE_ID();
+  return res.opportunities.filter(
+    (opportunity) =>
+      opportunity.contactId === ghlContactId &&
+      opportunity.locationId === locationId &&
+      opportunity.pipelineId === pipelineId &&
+      opportunity.status === "open",
+  );
+}
+
+export type OpportunitySelectionValidation =
+  | { valid: true; opportunity: GhlOpportunity }
+  | { valid: false; reason: "not_found" | "not_relevant" };
+
+export async function validateOpportunitySelection(
+  opportunityId: string,
+  ghlContactId: string,
+): Promise<OpportunitySelectionValidation> {
+  const res = await ghlFetch<{ opportunity?: GhlOpportunity | null }>(
+    `/opportunities/${encodeURIComponent(opportunityId)}`,
+  ).catch((error: unknown) => {
+    if (
+      error instanceof Error &&
+      /^GHL API error: 404\b/.test(error.message)
+    ) {
+      return null;
+    }
+    throw error;
+  });
+  const opportunity = res?.opportunity;
+  if (!opportunity) return { valid: false, reason: "not_found" };
+
+  if (
+    opportunity.contactId !== ghlContactId ||
+    opportunity.locationId !== LOCATION_ID() ||
+    opportunity.pipelineId !== PIPELINE_ID() ||
+    opportunity.status !== "open"
+  ) {
+    return { valid: false, reason: "not_relevant" };
+  }
+
+  return { valid: true, opportunity };
 }
 
 /**

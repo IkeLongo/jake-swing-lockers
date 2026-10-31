@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { parseCustomerResolution } from "@/lib/imports/customer-resolution";
+import { getOpportunityStateAfterCustomerChange } from "@/lib/imports/opportunity-resolution";
 
 export async function PUT(
   req: NextRequest,
@@ -36,7 +37,19 @@ export async function PUT(
 
   const batch = await db.importBatch.findUnique({
     where: { id: batchId },
-    select: { id: true, parserMode: true, demoSessionId: true },
+    select: {
+      id: true,
+      parserMode: true,
+      demoSessionId: true,
+      customerResolution: true,
+      selectedGolfClientId: true,
+      proposedFirstName: true,
+      proposedLastName: true,
+      proposedEmail: true,
+      proposedPhone: true,
+      opportunityResolution: true,
+      selectedGhlOpportunityId: true,
+    },
   });
   if (!batch) {
     return NextResponse.json({ error: "Import batch not found." }, { status: 404 });
@@ -58,13 +71,48 @@ export async function PUT(
     }
   }
 
+  const opportunityState = getOpportunityStateAfterCustomerChange(
+    {
+      customerResolution:
+        batch.customerResolution === "existing" ||
+        batch.customerResolution === "new"
+          ? batch.customerResolution
+          : null,
+      selectedGolfClientId: batch.selectedGolfClientId,
+      proposedFirstName: batch.proposedFirstName,
+      proposedLastName: batch.proposedLastName,
+      proposedEmail: batch.proposedEmail,
+      proposedPhone: batch.proposedPhone,
+    },
+    parsed.state,
+    {
+      opportunityResolution:
+        batch.opportunityResolution === "existing" ||
+        batch.opportunityResolution === "new"
+          ? batch.opportunityResolution
+          : null,
+      selectedGhlOpportunityId: batch.selectedGhlOpportunityId,
+    },
+  );
+
   const update = await db.importBatch.updateMany({
     where: {
       id: batchId,
       parserMode: "trackman-result",
       demoSessionId: null,
+      customerResolution: batch.customerResolution,
+      selectedGolfClientId: batch.selectedGolfClientId,
+      proposedFirstName: batch.proposedFirstName,
+      proposedLastName: batch.proposedLastName,
+      proposedEmail: batch.proposedEmail,
+      proposedPhone: batch.proposedPhone,
+      opportunityResolution: batch.opportunityResolution,
+      selectedGhlOpportunityId: batch.selectedGhlOpportunityId,
     },
-    data: parsed.state,
+    data: {
+      ...parsed.state,
+      ...opportunityState,
+    },
   });
   if (update.count === 0) {
     return NextResponse.json(
