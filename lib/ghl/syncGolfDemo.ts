@@ -2,12 +2,12 @@ import { db } from "@/lib/db";
 import { upsertContact, updateContactCustomFields } from "./contacts";
 import { addTagsToContact } from "./tags";
 import { upsertGolfDemoOpportunity } from "./opportunities";
-
-// ── Env helpers ───────────────────────────────────────────────────────────────
-
-function cf(name: keyof NodeJS.ProcessEnv): string | undefined {
-  return process.env[name] ?? undefined;
-}
+import {
+  GOLF_DEMO_TAGS,
+  buildGolfDemoCustomFields,
+  buildGolfDemoSummaries,
+  golfDemoOpportunityName,
+} from "./golfDemoSyncContent";
 
 // ── Result shape ──────────────────────────────────────────────────────────────
 
@@ -75,57 +75,16 @@ export async function syncGolfDemoToGHL(
     });
 
     // ── 4. Build club summary strings ───────────────────────────────────────
-    const demoPairs = session.clubTests.filter((t) => t.clubRole === "demo");
-    const currentPairs = session.clubTests.filter(
-      (t) => t.clubRole === "current"
-    );
-
-    function clubLabel(test: (typeof demoPairs)[0]): string {
-      const parts = [test.brand, test.model].filter(Boolean);
-      return parts.length > 0 ? parts.join(" ") : test.clubType ?? "Unknown";
-    }
-
-    const recommendedClub = demoPairs.find((t) => t.isRecommended);
-    const recommendedClubSummary = recommendedClub
-      ? clubLabel(recommendedClub)
-      : demoPairs.map(clubLabel).join(", ");
-
-    const currentClubSummary =
-      currentPairs.length > 0
-        ? currentPairs.map(clubLabel).join(", ")
-        : session.currentClub ?? "";
-
-    const demoClubCount = demoPairs.length;
-
-    // ── 4b. Calculate estimated opportunity value from demo club prices ────────
-    const priceSum = demoPairs
-      .filter((t) => t.estimatedPrice != null)
-      .reduce((acc, t) => acc + t.estimatedPrice!.toNumber(), 0);
-    const monetaryValue: number | undefined =
-      priceSum > 0 ? Math.round(priceSum * 100) / 100 : undefined;
+    const summaries = buildGolfDemoSummaries(session);
+    const { monetaryValue } = summaries;
 
     // ── 5. Update GHL contact custom fields ─────────────────────────────────
-    const customFields: { id: string; value: string }[] = [];
-
-    const addField = (envKey: string, value: string | null | undefined) => {
-      const fieldId = cf(envKey as keyof NodeJS.ProcessEnv);
-      if (fieldId && value != null && value !== "") {
-        customFields.push({ id: fieldId, value });
-      }
-    };
-
-    addField("GHL_SWINGLOCKER_CF_SWING_LOCKER_URL", lockerUrl);
-    addField("GHL_SWINGLOCKER_CF_LATEST_DEMO_SESSION_ID", String(session.id));
-    addField(
-      "GHL_SWINGLOCKER_CF_LATEST_DEMO_DATE",
-      session.demoDate.toISOString().split("T")[0]
+    const customFields = buildGolfDemoCustomFields(
+      session,
+      summaries,
+      lockerUrl,
+      new Date().toISOString()
     );
-    addField("GHL_SWINGLOCKER_CF_RECOMMENDED_CLUB_SUMMARY", recommendedClubSummary);
-    addField("GHL_SWINGLOCKER_CF_CURRENT_CLUB_SUMMARY", currentClubSummary);
-    addField("GHL_SWINGLOCKER_CF_DEMO_FOLLOWUP_STATUS", "pending");
-    addField("GHL_SWINGLOCKER_CF_SALES_REP_NAME", session.salesRep ?? "");
-    addField("GHL_SWINGLOCKER_CF_DEMO_CLUB_COUNT", String(demoClubCount));
-    addField("GHL_SWINGLOCKER_CF_LAST_DEMO_SUBMITTED_AT", new Date().toISOString());
 
     let customFieldsUpdated = false;
     if (customFields.length > 0) {
@@ -134,10 +93,9 @@ export async function syncGolfDemoToGHL(
     }
 
     // ── 6. Upsert opportunity ────────────────────────────────────────────────
-    const oppName = `${client.firstName ?? ""} ${client.lastName ?? ""}`.trim();
     const ghlOpportunityId = await upsertGolfDemoOpportunity(
       {
-        name: `${oppName} - Golf Demo`.trim(),
+        name: golfDemoOpportunityName(client),
         contactId: resolvedGhlContactId,
         monetaryValue,
       },
@@ -145,7 +103,7 @@ export async function syncGolfDemoToGHL(
     );
 
     // ── 7. Add tags to trigger GHL workflow ──────────────────────────────────
-    const tagsAdded = ["golf-demo:locker-ready", "golf-demo:followup-active"];
+    const tagsAdded = [...GOLF_DEMO_TAGS];
     await addTagsToContact(resolvedGhlContactId, tagsAdded);
 
     // ── 8. Save sync status to DemoSession ───────────────────────────────────
