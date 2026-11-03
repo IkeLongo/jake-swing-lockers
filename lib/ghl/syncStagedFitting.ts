@@ -5,6 +5,7 @@ import {
   golfDemoOpportunityName,
   type SyncClubTest,
 } from "./golfDemoSyncContent";
+import { ContactNeedsReviewError } from "./resolveStagedContact";
 
 // CRM sync for a locally finalized, staged TrackMan fitting.
 //
@@ -51,9 +52,14 @@ export type SyncOpportunityValidation =
 
 export interface StagedSyncDeps {
   loadBatch(batchId: number): Promise<StagedSyncBatch | null>;
-  upsertContact(
+  /**
+   * Verifies a saved contact ID, or finds/creates a contact conservatively.
+   * Throws ContactNeedsReviewError when the match is ambiguous or conflicting;
+   * any other throw is a retryable GHL failure.
+   */
+  resolveContact(
     input: Pick<StagedSyncClient, "firstName" | "lastName" | "email" | "phone">,
-    existingGhlContactId: string | null,
+    savedGhlContactId: string | null,
   ): Promise<{ id: string }>;
   saveContactId(clientId: number, ghlContactId: string): Promise<void>;
   /** Read-only. Throws on GHL service failures. */
@@ -93,6 +99,7 @@ export interface StagedSyncDeps {
     clientId: number;
     ghlContactId: string | null;
     message: string;
+    retryable: boolean;
   }): Promise<void>;
   now(): Date;
   appBaseUrl(): string;
@@ -119,6 +126,7 @@ export type StagedSyncResult =
       status: "failed";
       demoSessionId: number;
       retryable: boolean;
+      code?: "contact-needs-review";
       error: string;
     }
   | {
@@ -203,10 +211,10 @@ export async function syncStagedFittingToGHL(
 
   let ghlContactId: string | null = client.ghlContactId;
   try {
-    // 1. Contact: reuse a saved ID; otherwise resolve and persist immediately.
-    if (!ghlContactId) {
-      const resolved = await deps.upsertContact(client, null);
-      ghlContactId = resolved.id;
+    // 1. Contact: verify a saved ID or resolve one, and persist it immediately.
+    const resolved = await deps.resolveContact(client, client.ghlContactId);
+    ghlContactId = resolved.id;
+    if (resolved.id !== client.ghlContactId) {
       await deps.saveContactId(client.id, ghlContactId);
     }
 
@@ -276,12 +284,17 @@ export async function syncStagedFittingToGHL(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const retryable = !(
+      err instanceof NonRetryableSyncError ||
+      err instanceof ContactNeedsReviewError
+    );
     try {
       await deps.markFailed({
         sessionId: session.id,
         clientId: client.id,
         ghlContactId,
         message,
+        retryable,
       });
     } catch {
       // Recording the failure is best-effort.
@@ -290,7 +303,8 @@ export async function syncStagedFittingToGHL(
       ok: false,
       status: "failed",
       demoSessionId: session.id,
-      retryable: !(err instanceof NonRetryableSyncError),
+      retryable,
+      ...(err instanceof ContactNeedsReviewError ? { code: err.code } : {}),
       error: message,
     };
   }

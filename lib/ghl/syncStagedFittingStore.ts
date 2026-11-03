@@ -1,5 +1,8 @@
 import type { PrismaClient } from "@/app/generated/prisma/client";
-import { upsertContact, updateContactCustomFields } from "./contacts";
+import { updateContactCustomFields } from "./contacts";
+import { resolveStagedContact } from "./resolveStagedContact";
+import { stagedContactApi } from "./stagedContactApi";
+import { encodeSyncError } from "./syncErrorMarker";
 import { addTagsToContact } from "./tags";
 import {
   createGolfDemoOpportunity,
@@ -55,7 +58,8 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
         },
       }),
 
-    upsertContact,
+    resolveContact: async (input, savedGhlContactId) =>
+      resolveStagedContact(stagedContactApi, input, savedGhlContactId),
 
     async saveContactId(clientId, ghlContactId) {
       await db.golfClient.update({
@@ -130,11 +134,15 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
       });
     },
 
-    async markFailed({ sessionId, clientId, ghlContactId, message }) {
+    async markFailed({ sessionId, clientId, ghlContactId, message, retryable }) {
       const now = new Date();
       await db.demoSession.update({
         where: { id: sessionId },
-        data: { ghlLastSyncedAt: now, ghlSyncStatus: "failed", ghlSyncError: message },
+        data: {
+          ghlLastSyncedAt: now,
+          ghlSyncStatus: "failed",
+          ghlSyncError: encodeSyncError(message, retryable),
+        },
       });
       await db.golfClient.update({
         where: { id: clientId },

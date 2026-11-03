@@ -57,16 +57,17 @@ function cloneBatch(b: StagedSyncBatch): StagedSyncBatch {
 }
 
 interface Calls {
-  upsertContact: number;
+  contactCreates: number;
   createOpportunity: number;
   validate: number;
   fields: number;
   tags: number;
   order: string[];
+  failedRetryable: boolean[];
 }
 
 function harness(batch: StagedSyncBatch) {
-  const calls: Calls = { upsertContact: 0, createOpportunity: 0, validate: 0, fields: 0, tags: 0, order: [] };
+  const calls: Calls = { contactCreates: 0, createOpportunity: 0, validate: 0, fields: 0, tags: 0, order: [], failedRetryable: [] };
   const opts = {
     validation: { valid: true } as SyncOpportunityValidation | "throw",
     failAt: null as null | "fields" | "tags" | "create" | "contact",
@@ -77,9 +78,10 @@ function harness(batch: StagedSyncBatch) {
 
   const deps: StagedSyncDeps = {
     loadBatch: async () => cloneBatch(db.batch),
-    upsertContact: async () => {
-      calls.upsertContact++;
+    resolveContact: async (_input, saved) => {
       if (opts.failAt === "contact") throw new Error("contact down");
+      if (saved) return { id: saved };
+      calls.contactCreates++;
       return { id: "contact-new" };
     },
     saveContactId: async (_c, id) => {
@@ -125,7 +127,8 @@ function harness(batch: StagedSyncBatch) {
     markSynced: async () => {
       session().ghlSyncStatus = "synced";
     },
-    markFailed: async () => {
+    markFailed: async (args) => {
+      calls.failedRetryable.push(args.retryable);
       session().ghlSyncStatus = "failed";
     },
     now: () => new Date("2030-01-01T00:00:00Z"),
@@ -141,7 +144,7 @@ test("new opportunity + customer without GHL contact", async () => {
   if (!r.ok) return;
   assert.equal(r.ghlContactId, "contact-new");
   assert.equal(r.ghlOpportunityId, "opp-1");
-  assert.equal(h.calls.upsertContact, 1);
+  assert.equal(h.calls.contactCreates, 1);
   assert.equal(h.calls.createOpportunity, 1);
   assert.equal(h.db.batch.demoSession!.client.ghlContactId, "contact-new");
   assert.equal(h.db.batch.demoSession!.ghlSyncStatus, "synced");
@@ -153,7 +156,7 @@ test("existing ghlContactId is reused", async () => {
   const h = harness(b);
   const r = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(r.ok && r.ghlContactId, "contact-old");
-  assert.equal(h.calls.upsertContact, 0);
+  assert.equal(h.calls.contactCreates, 0);
 });
 
 test("contact and opportunity IDs are persisted before later steps", async () => {
@@ -175,7 +178,7 @@ test("failure after opportunity creation keeps the ID; retry reuses it", async (
   const second = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(second.ok && second.ghlOpportunityId, "opp-1");
   assert.equal(h.calls.createOpportunity, 1);
-  assert.equal(h.calls.upsertContact, 1);
+  assert.equal(h.calls.contactCreates, 1);
 });
 
 test("a failed opportunity create is retryable and creates nothing locally", async () => {
@@ -251,6 +254,24 @@ test("tags already applied are not re-added when a later step is retried", async
   assert.equal(h.calls.createOpportunity, 0);
 });
 
+test("a contact needing review fails the sync non-retryably without touching the fitting", async () => {
+  const h = harness(makeBatch());
+  const { ContactNeedsReviewError } = await import("../lib/ghl/resolveStagedContact");
+  h.deps.resolveContact = async () => {
+    throw new ContactNeedsReviewError("multiple_matches", "Multiple GHL contacts match.");
+  };
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok, false);
+  if (r.ok || r.status !== "failed") return assert.fail("expected failed");
+  assert.equal(r.retryable, false);
+  assert.equal(r.code, "contact-needs-review");
+  assert.deepEqual(h.calls.failedRetryable, [false]);
+  assert.equal(h.calls.createOpportunity, 0);
+  assert.equal(h.db.batch.demoSession!.client.ghlContactId, null);
+  assert.equal(h.db.batch.demoSession!.status, "finalized");
+  assert.equal(h.db.batch.demoSession!.ghlSyncStatus, "failed");
+});
+
 test("preconditions are rejected", async () => {
   const cases: [StagedSyncBatch, string][] = [
     [makeBatch({ status: "reviewing" }), "not_finalized"],
@@ -264,7 +285,7 @@ test("preconditions are rejected", async () => {
     const h = harness(batch);
     const r = await syncStagedFittingToGHL(h.deps, 1);
     assert.equal(r.ok === false && r.status === "rejected" && r.code, code);
-    assert.equal(h.calls.upsertContact + h.calls.createOpportunity, 0);
+    assert.equal(h.calls.contactCreates + h.calls.createOpportunity, 0);
   }
   const h = harness(makeBatch());
   h.deps.loadBatch = async () => null;

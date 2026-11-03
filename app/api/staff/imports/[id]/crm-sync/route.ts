@@ -47,6 +47,7 @@ export async function POST(
           status: "failed",
           demoSessionId: result.demoSessionId,
           retryable: result.retryable,
+          ...(result.code ? { code: result.code } : {}),
           error: result.error,
         },
         { status: 502 },
