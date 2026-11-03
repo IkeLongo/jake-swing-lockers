@@ -43,6 +43,7 @@ export interface ConfirmPageState {
 export function getConfirmPageRedirect(
   batch: ConfirmBatch,
   includedClubCount: number,
+  ghlDecision: "existing" | "new" | null,
 ): string | null {
   const base = `/staff/imports/${batch.id}`;
   if (batch.parserMode !== "trackman-result" || batch.status === "failed") {
@@ -53,13 +54,19 @@ export function getConfirmPageRedirect(
     return batch.demoSession?.status === "finalized" ? null : `${base}/map`;
   }
   if (batch.status === "finalized") return `${base}/map`;
-  if (!hasPersistedCustomerResolution(batch)) return `${base}/customer`;
+  if (!hasPersistedCustomerResolution(batch) || ghlDecision === null) {
+    return `${base}/customer`;
+  }
 
   const { opportunityResolution: resolution, selectedGhlOpportunityId: id } =
     batch;
+  // A "new" contact has no existing opportunities to select.
   const opportunityComplete =
     (resolution === "new" && id === null) ||
-    (resolution === "existing" && !!id && id.trim().length > 0);
+    (resolution === "existing" &&
+      ghlDecision === "existing" &&
+      !!id &&
+      id.trim().length > 0);
   if (!opportunityComplete) return `${base}/opportunity`;
 
   if (includedClubCount === 0) return `${base}/map`;

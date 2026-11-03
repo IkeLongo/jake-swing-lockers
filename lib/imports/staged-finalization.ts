@@ -1,5 +1,10 @@
-import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
 import { hasPersistedCustomerResolution } from "./customer-workflow-routing";
+import { parseProposedIdentity } from "./customer-identifiers";
+import {
+  findDuplicateCandidates,
+  type ClientIdentity,
+} from "./new-customer-review";
+import { computeReviewSignature } from "./new-customer-review-server";
 import {
   flattenPlan,
   persistPlan,
@@ -26,6 +31,7 @@ export interface StagedFinalizeBatch {
   proposedLastName: string | null;
   proposedEmail: string | null;
   proposedPhone: string | null;
+  newCustomerConfirmationSignature: string | null;
   opportunityResolution: string | null;
   selectedGhlOpportunityId: string | null;
   trackmanSessionDate: Date | null;
@@ -50,10 +56,7 @@ export interface StagedFinalizeTx<S extends PlannableSummary> {
   lockBatch(batchId: number): Promise<void>;
   loadBatch(batchId: number): Promise<StagedFinalizeBatch | null>;
   loadSummaries(batchId: number): Promise<S[]>;
-  findClientByContact(
-    email: string | null,
-    phone: string | null,
-  ): Promise<{ id: number } | null>;
+  listClientsForDuplicateCheck(): Promise<ClientIdentity[]>;
   createClient(data: {
     firstName: string | null;
     lastName: string | null;
@@ -79,6 +82,12 @@ export interface StagedFinalizeDeps<S extends PlannableSummary> {
   ): Promise<OpportunityValidation>;
   transaction<T>(fn: (tx: StagedFinalizeTx<S>) => Promise<T>): Promise<T>;
   now(): Date;
+  /**
+   * TEMPORARY (CP4c-A): blocks creating new staged finalizations until CP4d
+   * enforces the persisted GHL contact decision. REMOVE IN CP4d together with
+   * `cp4dFinalizationGuard`. Never applied to already-linked batches.
+   */
+  temporaryFinalizationGuard?: (batch: StagedFinalizeBatch) => Failure | null;
 }
 
 export type StagedFinalizeErrorCode =
@@ -86,6 +95,7 @@ export type StagedFinalizeErrorCode =
   | "not_eligible"
   | "already_linked"
   | "customer_unresolved"
+  | "duplicate_customer_unresolved"
   | "opportunity_unresolved"
   | "invalid_opportunity_state"
   | "new_customer_existing_opportunity"
@@ -93,6 +103,7 @@ export type StagedFinalizeErrorCode =
   | "opportunity_no_longer_valid"
   | "no_clubs"
   | "ghl_unavailable"
+  | "ghl_contact_integration_pending"
   | "state_changed";
 
 export type StagedFinalizeResult =
@@ -147,6 +158,21 @@ function existingResult(
   );
 }
 
+/**
+ * TEMPORARY (CP4c-A → remove in CP4d). Finalization and CRM sync do not yet
+ * honor the persisted GHL contact decision, so a new staged finalization is
+ * refused. Legacy batches that already have a DemoSession return before this
+ * guard is evaluated.
+ */
+export function cp4dFinalizationGuard(batch: StagedFinalizeBatch): Failure | null {
+  if (batch.demoSessionId !== null) return null;
+  return fail(
+    409,
+    "ghl_contact_integration_pending",
+    "Finalizing staged fittings is temporarily disabled until GHL contact approval is fully integrated.",
+  );
+}
+
 /** Pure validation of the staged state; GHL and club checks happen elsewhere. */
 export function validateStagedBatch(batch: StagedFinalizeBatch): Failure | null {
   if (batch.parserMode !== "trackman-result" || batch.status === "failed") {
@@ -160,6 +186,21 @@ export function validateStagedBatch(batch: StagedFinalizeBatch): Failure | null 
   }
   if (batch.customerResolution === "existing" && !batch.selectedGolfClient) {
     return fail(409, "customer_unresolved", "The selected customer no longer exists.");
+  }
+  if (
+    batch.customerResolution === "new" &&
+    !parseProposedIdentity({
+      firstName: batch.proposedFirstName,
+      lastName: batch.proposedLastName,
+      email: batch.proposedEmail,
+      phone: batch.proposedPhone,
+    }).ok
+  ) {
+    return fail(
+      409,
+      "customer_unresolved",
+      "The new customer needs a name and a valid email or phone. Update the customer details before finalizing.",
+    );
   }
 
   const resolution = batch.opportunityResolution;
@@ -209,6 +250,7 @@ function stateSignature(batch: StagedFinalizeBatch): string {
     batch.proposedLastName,
     batch.proposedEmail,
     batch.proposedPhone,
+    batch.newCustomerConfirmationSignature,
     batch.opportunityResolution,
     batch.selectedGhlOpportunityId,
   ]);
@@ -222,28 +264,57 @@ function planClubs<S extends PlannableSummary>(summaries: readonly S[]) {
   };
 }
 
+type ClientResolution =
+  | { ok: true; clientId: number }
+  | { ok: false; failure: Failure };
+
+// Never reuses an existing customer. A new customer is created only when no
+// GolfClient matches, or when staff confirmed this exact candidate set; the
+// confirmation is recomputed here, inside the locked transaction.
 async function resolveClientId<S extends PlannableSummary>(
   tx: StagedFinalizeTx<S>,
   batch: StagedFinalizeBatch,
-): Promise<number> {
+): Promise<ClientResolution> {
   if (batch.customerResolution === "existing") {
-    return batch.selectedGolfClient!.id;
+    return { ok: true, clientId: batch.selectedGolfClient!.id };
   }
 
-  const firstName = batch.proposedFirstName?.trim() || null;
-  const lastName = batch.proposedLastName?.trim() || null;
-  const email = batch.proposedEmail?.trim()
-    ? normalizeEmail(batch.proposedEmail)
-    : null;
-  const phone = batch.proposedPhone?.trim()
-    ? normalizePhone(batch.proposedPhone)
-    : null;
+  const identity = parseProposedIdentity({
+    firstName: batch.proposedFirstName,
+    lastName: batch.proposedLastName,
+    email: batch.proposedEmail,
+    phone: batch.proposedPhone,
+  });
+  if (!identity.ok) {
+    return {
+      ok: false,
+      failure: fail(409, "customer_unresolved", identity.error),
+    };
+  }
+  const { firstName, lastName, email, phone } = identity.value;
 
-  const match =
-    email || phone ? await tx.findClientByContact(email, phone) : null;
-  if (match) return match.id;
+  const candidates = findDuplicateCandidates(
+    await tx.listClientsForDuplicateCheck(),
+    { email, phone },
+  );
+  if (
+    candidates.length > 0 &&
+    (batch.newCustomerConfirmationSignature === null ||
+      batch.newCustomerConfirmationSignature !==
+        computeReviewSignature({ email, phone }, candidates))
+  ) {
+    return {
+      ok: false,
+      failure: fail(
+        409,
+        "duplicate_customer_unresolved",
+        "An existing customer matches this new customer's email or phone, and the match has not been reviewed. Review the customer step before finalizing.",
+      ),
+    };
+  }
+
   const created = await tx.createClient({ firstName, lastName, email, phone });
-  return created.id;
+  return { ok: true, clientId: created.id };
 }
 
 export async function finalizeStagedImport<S extends PlannableSummary>(
@@ -256,6 +327,9 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
   const batch = await deps.loadBatch(batchId);
   if (!batch) return fail(404, "batch_not_found", "Import batch not found.");
   if (batch.demoSessionId !== null) return existingResult(batch);
+
+  const blocked = deps.temporaryFinalizationGuard?.(batch);
+  if (blocked) return blocked;
 
   const invalid = validateStagedBatch(batch);
   if (invalid) return invalid;
@@ -303,6 +377,9 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
     if (!locked) return fail(404, "batch_not_found", "Import batch not found.");
     if (locked.demoSessionId !== null) return existingResult(locked);
 
+    const lockedBlocked = deps.temporaryFinalizationGuard?.(locked);
+    if (lockedBlocked) return lockedBlocked;
+
     const lockedInvalid = validateStagedBatch(locked);
     if (lockedInvalid) return lockedInvalid;
     if (stateSignature(locked) !== expectedSignature) {
@@ -323,7 +400,9 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
       );
     }
 
-    const clientId = await resolveClientId(tx, locked);
+    const resolvedClient = await resolveClientId(tx, locked);
+    if (!resolvedClient.ok) return resolvedClient.failure;
+    const clientId = resolvedClient.clientId;
     const ghlOpportunityId =
       locked.opportunityResolution === "existing"
         ? locked.selectedGhlOpportunityId

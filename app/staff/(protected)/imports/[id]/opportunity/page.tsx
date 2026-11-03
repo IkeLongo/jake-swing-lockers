@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getOpportunityPageRedirect } from "@/lib/imports/opportunity-page";
+import {
+  GHL_APPROVAL_BATCH_SELECT,
+  getCurrentGhlDecision,
+} from "@/lib/imports/ghl-approval-gate";
 import { getStagedCustomerSummary } from "@/lib/imports/staged-customer-summary";
 import { StagedFittingHeader } from "../../_components/StagedFittingHeader";
 import { OpportunitySection } from "./_components/OpportunitySection";
@@ -33,6 +37,7 @@ export default async function ImportOpportunityPage({
       proposedLastName: true,
       proposedEmail: true,
       proposedPhone: true,
+      ...GHL_APPROVAL_BATCH_SELECT,
       selectedGolfClient: {
         select: { firstName: true, lastName: true, email: true, phone: true },
       },
@@ -40,7 +45,10 @@ export default async function ImportOpportunityPage({
   });
   if (!batch) notFound();
 
-  const destination = getOpportunityPageRedirect(batch);
+  const destination = getOpportunityPageRedirect(
+    batch,
+    getCurrentGhlDecision(batch, batch.selectedGolfClient),
+  );
   if (destination) redirect(destination);
 
   return (

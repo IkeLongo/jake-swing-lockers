@@ -5,6 +5,10 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { db } from "@/lib/db";
 import type { CustomerResolutionState } from "@/lib/imports/customer-resolution";
 import { getCustomerPageRedirect } from "@/lib/imports/customer-workflow-routing";
+import { buildNewCustomerReview } from "@/lib/imports/new-customer-review-server";
+import { loadClientsForDuplicateCheck } from "@/lib/imports/new-customer-review-store";
+import { buildApprovalView } from "@/lib/ghl/approveBatchContact";
+import { getBatchGhlApprovalStatus } from "@/lib/imports/ghl-approval-gate";
 import { CustomerResolutionSection } from "./_components/CustomerResolutionSection";
 
 export const metadata: Metadata = {
@@ -37,6 +41,13 @@ export default async function ImportCustomerPage({
       proposedLastName: true,
       proposedEmail: true,
       proposedPhone: true,
+      newCustomerConfirmationSignature: true,
+      ghlContactDecision: true,
+      approvedGhlContactId: true,
+      ghlContactApprovalSignature: true,
+      ghlContactApprovedAt: true,
+      ghlContactApprovedByStaffUserId: true,
+      ghlContactReviewSnapshot: true,
       selectedGolfClient: {
         select: {
           id: true,
@@ -66,6 +77,32 @@ export default async function ImportCustomerPage({
     proposedEmail: batch.proposedEmail,
     proposedPhone: batch.proposedPhone,
   };
+
+  // Recomputed on every load so a stale or legacy staged customer is re-reviewed.
+  const initialReview =
+    initialState.customerResolution === "new"
+      ? buildNewCustomerReview(
+          await loadClientsForDuplicateCheck(db),
+          { email: batch.proposedEmail, phone: batch.proposedPhone },
+          batch.newCustomerConfirmationSignature,
+        )
+      : null;
+
+  const initialApproval = buildApprovalView(
+    getBatchGhlApprovalStatus(
+      batch,
+      initialState.customerResolution === "existing"
+        ? batch.selectedGolfClient
+        : null,
+    ),
+    {
+      decision: batch.ghlContactDecision,
+      approvedContactId: batch.approvedGhlContactId,
+      approvedAt: batch.ghlContactApprovedAt,
+      approvedByStaffUserId: batch.ghlContactApprovedByStaffUserId,
+      snapshot: batch.ghlContactReviewSnapshot,
+    },
+  );
 
   return (
     <div className="max-w-3xl">
@@ -111,6 +148,8 @@ export default async function ImportCustomerPage({
         trackmanPlayerEmail={batch.trackmanPlayerEmail}
         initialState={initialState}
         initialSelectedCustomer={batch.selectedGolfClient}
+        initialReview={initialReview}
+        initialApproval={initialApproval}
       />
     </div>
   );

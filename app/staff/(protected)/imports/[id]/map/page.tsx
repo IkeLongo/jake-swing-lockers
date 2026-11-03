@@ -4,6 +4,10 @@ import { notFound, redirect } from "next/navigation";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { db } from "@/lib/db";
 import { getReviewPageRedirect } from "@/lib/imports/customer-workflow-routing";
+import {
+  GHL_APPROVAL_BATCH_SELECT,
+  getCurrentGhlDecision,
+} from "@/lib/imports/ghl-approval-gate";
 import { getStagedCustomerSummary } from "@/lib/imports/staged-customer-summary";
 import { StagedFittingHeader } from "../../_components/StagedFittingHeader";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
@@ -57,6 +61,7 @@ export default async function ImportMapPage({
         proposedLastName: true,
         proposedEmail: true,
         proposedPhone: true,
+        ...GHL_APPROVAL_BATCH_SELECT,
         trackmanPlayerName: true,
         trackmanPlayerEmail: true,
         createdAt: true,
@@ -91,7 +96,10 @@ export default async function ImportMapPage({
   ]);
 
   if (!batch) notFound();
-  const redirectToCustomer = getReviewPageRedirect(batch);
+  const redirectToCustomer = getReviewPageRedirect(
+    batch,
+    getCurrentGhlDecision(batch, batch.selectedGolfClient),
+  );
   if (redirectToCustomer) redirect(redirectToCustomer);
 
   // Serialize Decimal fields for client components

@@ -43,17 +43,19 @@ export function hasPersistedCustomerResolution(
 
   return (
     batch.customerResolution === "new" &&
-    [
-      batch.proposedFirstName,
-      batch.proposedLastName,
-      batch.proposedEmail,
-      batch.proposedPhone,
-    ].some((value) => value?.trim())
+    [batch.proposedFirstName, batch.proposedLastName].some((v) => v?.trim()) &&
+    [batch.proposedEmail, batch.proposedPhone].some((v) => v?.trim())
   );
 }
 
+/**
+ * `ghlDecision` is the current, persisted GHL contact decision (see
+ * `getCurrentGhlDecision`); null means unresolved or stale. Legacy batches
+ * linked to a DemoSession and non-TrackMan batches are never gated.
+ */
 export function getReviewPageRedirect(
   batch: ImportCustomerWorkflowState,
+  ghlDecision: "existing" | "new" | null,
 ): string | null {
   if (
     batch.demoSessionId !== null ||
@@ -62,7 +64,9 @@ export function getReviewPageRedirect(
     return null;
   }
 
-  if (hasPersistedCustomerResolution(batch)) return null;
+  if (!hasPersistedCustomerResolution(batch) || ghlDecision === null) {
+    return `/staff/imports/${batch.id}/customer`;
+  }
 
-  return `/staff/imports/${batch.id}/customer`;
+  return null;
 }

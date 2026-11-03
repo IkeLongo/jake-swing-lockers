@@ -48,11 +48,20 @@ function club(id: number, over: Partial<ConfirmClubSummary> = {}): ConfirmClubSu
 // ── Redirect / state ─────────────────────────────────────────────────────────
 
 test("eligible existing and new opportunity states render the page", () => {
-  assert.equal(getConfirmPageRedirect(batch(), 2), null);
+  assert.equal(getConfirmPageRedirect(batch(), 2, "existing"), null);
   assert.equal(
     getConfirmPageRedirect(
       batch({ opportunityResolution: "new", selectedGhlOpportunityId: null }),
       2,
+      "existing",
+    ),
+    null,
+  );
+  assert.equal(
+    getConfirmPageRedirect(
+      batch({ opportunityResolution: "new", selectedGhlOpportunityId: null }),
+      2,
+      "new",
     ),
     null,
   );
@@ -63,9 +72,18 @@ test("unresolved customer redirects to the customer step", () => {
     getConfirmPageRedirect(
       batch({ customerResolution: null, selectedGolfClientId: null }),
       2,
+      null,
     ),
     "/staff/imports/5/customer",
   );
+});
+
+test("missing or stale GHL approval redirects to the customer step", () => {
+  assert.equal(getConfirmPageRedirect(batch(), 2, null), "/staff/imports/5/customer");
+});
+
+test("an existing opportunity cannot be confirmed under a new-contact decision", () => {
+  assert.equal(getConfirmPageRedirect(batch(), 2, "new"), "/staff/imports/5/opportunity");
 });
 
 test("unresolved or inconsistent opportunity redirects to the opportunity step", () => {
@@ -75,22 +93,23 @@ test("unresolved or inconsistent opportunity redirects to the opportunity step",
     { opportunityResolution: "new", selectedGhlOpportunityId: "opp-1" },
   ]) {
     assert.equal(
-      getConfirmPageRedirect(batch(over), 2),
+      getConfirmPageRedirect(batch(over), 2, "existing"),
       "/staff/imports/5/opportunity",
     );
   }
 });
 
 test("other ineligible batches are routed to an earlier step", () => {
-  assert.equal(getConfirmPageRedirect(batch(), 0), "/staff/imports/5/map");
+  assert.equal(getConfirmPageRedirect(batch(), 0, "existing"), "/staff/imports/5/map");
   assert.equal(
-    getConfirmPageRedirect(batch({ parserMode: "legacy" }), 2),
+    getConfirmPageRedirect(batch({ parserMode: "legacy" }), 2, null),
     "/staff/imports/5",
   );
   assert.equal(
     getConfirmPageRedirect(
       batch({ demoSessionId: 9, demoSession: { status: "draft", ghlSyncStatus: null } }),
       2,
+      null,
     ),
     "/staff/imports/5/map",
   );
@@ -104,7 +123,7 @@ test("finalized batches stay on the page in every CRM state", () => {
       demoSession: { status: "finalized", ghlSyncStatus, ghlSyncError },
     });
 
-  assert.equal(getConfirmPageRedirect(finalized(null), 2), null);
+  assert.equal(getConfirmPageRedirect(finalized(null), 2, null), null);
   assert.deepEqual(getConfirmPageState(batch()), { stage: "ready", syncAttempted: false, error: null });
   assert.deepEqual(getConfirmPageState(finalized(null)), { stage: "crm_pending", syncAttempted: false, error: null });
   assert.deepEqual(getConfirmPageState(finalized("failed", "GHL timeout")), {

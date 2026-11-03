@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
+import { getLegacyConfirmBlock } from "@/lib/imports/legacy-confirm-guard";
 
 // ── Request body types ────────────────────────────────────────────────────────
 
@@ -87,6 +88,15 @@ export async function POST(
     return NextResponse.json(
       { error: "This import has already been confirmed." },
       { status: 409 },
+    );
+  }
+
+  // Staged imports must not create a customer or session through this legacy route.
+  const stagedBlock = getLegacyConfirmBlock(batch);
+  if (stagedBlock) {
+    return NextResponse.json(
+      { error: stagedBlock.error, code: stagedBlock.code },
+      { status: stagedBlock.status },
     );
   }
 

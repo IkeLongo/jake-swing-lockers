@@ -58,8 +58,18 @@ export function OpportunitySection({ batchId }: Props) {
     try {
       const response = await fetch(endpoint, { cache: "no-store" });
       const body = (await response.json()) as
-        | OpportunityResolutionResponse
-        | { error: string };
+        | (OpportunityResolutionResponse & {
+            contactDecision?: "existing" | "new" | null;
+          })
+        | { error: string; code?: string };
+      if (
+        !response.ok &&
+        "code" in body &&
+        body.code === "ghl_approval_required"
+      ) {
+        router.replace(`/staff/imports/${batchId}/customer`);
+        return;
+      }
       if (!response.ok || !("state" in body)) {
         setLoadError(
           "error" in body ? body.error : "Could not load opportunities.",
@@ -70,7 +80,7 @@ export function OpportunitySection({ batchId }: Props) {
     } catch {
       setLoadError("Could not load opportunities. Please try again.");
     }
-  }, [endpoint]);
+  }, [endpoint, router, batchId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -91,8 +101,12 @@ export function OpportunitySection({ batchId }: Props) {
       });
       const body = (await response.json()) as
         | { success: true; state: OpportunityResolutionResponse["state"] }
-        | { error: string };
+        | { error: string; code?: string };
       if (!response.ok || !("success" in body)) {
+        if ("code" in body && body.code === "ghl_approval_required") {
+          router.replace(`/staff/imports/${batchId}/customer`);
+          return;
+        }
         setSaveError(
           "error" in body ? body.error : "Could not save your selection.",
         );
@@ -154,8 +168,8 @@ export function OpportunitySection({ batchId }: Props) {
         </h2>
         {!data.canSelectExisting ? (
           <p className="mt-2 text-sm text-muted-foreground font-body">
-            This customer has no existing opportunities yet. Create a new one
-            below.
+            A new GHL contact will be created for this customer, so there are
+            no existing opportunities to choose from. Create a new one below.
           </p>
         ) : noExisting ? (
           <p className="mt-2 text-sm text-muted-foreground font-body">

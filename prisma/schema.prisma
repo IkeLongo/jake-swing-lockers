@@ -255,6 +255,23 @@ model ImportBatch {
   proposedPhone            String?
   opportunityResolution    String?
   selectedGhlOpportunityId String?
+  // Staff confirmation that a proposed new customer is a different person than
+  // the duplicate candidates reviewed. The signature binds the proposed
+  // identifiers and candidate set; it is recomputed and verified at finalization.
+  newCustomerConfirmationSignature  String?   @db.VarChar(64)
+  newCustomerConfirmedAt            DateTime?
+  newCustomerConfirmedByStaffUserId Int?
+  newCustomerReviewedCandidates     Json?
+  // Staff decision on which GHL contact this fitting uses: "existing" (with
+  // approvedGhlContactId) or "new" (created at CRM sync). NULL = unresolved.
+  // The signature binds the local identity, decision, contact and the signed
+  // review snapshot (candidate IDs, discrepancies, acknowledgments; no PII).
+  ghlContactDecision              String?   @db.VarChar(16)
+  approvedGhlContactId            String?   @db.VarChar(64)
+  ghlContactApprovalSignature     String?   @db.VarChar(64)
+  ghlContactApprovedAt            DateTime?
+  ghlContactApprovedByStaffUserId Int?
+  ghlContactReviewSnapshot        Json?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 

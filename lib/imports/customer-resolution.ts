@@ -1,4 +1,4 @@
-import { normalizeEmail } from "@/lib/auth/normalize";
+import { parseProposedIdentity } from "./customer-identifiers";
 
 export interface CustomerResolutionState {
   customerResolution: "existing" | "new" | null;
@@ -52,6 +52,42 @@ function parseProposedField(
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") return undefined;
   return value.trim() || null;
+}
+
+const REVIEW_SIGNATURE_PATTERN = /^[0-9a-f]{64}$/;
+
+export type NewCustomerConfirmationParseResult =
+  | { success: true; submittedSignature: string | null }
+  | { success: false; error: string };
+
+// A bare `confirmNewCustomer: true` is never accepted: the signature of the
+// reviewed candidate set must accompany it.
+export function parseNewCustomerConfirmation(
+  input: unknown,
+): NewCustomerConfirmationParseResult {
+  const body = (input ?? {}) as Record<string, unknown>;
+  const confirm = body.confirmNewCustomer;
+  const signature = body.reviewSignature;
+
+  if (confirm === undefined || confirm === null || confirm === false) {
+    return { success: true, submittedSignature: null };
+  }
+  if (confirm !== true) {
+    return { success: false, error: "confirmNewCustomer must be a boolean." };
+  }
+  if (body.resolution !== "new") {
+    return {
+      success: false,
+      error: "Only a new customer can be confirmed as a different person.",
+    };
+  }
+  if (typeof signature !== "string" || !REVIEW_SIGNATURE_PATTERN.test(signature)) {
+    return {
+      success: false,
+      error: "A review signature is required to confirm a new customer.",
+    };
+  }
+  return { success: true, submittedSignature: signature };
 }
 
 export function parseCustomerResolution(
@@ -109,27 +145,23 @@ export function parseCustomerResolution(
       };
     }
 
-    if (
-      !proposedFirstName &&
-      !proposedLastName &&
-      !proposedEmail &&
-      !proposedPhone
-    ) {
-      return {
-        success: false,
-        error: "Provide at least one proposed customer name or contact field.",
-      };
-    }
+    const identity = parseProposedIdentity({
+      firstName: proposedFirstName,
+      lastName: proposedLastName,
+      email: proposedEmail,
+      phone: proposedPhone,
+    });
+    if (!identity.ok) return { success: false, error: identity.error };
 
     return {
       success: true,
       state: {
         ...EMPTY_STATE,
         customerResolution: "new",
-        proposedFirstName,
-        proposedLastName,
-        proposedEmail: proposedEmail ? normalizeEmail(proposedEmail) : null,
-        proposedPhone,
+        proposedFirstName: identity.value.firstName,
+        proposedLastName: identity.value.lastName,
+        proposedEmail: identity.value.email,
+        proposedPhone: identity.value.phone,
       },
     };
   }

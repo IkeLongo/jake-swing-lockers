@@ -10,6 +10,17 @@ import type { CustomerMatchResult } from "@/lib/queries/customer-match";
 import type { CustomerResolutionState } from "@/lib/imports/customer-resolution";
 import { getNewCustomerFormValues } from "@/lib/imports/customer-resolution-form";
 import { hasPersistedCustomerResolution } from "@/lib/imports/customer-workflow-routing";
+import {
+  isReviewBlocking,
+  type NewCustomerReview,
+} from "@/lib/imports/new-customer-review";
+import { DuplicateReviewPanel } from "./DuplicateReviewPanel";
+import { GhlContactDiscoverySection } from "./GhlContactDiscoverySection";
+import type { GhlApprovalView } from "@/lib/ghl/approveBatchContact";
+import {
+  canContinueWithApproval,
+  getApprovalContinueHint,
+} from "@/lib/ghl/approvalUi";
 
 interface Props {
   batchId: number;
@@ -17,11 +28,20 @@ interface Props {
   trackmanPlayerEmail: string | null;
   initialState: CustomerResolutionState;
   initialSelectedCustomer: ClientSearchResult | null;
+  initialReview: NewCustomerReview | null;
+  initialApproval: GhlApprovalView | null;
 }
 
 interface SaveResponse {
   success: true;
   state: CustomerResolutionState;
+  review: NewCustomerReview | null;
+}
+
+interface SaveErrorResponse {
+  error: string;
+  code?: string;
+  review?: NewCustomerReview;
 }
 
 function getInitialChoice(
@@ -54,8 +74,11 @@ export function CustomerResolutionSection({
   trackmanPlayerEmail,
   initialState,
   initialSelectedCustomer,
+  initialReview,
+  initialApproval,
 }: Props) {
   const router = useRouter();
+  const [review, setReview] = useState<NewCustomerReview | null>(initialReview);
   const [match, setMatch] = useState<CustomerMatchResult | null>(null);
   const [matchError, setMatchError] = useState<string | null>(null);
   const [choice, setChoice] = useState<ClientPickerValue | null>(() =>
@@ -70,6 +93,8 @@ export function CustomerResolutionSection({
     hasPersistedCustomerResolution(initialState),
   );
   const initialResolutionValid = hasPersistedCustomerResolution(initialState);
+  const [approval, setApproval] = useState<GhlApprovalView | null>(initialApproval);
+  const [identityVersion, setIdentityVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -128,6 +153,8 @@ export function CustomerResolutionSection({
 
   function handlePickerChange(value: ClientPickerValue | null) {
     setChoice(value);
+    // Any edit changes the proposed identity, which invalidates a prior review.
+    setReview(null);
     if (value !== null) {
       setPersisted(false);
       setSaveError(null);
@@ -142,10 +169,8 @@ export function CustomerResolutionSection({
     }
     if (value?.mode === "new") {
       return Boolean(
-        value.firstName.trim() ||
-          value.lastName.trim() ||
-          value.email.trim() ||
-          value.phone.trim(),
+        (value.firstName.trim() || value.lastName.trim()) &&
+          (value.email.trim() || value.phone.trim()),
       );
     }
     return false;
@@ -155,7 +180,10 @@ export function CustomerResolutionSection({
     return isValidChoice(choice);
   }
 
-  async function saveChoice(target: ClientPickerValue | null = choice): Promise<boolean> {
+  async function saveChoice(
+    target: ClientPickerValue | null = choice,
+    confirmSignature?: string,
+  ): Promise<boolean> {
     if (!target || !isValidChoice(target) || saving) return false;
     setSaving(true);
     setSaveError(null);
@@ -169,6 +197,9 @@ export function CustomerResolutionSection({
             proposedLastName: target.lastName,
             proposedEmail: target.email,
             proposedPhone: target.phone,
+            ...(confirmSignature
+              ? { confirmNewCustomer: true, reviewSignature: confirmSignature }
+              : {}),
           };
 
     try {
@@ -180,12 +211,21 @@ export function CustomerResolutionSection({
           body: JSON.stringify(body),
         },
       );
-      const data = (await response.json()) as SaveResponse | { error: string };
+      const data = (await response.json()) as SaveResponse | SaveErrorResponse;
       if (!response.ok || !("success" in data)) {
-        setSaveError("error" in data ? data.error : "Could not save customer selection.");
+        const failure = data as SaveErrorResponse;
+        if (failure.review) {
+          setReview(failure.review);
+          // The review panel explains a first-time duplicate; only a stale
+          // review needs an explicit message.
+          if (failure.code === "review_changed") setSaveError(failure.error);
+        } else {
+          setSaveError(failure.error ?? "Could not save customer selection.");
+        }
         return false;
       }
 
+      setReview(data.review);
       const state = data.state;
       if (state.customerResolution === "existing" && state.selectedGolfClientId) {
         setChoice({
@@ -203,6 +243,10 @@ export function CustomerResolutionSection({
         });
       }
       setPersisted(true);
+      // A save may have cleared the approval; the remounted GHL section
+      // reloads the real state before Continue is enabled again.
+      setApproval(null);
+      setIdentityVersion((v) => v + 1);
       router.refresh();
       return true;
     } catch {
@@ -215,6 +259,12 @@ export function CustomerResolutionSection({
 
   const showSuggestions = !choice && !showPicker;
   const showExistingSummary = choice?.mode === "existing" && !showPicker;
+  const newReview = choice?.mode === "new" ? review : null;
+  const reviewBlocking = isReviewBlocking(newReview);
+  const reviewConfirmed =
+    newReview !== null && newReview.kind !== "none" && newReview.confirmed;
+  const canContinue = canContinueWithApproval(approval);
+  const continueHint = getApprovalContinueHint(approval);
 
   return (
     <div className="space-y-4">
@@ -390,13 +440,23 @@ export function CustomerResolutionSection({
               initialNewCustomer={newCustomerDefaults}
               disabled={saving}
             />
-            {choice?.mode === "new" && persisted && (
+            {choice?.mode === "new" && persisted && !reviewBlocking && (
               <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-primary font-body">
                 <IconCheck className="h-3.5 w-3.5" />
-                New customer details saved
+                {reviewConfirmed
+                  ? "Confirmed as a new customer (different from the matches reviewed)"
+                  : "New customer details saved"}
               </p>
             )}
-            {choice && !persisted && (
+            {newReview && reviewBlocking && (
+              <DuplicateReviewPanel
+                review={newReview}
+                saving={saving}
+                onUseExisting={(candidate) => void selectExisting(candidate)}
+                onConfirmNew={(signature) => void saveChoice(choice, signature)}
+              />
+            )}
+            {choice && !persisted && !reviewBlocking && (
               <button
                 type="button"
                 onClick={() => saveChoice()}
@@ -410,14 +470,31 @@ export function CustomerResolutionSection({
         )}
       </section>
 
-      {choice && persisted && (
-        <button
-          type="button"
-          onClick={() => router.push(`/staff/imports/${batchId}/map`)}
-          className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover font-subheading"
-        >
-          Continue →
-        </button>
+      {choice && persisted && !reviewBlocking && (
+        <GhlContactDiscoverySection
+          key={identityVersion}
+          batchId={batchId}
+          initialApproval={identityVersion === 0 ? initialApproval : null}
+          onApprovalChange={setApproval}
+        />
+      )}
+
+      {choice && persisted && !reviewBlocking && (
+        <div className="space-y-2">
+          {continueHint && (
+            <p className="text-sm text-muted-foreground font-body">
+              {continueHint}
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={!canContinue}
+            onClick={() => router.push(`/staff/imports/${batchId}/map`)}
+            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 font-subheading"
+          >
+            Continue →
+          </button>
+        </div>
       )}
     </div>
   );

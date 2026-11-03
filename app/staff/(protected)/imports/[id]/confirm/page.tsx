@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { STAFF_SESSION_COOKIE, verifyStaffSessionToken } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { getOpportunityById } from "@/lib/ghl/opportunities";
+import { GHL_APPROVAL_BATCH_SELECT, getCurrentGhlDecision } from "@/lib/imports/ghl-approval-gate";
 import {
   formatFittingDate,
   getConfirmClubs,
@@ -47,6 +48,7 @@ export default async function ImportConfirmPage({
         proposedLastName: true,
         proposedEmail: true,
         proposedPhone: true,
+        ...GHL_APPROVAL_BATCH_SELECT,
         opportunityResolution: true,
         selectedGhlOpportunityId: true,
         trackmanSessionDate: true,
@@ -80,8 +82,9 @@ export default async function ImportConfirmPage({
   ]);
   if (!batch) notFound();
 
+  const ghlDecision = getCurrentGhlDecision(batch, batch.selectedGolfClient);
   const clubs = getConfirmClubs(summaries);
-  const destination = getConfirmPageRedirect(batch, clubs.length);
+  const destination = getConfirmPageRedirect(batch, clubs.length, ghlDecision);
   if (destination) redirect(destination);
 
   const state = getConfirmPageState(batch);
@@ -137,6 +140,26 @@ export default async function ImportConfirmPage({
       />
 
       <div className="w-full max-w-3xl space-y-4">
+        {ghlDecision && (
+          <section aria-labelledby="confirm-ghl-contact">
+            <h2 id="confirm-ghl-contact" className={sectionHeading}>
+              GHL contact
+            </h2>
+            <div className="mt-2 rounded-lg border border-border bg-card px-4 py-2.5">
+              <p className="text-sm font-semibold text-foreground font-body">
+                {ghlDecision === "existing"
+                  ? "Existing GHL contact"
+                  : "New GHL contact"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground font-body">
+                {ghlDecision === "existing"
+                  ? "Staff approved using the existing GHL contact for this customer."
+                  : "Staff approved creating a new GHL contact when the CRM sync runs."}
+              </p>
+            </div>
+          </section>
+        )}
+
         <section aria-labelledby="confirm-opportunity">
           <h2 id="confirm-opportunity" className={sectionHeading}>
             Opportunity

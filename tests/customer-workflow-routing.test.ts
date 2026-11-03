@@ -26,9 +26,19 @@ function createBatch(
 
 test("unresolved staged TrackMan imports redirect from review to customer step", () => {
   assert.equal(
-    getReviewPageRedirect(createBatch()),
+    getReviewPageRedirect(createBatch(), null),
     "/staff/imports/42/customer",
   );
+});
+
+test("a resolved customer without a current GHL approval redirects to the customer step", () => {
+  const resolved = createBatch({
+    customerResolution: "existing",
+    selectedGolfClientId: 9,
+  });
+  assert.equal(getReviewPageRedirect(resolved, null), "/staff/imports/42/customer");
+  assert.equal(getReviewPageRedirect(resolved, "existing"), null);
+  assert.equal(getReviewPageRedirect(resolved, "new"), null);
 });
 
 test("persisted existing and new customer resolutions can reach review", () => {
@@ -38,6 +48,7 @@ test("persisted existing and new customer resolutions can reach review", () => {
         customerResolution: "existing",
         selectedGolfClientId: 9,
       }),
+      "existing",
     ),
     null,
   );
@@ -46,7 +57,9 @@ test("persisted existing and new customer resolutions can reach review", () => {
       createBatch({
         customerResolution: "new",
         proposedFirstName: "Max",
+        proposedEmail: "max@example.com",
       }),
+      "new",
     ),
     null,
   );
@@ -79,7 +92,7 @@ test("linked DemoSession imports bypass the staged customer requirement", () => 
     customerResolution: null,
   });
 
-  assert.equal(getReviewPageRedirect(linkedBatch), null);
+  assert.equal(getReviewPageRedirect(linkedBatch, null), null);
   assert.equal(
     getCustomerPageRedirect(linkedBatch),
     "/staff/imports/42/map",

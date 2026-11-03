@@ -58,10 +58,11 @@ interface OpportunityPageBatch {
 
 export function getOpportunityPageRedirect(
   batch: OpportunityPageBatch,
+  ghlDecision: "existing" | "new" | null,
 ): string | null {
   if (batch.demoSessionId !== null) return `/staff/imports/${batch.id}/map`;
   if (batch.parserMode !== "trackman-result") return `/staff/imports/${batch.id}`;
-  if (!hasPersistedCustomerResolution(batch)) {
+  if (!hasPersistedCustomerResolution(batch) || ghlDecision === null) {
     return `/staff/imports/${batch.id}/customer`;
   }
   return null;

@@ -75,13 +75,13 @@ export interface StagedContactResolution {
   source: ContactResolutionSource;
 }
 
-function usableEmail(email: string | null): string | null {
+export function usableEmail(email: string | null): string | null {
   const value = email ? normalizeEmail(email) : "";
   return /^[^\s@]+@[^\s@]+$/.test(value) ? value : null;
 }
 
 // Lookups require E.164; anything else cannot be searched reliably.
-function usablePhone(phone: string | null): string | null {
+export function usablePhone(phone: string | null): string | null {
   const value = phone ? normalizePhone(phone) : "";
   return /^\+\d{8,15}$/.test(value) ? value : null;
 }
@@ -90,7 +90,7 @@ function sameText(a: string | null | undefined, b: string | null | undefined) {
   return (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
 }
 
-function conflicts(
+export function conflicts(
   a: string | null | undefined,
   b: string | null | undefined,
   eq: (x: string, y: string) => boolean = (x, y) => sameText(x, y),
@@ -99,8 +99,8 @@ function conflicts(
   return !eq(a, b);
 }
 
-const samePhone = (x: string, y: string) => normalizePhone(x) === normalizePhone(y);
-const sameEmail = (x: string, y: string) => normalizeEmail(x) === normalizeEmail(y);
+export const samePhone = (x: string, y: string) => normalizePhone(x) === normalizePhone(y);
+export const sameEmail = (x: string, y: string) => normalizeEmail(x) === normalizeEmail(y);
 
 /** The identifier that did NOT match is checked, along with the names. */
 function hasIdentityConflict(

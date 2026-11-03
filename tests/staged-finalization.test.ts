@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  cp4dFinalizationGuard,
   finalizeStagedImport,
   type StagedFinalizeBatch,
   type StagedFinalizeDeps,
   type StagedFinalizeTx,
   type OpportunityValidation,
 } from "../lib/imports/staged-finalization";
+import { computeReviewSignature } from "../lib/imports/new-customer-review-server";
+import { createPrismaStagedFinalizeDeps } from "../lib/imports/staged-finalization-store";
 import type { PlannableSummary } from "../lib/imports/finalizationPlan";
 
 interface Summary extends PlannableSummary {
@@ -35,6 +38,7 @@ function makeBatch(over: Partial<StagedFinalizeBatch> = {}): StagedFinalizeBatch
     proposedLastName: null,
     proposedEmail: null,
     proposedPhone: null,
+    newCustomerConfirmationSignature: null,
     opportunityResolution: "existing",
     selectedGhlOpportunityId: "opp-1",
     trackmanSessionDate: new Date("2026-05-08T12:00:00Z"),
@@ -61,7 +65,13 @@ interface Harness {
   state: {
     batch: StagedFinalizeBatch;
     summaries: Summary[];
-    clients: { id: number; email: string | null; phone: string | null }[];
+    clients: {
+      id: number;
+      firstName: string | null;
+      lastName: string | null;
+      email: string | null;
+      phone: string | null;
+    }[];
     sessions: { id: number; clientId: number; demoDate: Date; salesRep: string | null; ghlOpportunityId: string | null; status: string }[];
     clubs: ClubRow[];
     metrics: number[];
@@ -123,12 +133,15 @@ function harness(
           },
           loadBatch: async () => reload(),
           loadSummaries: async () => state.summaries,
-          findClientByContact: async (email, phone) =>
-            state.clients.find(
-              (c) => (email && c.email === email) || (phone && c.phone === phone),
-            ) ?? null,
+          listClientsForDuplicateCheck: async () => state.clients.map((c) => ({ ...c })),
           createClient: async (d) => {
-            const c = { id: nextId++, email: d.email, phone: d.phone };
+            const c = {
+              id: nextId++,
+              firstName: d.firstName,
+              lastName: d.lastName,
+              email: d.email,
+              phone: d.phone,
+            };
             state.clients.push(c);
             return { id: c.id };
           },
@@ -237,7 +250,92 @@ test("existing opportunity requires a ghlContactId", async () => {
   if (!r.ok) assert.equal(r.code, "no_ghl_contact");
 });
 
-test("new customer + new opportunity creates the client and dedupes by email", async () => {
+function newCustomerBatch(over: Partial<StagedFinalizeBatch> = {}) {
+  return makeBatch({
+    customerResolution: "new",
+    selectedGolfClientId: null,
+    selectedGolfClient: null,
+    proposedFirstName: "Ann",
+    proposedLastName: "Lee",
+    proposedEmail: "ann@example.com",
+    proposedPhone: "+12105550100",
+    opportunityResolution: "new",
+    selectedGhlOpportunityId: null,
+    ...over,
+  });
+}
+
+const existingClient = (id: number, email: string | null, phone: string | null) => ({
+  id,
+  firstName: "Other",
+  lastName: "Person",
+  email,
+  phone,
+});
+
+test("new customer with an unresolved email duplicate is rejected without creating", async () => {
+  const h = harness(newCustomerBatch(), [summary(1)]);
+  h.state.clients.push(existingClient(7, "ANN@example.com ", null));
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.code, "duplicate_customer_unresolved");
+    assert.equal(r.status, 409);
+  }
+  assert.equal(h.state.clients.length, 1);
+  assert.equal(h.state.sessions.length, 0);
+});
+
+test("legacy-formatted phone duplicate is detected at finalization", async () => {
+  const h = harness(newCustomerBatch({ proposedEmail: null }), [summary(1)]);
+  h.state.clients.push(existingClient(7, null, "(210) 555-0100"));
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok === false && r.code, "duplicate_customer_unresolved");
+});
+
+test("valid confirmation lets finalization create a different person", async () => {
+  const sig = computeReviewSignature(
+    { email: "ann@example.com", phone: "+12105550100" },
+    [{ ...existingClient(7, null, "210-555-0100"), matchedOn: "phone" }],
+  );
+  const h = harness(
+    newCustomerBatch({ newCustomerConfirmationSignature: sig }),
+    [summary(1)],
+  );
+  h.state.clients.push(existingClient(7, null, "210-555-0100"));
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok, true);
+  assert.equal(h.state.clients.length, 2);
+  assert.equal(h.state.sessions.length, 1);
+});
+
+test("confirmation is rejected when a new match appeared after review", async () => {
+  const sig = computeReviewSignature(
+    { email: "ann@example.com", phone: "+12105550100" },
+    [{ ...existingClient(7, null, "210-555-0100"), matchedOn: "phone" }],
+  );
+  const h = harness(
+    newCustomerBatch({ newCustomerConfirmationSignature: sig }),
+    [summary(1)],
+  );
+  h.state.clients.push(existingClient(7, null, "210-555-0100"));
+  h.state.clients.push(existingClient(8, "ann@example.com", null));
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok === false && r.code, "duplicate_customer_unresolved");
+  assert.equal(h.state.clients.length, 2);
+});
+
+test("stale confirmation is rejected after the match disappears and returns", async () => {
+  const h = harness(
+    newCustomerBatch({ newCustomerConfirmationSignature: "a".repeat(64) }),
+    [summary(1)],
+  );
+  h.state.clients.push(existingClient(7, null, "210-555-0100"));
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok === false && r.code, "duplicate_customer_unresolved");
+});
+
+test("new customer with no duplicates is created, and a second identical batch conflicts", async () => {
   const batch = makeBatch({
     customerResolution: "new",
     selectedGolfClientId: null,
@@ -255,10 +353,10 @@ test("new customer + new opportunity creates the client and dedupes by email", a
   assert.equal(h.state.clients.length, 1);
   assert.equal(h.state.clients[0]!.email, "ann@example.com");
 
-  // Another batch with the same email reuses the client.
+  // Another batch with the same email is never silently merged.
   h.state.batch = { ...batch, demoSessionId: null, status: "reviewing" };
   const r2 = await finalizeStagedImport(h.deps, input);
-  assert.equal(r2.ok, true);
+  assert.equal(r2.ok === false && r2.code, "duplicate_customer_unresolved");
   assert.equal(h.state.clients.length, 1);
 });
 
@@ -268,6 +366,7 @@ test("new customer + existing opportunity is rejected", async () => {
       customerResolution: "new",
       selectedGolfClientId: null,
       selectedGolfClient: null,
+      proposedFirstName: "Max",
       proposedEmail: "a@b.co",
     }),
     [summary(1)],
@@ -382,6 +481,53 @@ test("GHL outage is retryable; stale opportunity is a conflict", async () => {
   });
   const s = await finalizeStagedImport(stale.deps, input);
   assert.equal(s.ok === false && s.code, "opportunity_no_longer_valid");
+});
+
+// TEMPORARY (CP4c-A): remove with cp4dFinalizationGuard in CP4d.
+test("temporary CP4d guard blocks staged finalization before any write", async () => {
+  const h = harness(makeBatch(), [summary(1), summary(2)]);
+  h.deps.temporaryFinalizationGuard = cp4dFinalizationGuard;
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok === false && r.code, "ghl_contact_integration_pending");
+  assert.equal(r.ok === false && r.status, 409);
+  assert.equal(h.state.sessions.length, 0);
+  assert.equal(h.state.clubs.length, 0);
+  assert.equal(h.opts.ghlCalls, 0);
+});
+
+test("temporary CP4d guard does not affect legacy already-linked sessions", async () => {
+  const finalized = harness(
+    makeBatch({
+      demoSessionId: 5,
+      demoSession: { id: 5, status: "finalized", clientId: 10, ghlOpportunityId: null },
+    }),
+    [summary(1)],
+  );
+  finalized.state.sessions.push({
+    id: 5,
+    status: "finalized",
+    clientId: 10,
+    ghlOpportunityId: null,
+  } as never);
+  finalized.deps.temporaryFinalizationGuard = cp4dFinalizationGuard;
+  const ok = await finalizeStagedImport(finalized.deps, input);
+  assert.equal(ok.ok && ok.alreadyFinalized, true);
+
+  const draft = harness(
+    makeBatch({
+      demoSessionId: 5,
+      demoSession: { id: 5, status: "draft", clientId: 10, ghlOpportunityId: null },
+    }),
+    [summary(1)],
+  );
+  draft.deps.temporaryFinalizationGuard = cp4dFinalizationGuard;
+  const r = await finalizeStagedImport(draft.deps, input);
+  assert.equal(r.ok === false && r.code, "already_linked");
+});
+
+test("the production finalization deps install the temporary guard", () => {
+  const deps = createPrismaStagedFinalizeDeps({} as never);
+  assert.equal(deps.temporaryFinalizationGuard, cp4dFinalizationGuard);
 });
 
 test("already-linked unfinalized session and missing batch are rejected", async () => {

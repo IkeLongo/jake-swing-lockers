@@ -6,6 +6,8 @@ import type {
 } from "@/app/generated/prisma/client";
 import { validateOpportunitySelection } from "@/lib/ghl/opportunities";
 import { createPrismaFinalizeStore } from "./finalizationStore";
+import { loadClientsForDuplicateCheck } from "./new-customer-review-store";
+import { cp4dFinalizationGuard } from "./staged-finalization";
 import type {
   StagedFinalizeBatch,
   StagedFinalizeDeps,
@@ -23,6 +25,7 @@ const BATCH_SELECT = {
   proposedLastName: true,
   proposedEmail: true,
   proposedPhone: true,
+  newCustomerConfirmationSignature: true,
   opportunityResolution: true,
   selectedGhlOpportunityId: true,
   trackmanSessionDate: true,
@@ -63,14 +66,7 @@ function createTx(
     },
     loadBatch: (batchId) => loadBatch(tx, batchId),
     loadSummaries: (batchId) => loadSummaries(tx, batchId),
-    findClientByContact(email, phone) {
-      return tx.golfClient.findFirst({
-        where: {
-          OR: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])],
-        },
-        select: { id: true },
-      });
-    },
+    listClientsForDuplicateCheck: () => loadClientsForDuplicateCheck(tx),
     createClient: (data) =>
       tx.golfClient.create({ data, select: { id: true } }),
     createFinalizedSession: (data) =>
@@ -110,5 +106,7 @@ export function createPrismaStagedFinalizeDeps(
         timeout: 30_000,
       }),
     now: () => new Date(),
+    // TEMPORARY (CP4c-A): remove in CP4d with cp4dFinalizationGuard.
+    temporaryFinalizationGuard: cp4dFinalizationGuard,
   };
 }

@@ -48,17 +48,25 @@ const batch = {
 };
 
 test("page redirects away when not eligible", () => {
-  assert.equal(getOpportunityPageRedirect(batch), null);
+  assert.equal(getOpportunityPageRedirect(batch, "existing"), null);
+  assert.equal(getOpportunityPageRedirect(batch, "new"), null);
   assert.equal(
-    getOpportunityPageRedirect({ ...batch, demoSessionId: 1 }),
+    getOpportunityPageRedirect(batch, null),
+    "/staff/imports/7/customer",
+  );
+  assert.equal(
+    getOpportunityPageRedirect({ ...batch, demoSessionId: 1 }, null),
     "/staff/imports/7/map",
   );
   assert.equal(
-    getOpportunityPageRedirect({ ...batch, parserMode: "other" }),
+    getOpportunityPageRedirect({ ...batch, parserMode: "other" }, null),
     "/staff/imports/7",
   );
   assert.equal(
-    getOpportunityPageRedirect({ ...batch, customerResolution: null, selectedGolfClientId: null }),
+    getOpportunityPageRedirect(
+      { ...batch, customerResolution: null, selectedGolfClientId: null },
+      null,
+    ),
     "/staff/imports/7/customer",
   );
 });

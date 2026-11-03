@@ -1,8 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/app/generated/prisma/client";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { parseCustomerResolution } from "@/lib/imports/customer-resolution";
+import {
+  hasSameCustomerIdentity,
+  parseCustomerResolution,
+  parseNewCustomerConfirmation,
+} from "@/lib/imports/customer-resolution";
 import { getOpportunityStateAfterCustomerChange } from "@/lib/imports/opportunity-resolution";
+import {
+  buildNewCustomerReview,
+  decideNewCustomerSave,
+} from "@/lib/imports/new-customer-review-server";
+import { loadClientsForDuplicateCheck } from "@/lib/imports/new-customer-review-store";
+import { shouldClearGhlApprovalOnCustomerChange } from "@/lib/imports/ghl-contact-approval";
+import { CLEARED_GHL_APPROVAL_DATA } from "@/lib/ghl/approveBatchContactStore";
+
+const CLEARED_CONFIRMATION = {
+  newCustomerConfirmationSignature: null,
+  newCustomerConfirmedAt: null,
+  newCustomerConfirmedByStaffUserId: null,
+  newCustomerReviewedCandidates: Prisma.DbNull,
+};
 
 export async function PUT(
   req: NextRequest,
@@ -29,6 +48,10 @@ export async function PUT(
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
+  const confirmation = parseNewCustomerConfirmation(body);
+  if (!confirmation.success) {
+    return NextResponse.json({ error: confirmation.error }, { status: 400 });
+  }
 
   const batchId = Number(id);
   if (!Number.isSafeInteger(batchId)) {
@@ -49,6 +72,10 @@ export async function PUT(
       proposedPhone: true,
       opportunityResolution: true,
       selectedGhlOpportunityId: true,
+      newCustomerConfirmationSignature: true,
+      ghlContactDecision: true,
+      approvedGhlContactId: true,
+      ghlContactApprovalSignature: true,
     },
   });
   if (!batch) {
@@ -71,19 +98,67 @@ export async function PUT(
     }
   }
 
+  const currentCustomer = {
+    customerResolution:
+      batch.customerResolution === "existing" ||
+      batch.customerResolution === "new"
+        ? batch.customerResolution
+        : null,
+    selectedGolfClientId: batch.selectedGolfClientId,
+    proposedFirstName: batch.proposedFirstName,
+    proposedLastName: batch.proposedLastName,
+    proposedEmail: batch.proposedEmail,
+    proposedPhone: batch.proposedPhone,
+  } as const;
+
+  // Duplicate candidates are always recomputed here; the client only supplies
+  // the signature of the candidate set it reviewed.
+  const duplicateClients =
+    parsed.state.customerResolution === "new"
+      ? await loadClientsForDuplicateCheck(db)
+      : [];
+  let confirmationData: Record<string, unknown> = CLEARED_CONFIRMATION;
+  if (parsed.state.customerResolution === "new") {
+    const decision = decideNewCustomerSave({
+      clients: duplicateClients,
+      proposed: {
+        email: parsed.state.proposedEmail,
+        phone: parsed.state.proposedPhone,
+      },
+      identityUnchanged: hasSameCustomerIdentity(currentCustomer, parsed.state),
+      storedSignature: batch.newCustomerConfirmationSignature,
+      submittedSignature: confirmation.submittedSignature,
+    });
+    if (decision.outcome !== "save") {
+      return NextResponse.json(
+        {
+          error:
+            decision.outcome === "review_changed"
+              ? "Matching customers changed since you reviewed them. Review the matches again."
+              : "An existing customer matches this email or phone number. Review the matches before saving.",
+          code:
+            decision.outcome === "review_changed"
+              ? "review_changed"
+              : "duplicate_review_required",
+          review: decision.review,
+        },
+        { status: 409 },
+      );
+    }
+    if (decision.confirmation.action === "keep") {
+      confirmationData = {};
+    } else if (decision.confirmation.action === "set") {
+      confirmationData = {
+        newCustomerConfirmationSignature: decision.confirmation.signature,
+        newCustomerConfirmedAt: new Date(),
+        newCustomerConfirmedByStaffUserId: session.staffUserId,
+        newCustomerReviewedCandidates: decision.confirmation.snapshot,
+      };
+    }
+  }
+
   const opportunityState = getOpportunityStateAfterCustomerChange(
-    {
-      customerResolution:
-        batch.customerResolution === "existing" ||
-        batch.customerResolution === "new"
-          ? batch.customerResolution
-          : null,
-      selectedGolfClientId: batch.selectedGolfClientId,
-      proposedFirstName: batch.proposedFirstName,
-      proposedLastName: batch.proposedLastName,
-      proposedEmail: batch.proposedEmail,
-      proposedPhone: batch.proposedPhone,
-    },
+    currentCustomer,
     parsed.state,
     {
       opportunityResolution:
@@ -108,10 +183,20 @@ export async function PUT(
       proposedPhone: batch.proposedPhone,
       opportunityResolution: batch.opportunityResolution,
       selectedGhlOpportunityId: batch.selectedGhlOpportunityId,
+      newCustomerConfirmationSignature: batch.newCustomerConfirmationSignature,
+      ghlContactDecision: batch.ghlContactDecision,
+      approvedGhlContactId: batch.approvedGhlContactId,
+      ghlContactApprovalSignature: batch.ghlContactApprovalSignature,
     },
     data: {
       ...parsed.state,
       ...opportunityState,
+      ...confirmationData,
+      // Same atomic write as the identity change, so a stale GHL approval can
+      // never outlive the customer it was reviewed for.
+      ...(shouldClearGhlApprovalOnCustomerChange(currentCustomer, parsed.state)
+        ? CLEARED_GHL_APPROVAL_DATA
+        : {}),
     },
   });
   if (update.count === 0) {
@@ -130,11 +215,22 @@ export async function PUT(
       proposedLastName: true,
       proposedEmail: true,
       proposedPhone: true,
+      newCustomerConfirmationSignature: true,
     },
   });
   if (!persisted) {
     return NextResponse.json({ error: "Import batch not found." }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true, state: persisted });
+  const { newCustomerConfirmationSignature, ...state } = persisted;
+  const review =
+    state.customerResolution === "new"
+      ? buildNewCustomerReview(
+          duplicateClients,
+          { email: state.proposedEmail, phone: state.proposedPhone },
+          newCustomerConfirmationSignature,
+        )
+      : null;
+
+  return NextResponse.json({ success: true, state, review });
 }
