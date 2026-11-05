@@ -206,3 +206,66 @@ export async function resolveStagedContact(
     throw err;
   }
 }
+
+/**
+ * Finds a single exact identifier match and verifies its full record/location.
+ * The caller decides whether a match is an approved reuse or a recovery from a
+ * previously persisted creation attempt.
+ */
+export async function findStagedContactMatch(
+  api: StagedContactApi,
+  input: StagedContactInput,
+): Promise<GhlContactLite | null> {
+  const email = usableEmail(input.email);
+  const phone = usablePhone(input.phone);
+  if (!email && !phone) {
+    throw new ContactNeedsReviewError(
+      "missing_identifier",
+      "This customer has no usable email or phone number to match or create a GHL contact.",
+    );
+  }
+
+  const byEmail = email ? single(await api.lookupByEmail(email), "email") : null;
+  const byPhone = phone ? single(await api.lookupByPhone(phone), "phone") : null;
+  if (byEmail && byPhone && byEmail.id !== byPhone.id) {
+    throw new ContactNeedsReviewError(
+      "identifier_conflict",
+      "This customer's email and phone number match different GHL contacts.",
+    );
+  }
+
+  const matched = byEmail ?? byPhone;
+  if (!matched) return null;
+  const hasConflict = (contact: GhlContactLite) =>
+    byEmail && byPhone
+      ? hasIdentityConflict(contact, input, "email") ||
+        hasIdentityConflict(contact, input, "phone")
+      : hasIdentityConflict(contact, input, byEmail ? "email" : "phone");
+  if (hasConflict(matched)) {
+    throw new ContactNeedsReviewError(
+      "identity_conflict",
+      "A matching GHL contact has conflicting identity details.",
+    );
+  }
+
+  const fullContact = await api.getContact(matched.id);
+  if (!fullContact) {
+    throw new ContactNeedsReviewError(
+      "identity_conflict",
+      "A matching GHL contact could not be verified. Review the contact before syncing.",
+    );
+  }
+  if (fullContact.locationId !== api.locationId()) {
+    throw new ContactNeedsReviewError(
+      "wrong_location",
+      "A matching GHL contact does not belong to the configured GHL location.",
+    );
+  }
+  if (hasConflict(fullContact)) {
+    throw new ContactNeedsReviewError(
+      "identity_conflict",
+      "A matching GHL contact has conflicting identity details.",
+    );
+  }
+  return fullContact;
+}

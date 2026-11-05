@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   syncStagedFittingToGHL,
+  CreationNeedsReconciliationError,
   type StagedSyncBatch,
   type StagedSyncDeps,
   type SyncOpportunityValidation,
 } from "../lib/ghl/syncStagedFitting";
+import { ContactNeedsReviewError } from "../lib/ghl/resolveStagedContact";
+import { GhlApiError } from "../lib/ghl/client";
+import {
+  computeApprovalSignature,
+  resolveBatchLocalIdentity,
+  type GhlReviewSnapshot,
+} from "../lib/imports/ghl-contact-approval";
 import {
   buildGolfDemoCustomFields,
   buildGolfDemoSummaries,
@@ -18,10 +26,20 @@ import { upsertGolfDemoOpportunity } from "../lib/ghl/opportunities";
 process.env.GHL_SWINGLOCKER_CF_SWING_LOCKER_URL = "cf-url";
 
 function makeBatch(over: Partial<StagedSyncBatch> = {}, sessionOver: Record<string, unknown> = {}): StagedSyncBatch {
-  return {
+  const batch: StagedSyncBatch = {
     id: 1,
     parserMode: "trackman-result",
     status: "finalized",
+    customerResolution: "new",
+    selectedGolfClientId: null,
+    proposedFirstName: "Ann",
+    proposedLastName: "Lee",
+    proposedEmail: "a@b.co",
+    proposedPhone: null,
+    ghlContactDecision: null,
+    approvedGhlContactId: null,
+    ghlContactApprovalSignature: null,
+    ghlContactReviewSnapshot: null,
     opportunityResolution: "new",
     selectedGhlOpportunityId: null,
     demoSession: {
@@ -33,6 +51,7 @@ function makeBatch(over: Partial<StagedSyncBatch> = {}, sessionOver: Record<stri
       currentClub: null,
       ghlOpportunityId: null,
       ghlSyncStatus: null,
+      ghlSyncState: null,
       ghlLockerReadyTagAddedAt: null,
       clubTests: [
         { clubRole: "demo", clubType: "7i", brand: "Ping", model: "G430", isRecommended: false, estimatedPrice: { toNumber: () => 1000 } },
@@ -42,6 +61,39 @@ function makeBatch(over: Partial<StagedSyncBatch> = {}, sessionOver: Record<stri
     },
     ...over,
   } as StagedSyncBatch;
+  return "ghlContactDecision" in over || !batch.demoSession
+    ? batch
+    : approveBatch(batch, "new", null);
+}
+
+function approveBatch(
+  batch: StagedSyncBatch,
+  decision: "existing" | "new",
+  contactId: string | null,
+): StagedSyncBatch {
+  const client = batch.demoSession!.client;
+  const identity = resolveBatchLocalIdentity(batch, client);
+  assert.ok(identity);
+  const snapshot: GhlReviewSnapshot = {
+    v: 1,
+    discoverySignature: "a".repeat(64),
+    incomplete: false,
+    candidates: [],
+    acknowledgedDiscrepancies: [],
+    acknowledgedCandidateIds: [],
+  };
+  return {
+    ...batch,
+    ghlContactDecision: decision,
+    approvedGhlContactId: contactId,
+    ghlContactApprovalSignature: computeApprovalSignature({
+      identity,
+      decision,
+      approvedContactId: contactId,
+      snapshot,
+    }),
+    ghlContactReviewSnapshot: snapshot,
+  };
 }
 
 function cloneBatch(b: StagedSyncBatch): StagedSyncBatch {
@@ -64,52 +116,107 @@ interface Calls {
   tags: number;
   order: string[];
   failedRetryable: boolean[];
+  verifiedContacts: string[];
+  newContactResolutions: number;
+  validatedContactIds: string[];
+  newContactInputs: { firstName: string | null; lastName: string | null; email: string | null; phone: string | null }[];
 }
 
 function harness(batch: StagedSyncBatch) {
-  const calls: Calls = { contactCreates: 0, createOpportunity: 0, validate: 0, fields: 0, tags: 0, order: [], failedRetryable: [] };
+  const calls: Calls = {
+    contactCreates: 0,
+    createOpportunity: 0,
+    validate: 0,
+    fields: 0,
+    tags: 0,
+    order: [],
+    failedRetryable: [],
+    verifiedContacts: [],
+    newContactResolutions: 0,
+    validatedContactIds: [],
+    newContactInputs: [],
+  };
   const opts = {
     validation: { valid: true } as SyncOpportunityValidation | "throw",
-    failAt: null as null | "fields" | "tags" | "create" | "contact",
+    failAt: null as null | "fields" | "tags" | "create-rejected" | "create-ambiguous" | "contact",
   };
   const db = { batch, localWrites: 0 };
   const session = () => db.batch.demoSession!;
-  let queue: Promise<unknown> = Promise.resolve();
+  let opportunityPending = false;
+  let resolvedNewContact: string | null = null;
 
   const deps: StagedSyncDeps = {
     loadBatch: async () => cloneBatch(db.batch),
-    resolveContact: async (_input, saved) => {
+    verifyApprovedContact: async (id) => {
+      calls.verifiedContacts.push(id);
+      if (opts.failAt === "contact") {
+        throw new ContactNeedsReviewError("wrong_location", "Contact mismatch.");
+      }
+    },
+    resolveNewContact: async (_input, args) => {
+      calls.newContactResolutions++;
+      calls.newContactInputs.push(_input);
       if (opts.failAt === "contact") throw new Error("contact down");
-      if (saved) return { id: saved };
+      if (resolvedNewContact) {
+        if (args.savedGhlContactId !== null) {
+          assert.equal(args.savedGhlContactId, resolvedNewContact);
+        }
+        return { id: resolvedNewContact };
+      }
+      if (args.savedGhlContactId) {
+        throw new ContactNeedsReviewError("identity_conflict", "Old link not reusable.");
+      }
       calls.contactCreates++;
-      return { id: "contact-new" };
+      resolvedNewContact = "contact-new";
+      session().client.ghlContactId = resolvedNewContact;
+      calls.order.push("saveContact");
+      return { id: resolvedNewContact };
     },
     saveContactId: async (_c, id) => {
       calls.order.push("saveContact");
       session().client.ghlContactId = id;
     },
-    validateOpportunity: async () => {
+    validateOpportunity: async (_id, contactId) => {
       calls.validate++;
+      calls.validatedContactIds.push(contactId);
       if (opts.validation === "throw") throw new Error("GHL down");
       return opts.validation;
     },
     createOpportunity: async () => {
       calls.createOpportunity++;
-      if (opts.failAt === "create") throw new Error("create failed");
+      if (opts.failAt === "create-rejected") {
+        throw new GhlApiError(400, "Bad Request", "Invalid opportunity.");
+      }
+      if (opts.failAt === "create-ambiguous") {
+        throw new Error("response lost after remote create");
+      }
       return `opp-${calls.createOpportunity}`;
     },
-    ensureOpportunityId: (_id, create) => {
-      const run = async () => {
-        await Promise.resolve();
-        if (session().ghlOpportunityId) return session().ghlOpportunityId!;
-        const created = await create();
+    ensureOpportunityId: (_id, _batchId, _contactId, create) => {
+      const existingId = session().ghlOpportunityId;
+      if (existingId) return Promise.resolve(existingId);
+      if (opportunityPending) {
+        return Promise.reject(
+          new CreationNeedsReconciliationError("Opportunity creation requires reconciliation."),
+        );
+      }
+      opportunityPending = true;
+      return (async () => {
+        let created: string;
+        try {
+          created = await create();
+        } catch (error) {
+          if (error instanceof GhlApiError && [400, 401, 403, 404, 422, 429].includes(error.status)) {
+            opportunityPending = false;
+            throw error;
+          }
+          throw new CreationNeedsReconciliationError("Opportunity creation requires reconciliation.");
+        }
         calls.order.push("saveOpp");
         session().ghlOpportunityId = created;
+        opportunityPending = false;
         return created;
-      };
-      const r = queue.then(run, run);
-      queue = r.catch(() => undefined);
-      return r;
+      })();
     },
     updateContactCustomFields: async () => {
       calls.fields++;
@@ -145,18 +252,133 @@ test("new opportunity + customer without GHL contact", async () => {
   assert.equal(r.ghlContactId, "contact-new");
   assert.equal(r.ghlOpportunityId, "opp-1");
   assert.equal(h.calls.contactCreates, 1);
+  assert.deepEqual(h.calls.newContactInputs, [{
+    firstName: "Ann",
+    lastName: "Lee",
+    email: "a@b.co",
+    phone: null,
+  }]);
   assert.equal(h.calls.createOpportunity, 1);
   assert.equal(h.db.batch.demoSession!.client.ghlContactId, "contact-new");
   assert.equal(h.db.batch.demoSession!.ghlSyncStatus, "synced");
 });
 
+test("existing customer new-contact approval creates from persisted customer identity, not batch proposals", async () => {
+  const b = approveBatch(
+    makeBatch(
+      {
+        customerResolution: "existing",
+        selectedGolfClientId: 3,
+        proposedFirstName: "Wrong",
+        proposedLastName: "Person",
+        proposedEmail: "wrong@example.net",
+        proposedPhone: "+14155550199",
+      },
+      {
+        client: {
+          id: 3,
+          firstName: "Ann",
+          lastName: "Lee",
+          email: "ann@example.com",
+          phone: "+12105550100",
+          ghlContactId: null,
+        },
+      },
+    ),
+    "new",
+    null,
+  );
+  const h = harness(b);
+  const result = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.calls.newContactInputs, [{
+    firstName: "Ann",
+    lastName: "Lee",
+    email: "ann@example.com",
+    phone: "+12105550100",
+  }]);
+});
+
 test("existing ghlContactId is reused", async () => {
-  const b = makeBatch();
-  b.demoSession!.client.ghlContactId = "contact-old";
+  const b = approveBatch(
+    makeBatch(
+      { customerResolution: "existing", selectedGolfClientId: 3 },
+      { client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-old" } },
+    ),
+    "existing",
+    "contact-old",
+  );
   const h = harness(b);
   const r = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(r.ok && r.ghlContactId, "contact-old");
   assert.equal(h.calls.contactCreates, 0);
+  assert.deepEqual(h.calls.verifiedContacts, ["contact-old"]);
+});
+
+test("existing approved contact never falls back to a different saved GHL contact", async () => {
+  const b = approveBatch(
+    makeBatch(
+      { customerResolution: "existing", selectedGolfClientId: 3 },
+      {
+        client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-old" },
+      },
+    ),
+    "existing",
+    "contact-approved",
+  );
+  const h = harness(b);
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.code, "contact-needs-review");
+  assert.deepEqual(h.calls.verifiedContacts, []);
+  assert.equal(h.calls.createOpportunity, 0);
+  assert.equal(h.db.batch.demoSession!.client.ghlContactId, "contact-old");
+});
+
+test("missing and stale GHL approvals stop before any CRM work", async () => {
+  const missing = makeBatch({ ghlContactDecision: null });
+  const stale = makeBatch();
+  stale.ghlContactApprovalSignature = "stale";
+  for (const batch of [missing, stale]) {
+    const h = harness(batch);
+    const r = await syncStagedFittingToGHL(h.deps, 1);
+    assert.equal(r.ok, false);
+    assert.equal(r.ok === false && r.code, "contact-needs-review");
+    assert.equal(h.calls.contactCreates + h.calls.createOpportunity, 0);
+  }
+});
+
+test("new-contact approval does not reuse a pre-existing customer contact link", async () => {
+  const b = makeBatch({}, {
+    client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-old" },
+  });
+  const h = harness(b);
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.code, "contact-needs-review");
+  assert.equal(h.calls.contactCreates, 0);
+  assert.equal(h.calls.createOpportunity, 0);
+});
+
+test("new-contact approval cannot sync to an existing opportunity", async () => {
+  const b = makeBatch(
+    {
+      customerResolution: "existing",
+      selectedGolfClientId: 3,
+      opportunityResolution: "existing",
+      selectedGhlOpportunityId: "opp-x",
+    },
+    {
+      ghlOpportunityId: "opp-x",
+      client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: null },
+    },
+  );
+  const h = harness(b);
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.code, "contact-needs-review");
+  assert.equal(h.calls.verifiedContacts.length + h.calls.contactCreates, 0);
+  assert.equal(h.calls.validate + h.calls.createOpportunity, 0);
 });
 
 test("contact and opportunity IDs are persisted before later steps", async () => {
@@ -181,9 +403,9 @@ test("failure after opportunity creation keeps the ID; retry reuses it", async (
   assert.equal(h.calls.contactCreates, 1);
 });
 
-test("a failed opportunity create is retryable and creates nothing locally", async () => {
+test("a definitive opportunity rejection can safely retry", async () => {
   const h = harness(makeBatch());
-  h.opts.failAt = "create";
+  h.opts.failAt = "create-rejected";
   const r = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(r.ok === false && r.status, "failed");
   assert.equal(h.db.batch.demoSession!.ghlOpportunityId, null);
@@ -192,20 +414,68 @@ test("a failed opportunity create is retryable and creates nothing locally", asy
   assert.equal(again.ok, true);
 });
 
+test("an ambiguous opportunity response blocks retry until reconciliation", async () => {
+  const h = harness(makeBatch());
+  h.opts.failAt = "create-ambiguous";
+  const first = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(first.ok, false);
+  assert.equal(first.ok === false && first.code, "creation-needs-reconciliation");
+  if (first.ok || first.status !== "failed") assert.fail("expected a failed reconciliation result");
+  assert.equal(first.retryable, false);
+  assert.equal(h.db.batch.demoSession!.ghlOpportunityId, null);
+
+  h.opts.failAt = null;
+  const retry = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(retry.ok, false);
+  assert.equal(retry.ok === false && retry.code, "creation-needs-reconciliation");
+  assert.equal(h.calls.createOpportunity, 1);
+});
+
 test("existing opportunity: validated read-only, never created or updated", async () => {
-  const b = makeBatch({ opportunityResolution: "existing", selectedGhlOpportunityId: "opp-x" }, { ghlOpportunityId: "opp-x" });
-  b.demoSession!.client.ghlContactId = "contact-old";
+  const b = approveBatch(
+    makeBatch(
+      {
+        customerResolution: "existing",
+        selectedGolfClientId: 3,
+        opportunityResolution: "existing",
+        selectedGhlOpportunityId: "opp-x",
+      },
+      {
+        ghlOpportunityId: "opp-x",
+        client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-approved" },
+      },
+    ),
+    "existing",
+    "contact-approved",
+  );
   const h = harness(b);
   const r = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(r.ok && r.ghlOpportunityId, "opp-x");
+  assert.deepEqual(h.calls.verifiedContacts, ["contact-approved"]);
   assert.equal(h.calls.validate, 1);
+  assert.deepEqual(h.calls.validatedContactIds, ["contact-approved"]);
   assert.equal(h.calls.createOpportunity, 0);
   assert.equal(h.calls.fields, 1);
 });
 
 test("existing opportunity validation failures are recorded, not retryable", async () => {
   for (const reason of ["not_found", "not_relevant"] as const) {
-    const b = makeBatch({ opportunityResolution: "existing", selectedGhlOpportunityId: "opp-x" }, { ghlOpportunityId: "opp-x" });
+    const b = approveBatch(
+      makeBatch(
+        {
+          customerResolution: "existing",
+          selectedGolfClientId: 3,
+          opportunityResolution: "existing",
+          selectedGhlOpportunityId: "opp-x",
+        },
+        {
+          ghlOpportunityId: "opp-x",
+          client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-old" },
+        },
+      ),
+      "existing",
+      "contact-old",
+    );
     const h = harness(b);
     h.opts.validation = { valid: false, reason };
     const r = await syncStagedFittingToGHL(h.deps, 1);
@@ -215,8 +485,49 @@ test("existing opportunity validation failures are recorded, not retryable", asy
   }
 });
 
+test("existing opportunity owned by another GHL contact is rejected", async () => {
+  const b = approveBatch(
+    makeBatch(
+      {
+        customerResolution: "existing",
+        selectedGolfClientId: 3,
+        opportunityResolution: "existing",
+        selectedGhlOpportunityId: "opp-x",
+      },
+      {
+        ghlOpportunityId: "opp-x",
+        client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-approved" },
+      },
+    ),
+    "existing",
+    "contact-approved",
+  );
+  const h = harness(b);
+  h.opts.validation = { valid: false, reason: "not_relevant" };
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok, false);
+  assert.deepEqual(h.calls.validatedContactIds, ["contact-approved"]);
+  assert.equal(h.calls.createOpportunity, 0);
+  assert.equal(h.db.batch.demoSession!.ghlOpportunityId, "opp-x");
+});
+
 test("existing opportunity GHL outage is retryable", async () => {
-  const b = makeBatch({ opportunityResolution: "existing", selectedGhlOpportunityId: "opp-x" }, { ghlOpportunityId: "opp-x" });
+  const b = approveBatch(
+    makeBatch(
+      {
+        customerResolution: "existing",
+        selectedGolfClientId: 3,
+        opportunityResolution: "existing",
+        selectedGhlOpportunityId: "opp-x",
+      },
+      {
+        ghlOpportunityId: "opp-x",
+        client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-old" },
+      },
+    ),
+    "existing",
+    "contact-old",
+  );
   const h = harness(b);
   h.opts.validation = "throw";
   const r = await syncStagedFittingToGHL(h.deps, 1);
@@ -254,10 +565,30 @@ test("tags already applied are not re-added when a later step is retried", async
   assert.equal(h.calls.createOpportunity, 0);
 });
 
+test("already-synced legacy linked sessions remain a no-op without new approval fields", async () => {
+  const b = makeBatch(
+    {
+      ghlContactDecision: null,
+      approvedGhlContactId: null,
+      ghlContactApprovalSignature: null,
+      ghlContactReviewSnapshot: null,
+    },
+    {
+      ghlSyncStatus: "synced",
+      ghlOpportunityId: "opp-legacy",
+      ghlLockerReadyTagAddedAt: new Date(),
+      client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-legacy" },
+    },
+  );
+  const h = harness(b);
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok && r.alreadySynced, true);
+  assert.equal(h.calls.verifiedContacts.length + h.calls.createOpportunity, 0);
+});
+
 test("a contact needing review fails the sync non-retryably without touching the fitting", async () => {
   const h = harness(makeBatch());
-  const { ContactNeedsReviewError } = await import("../lib/ghl/resolveStagedContact");
-  h.deps.resolveContact = async () => {
+  h.deps.resolveNewContact = async () => {
     throw new ContactNeedsReviewError("multiple_matches", "Multiple GHL contacts match.");
   };
   const r = await syncStagedFittingToGHL(h.deps, 1);
@@ -300,9 +631,9 @@ test("simultaneous new-opportunity syncs create one opportunity", async () => {
     syncStagedFittingToGHL(h.deps, 1),
     syncStagedFittingToGHL(h.deps, 1),
   ]);
-  assert.ok(results.every((r) => r.ok));
+  assert.ok(results.every((r) => r.ok || r.code === "creation-needs-reconciliation"));
   assert.equal(h.calls.createOpportunity, 1);
-  assert.equal(new Set(results.map((r) => r.ok && r.ghlOpportunityId)).size, 1);
+  assert.equal(h.db.batch.demoSession!.ghlOpportunityId, "opp-1");
 });
 
 test("CRM failure leaves local fitting data untouched", async () => {

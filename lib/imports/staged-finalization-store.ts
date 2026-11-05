@@ -1,13 +1,13 @@
 import { randomUUID } from "crypto";
+import { Prisma } from "@/app/generated/prisma/client";
 import type {
   ImportClubSummary,
-  Prisma,
   PrismaClient,
 } from "@/app/generated/prisma/client";
 import { validateOpportunitySelection } from "@/lib/ghl/opportunities";
 import { createPrismaFinalizeStore } from "./finalizationStore";
 import { loadClientsForDuplicateCheck } from "./new-customer-review-store";
-import { cp4dFinalizationGuard } from "./staged-finalization";
+import { GhlContactAssociationConflictError } from "./staged-finalization";
 import type {
   StagedFinalizeBatch,
   StagedFinalizeDeps,
@@ -26,10 +26,25 @@ const BATCH_SELECT = {
   proposedEmail: true,
   proposedPhone: true,
   newCustomerConfirmationSignature: true,
+  ghlContactDecision: true,
+  approvedGhlContactId: true,
+  ghlContactApprovalSignature: true,
+  ghlContactApprovedAt: true,
+  ghlContactApprovedByStaffUserId: true,
+  ghlContactReviewSnapshot: true,
   opportunityResolution: true,
   selectedGhlOpportunityId: true,
   trackmanSessionDate: true,
-  selectedGolfClient: { select: { id: true, ghlContactId: true } },
+  selectedGolfClient: {
+    select: {
+      id: true,
+      ghlContactId: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+    },
+  },
   demoSession: {
     select: { id: true, status: true, clientId: true, ghlOpportunityId: true },
   },
@@ -64,11 +79,44 @@ function createTx(
     async lockBatch(batchId) {
       await tx.$queryRaw`SELECT id FROM ImportBatch WHERE id = ${batchId} FOR UPDATE`;
     },
+    async lockNewCustomerCreation() {
+      await tx.$queryRaw`SELECT id FROM StagedCustomerCreationMutex WHERE id = 1 FOR UPDATE`;
+    },
     loadBatch: (batchId) => loadBatch(tx, batchId),
     loadSummaries: (batchId) => loadSummaries(tx, batchId),
     listClientsForDuplicateCheck: () => loadClientsForDuplicateCheck(tx),
     createClient: (data) =>
       tx.golfClient.create({ data, select: { id: true } }),
+    async associateClientWithGhlContact(clientId, ghlContactId) {
+      const currentOwner = await tx.golfClient.findUnique({
+        where: { ghlContactId },
+        select: { id: true },
+      });
+      if (currentOwner && currentOwner.id !== clientId) {
+        throw new GhlContactAssociationConflictError();
+      }
+
+      try {
+        const result = await tx.golfClient.updateMany({
+          where: {
+            id: clientId,
+            OR: [{ ghlContactId: null }, { ghlContactId }],
+          },
+          data: { ghlContactId },
+        });
+        if (result.count !== 1) {
+          throw new GhlContactAssociationConflictError();
+        }
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002"
+        ) {
+          throw new GhlContactAssociationConflictError();
+        }
+        throw error;
+      }
+    },
     createFinalizedSession: (data) =>
       tx.demoSession.create({
         data: {
@@ -106,7 +154,5 @@ export function createPrismaStagedFinalizeDeps(
         timeout: 30_000,
       }),
     now: () => new Date(),
-    // TEMPORARY (CP4c-A): remove in CP4d with cp4dFinalizationGuard.
-    temporaryFinalizationGuard: cp4dFinalizationGuard,
   };
 }

@@ -6,6 +6,7 @@ import {
   type SyncClubTest,
 } from "./golfDemoSyncContent";
 import { ContactNeedsReviewError } from "./resolveStagedContact";
+import { getBatchGhlApprovalStatus, getCurrentGhlDecision } from "@/lib/imports/ghl-approval-gate";
 
 // CRM sync for a locally finalized, staged TrackMan fitting.
 //
@@ -32,6 +33,7 @@ export interface StagedSyncSession {
   currentClub: string | null;
   ghlOpportunityId: string | null;
   ghlSyncStatus: string | null;
+  ghlSyncState: unknown;
   ghlLockerReadyTagAddedAt: Date | null;
   clubTests: SyncClubTest[];
   client: StagedSyncClient;
@@ -43,7 +45,40 @@ export interface StagedSyncBatch {
   status: string;
   opportunityResolution: string | null;
   selectedGhlOpportunityId: string | null;
+  customerResolution: string | null;
+  selectedGolfClientId: number | null;
+  proposedFirstName: string | null;
+  proposedLastName: string | null;
+  proposedEmail: string | null;
+  proposedPhone: string | null;
+  ghlContactDecision: string | null;
+  approvedGhlContactId: string | null;
+  ghlContactApprovalSignature: string | null;
+  ghlContactReviewSnapshot: unknown;
   demoSession: StagedSyncSession | null;
+}
+
+export interface StagedSyncState {
+  version: 1;
+  contact?:
+    | {
+        status: "creating";
+        batchId: number;
+        clientId: number;
+        attemptedAt: string;
+      }
+    | {
+        status: "resolved";
+        batchId: number;
+        clientId: number;
+        contactId: string;
+      };
+  opportunity?: {
+    status: "creating";
+    batchId: number;
+    contactId: string;
+    attemptedAt: string;
+  };
 }
 
 export type SyncOpportunityValidation =
@@ -52,14 +87,15 @@ export type SyncOpportunityValidation =
 
 export interface StagedSyncDeps {
   loadBatch(batchId: number): Promise<StagedSyncBatch | null>;
-  /**
-   * Verifies a saved contact ID, or finds/creates a contact conservatively.
-   * Throws ContactNeedsReviewError when the match is ambiguous or conflicting;
-   * any other throw is a retryable GHL failure.
-   */
-  resolveContact(
+  verifyApprovedContact(contactId: string, clientId: number): Promise<void>;
+  resolveNewContact(
     input: Pick<StagedSyncClient, "firstName" | "lastName" | "email" | "phone">,
-    savedGhlContactId: string | null,
+    args: {
+      sessionId: number;
+      batchId: number;
+      clientId: number;
+      savedGhlContactId: string | null;
+    },
   ): Promise<{ id: string }>;
   saveContactId(clientId: number, ghlContactId: string): Promise<void>;
   /** Read-only. Throws on GHL service failures. */
@@ -72,13 +108,10 @@ export interface StagedSyncDeps {
     contactId: string;
     monetaryValue?: number;
   }): Promise<string>;
-  /**
-   * The only critical section: under an exclusive lock on the session, read
-   * ghlOpportunityId; if null, run `create` and persist the returned ID before
-   * releasing. Returns the stored (or newly created) opportunity ID.
-   */
   ensureOpportunityId(
     sessionId: number,
+    batchId: number,
+    contactId: string,
     create: () => Promise<string>,
   ): Promise<string>;
   updateContactCustomFields(
@@ -126,7 +159,7 @@ export type StagedSyncResult =
       status: "failed";
       demoSessionId: number;
       retryable: boolean;
-      code?: "contact-needs-review";
+      code?: "contact-needs-review" | "creation-needs-reconciliation";
       error: string;
     }
   | {
@@ -146,6 +179,14 @@ function rejected(
 }
 
 class NonRetryableSyncError extends Error {}
+
+export class CreationNeedsReconciliationError extends Error {
+  readonly code = "creation-needs-reconciliation" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "CreationNeedsReconciliationError";
+  }
+}
 
 export async function syncStagedFittingToGHL(
   deps: StagedSyncDeps,
@@ -209,13 +250,64 @@ export async function syncStagedFittingToGHL(
     };
   }
 
-  let ghlContactId: string | null = client.ghlContactId;
+  let ghlContactId: string | null = null;
   try {
-    // 1. Contact: verify a saved ID or resolve one, and persist it immediately.
-    const resolved = await deps.resolveContact(client, client.ghlContactId);
-    ghlContactId = resolved.id;
-    if (resolved.id !== client.ghlContactId) {
-      await deps.saveContactId(client.id, ghlContactId);
+    const approvalStatus = getBatchGhlApprovalStatus(batch, client);
+    const contactDecision = getCurrentGhlDecision(batch, client);
+    if (
+      !contactDecision ||
+      (contactDecision === "new" && resolution !== "new") ||
+      (batch.customerResolution === "existing" &&
+        batch.selectedGolfClientId !== client.id) ||
+      (batch.customerResolution === "new" && batch.selectedGolfClientId !== null)
+    ) {
+      throw new ContactNeedsReviewError(
+        "identity_conflict",
+        approvalStatus === "stale"
+          ? "The GHL contact approval is stale. Review and approve it again before syncing."
+          : "A current GHL contact approval for this finalized customer is required before syncing.",
+      );
+    }
+
+    // 1. Resolve exactly the staff-approved identity before syncing the fitting.
+    if (contactDecision === "existing") {
+      const approvedContactId = batch.approvedGhlContactId!;
+      if (client.ghlContactId && client.ghlContactId !== approvedContactId) {
+        throw new ContactNeedsReviewError(
+          "identity_conflict",
+          "The local customer is linked to a different GHL contact than the one approved for this fitting.",
+        );
+      }
+      await deps.verifyApprovedContact(approvedContactId, client.id);
+      if (!client.ghlContactId) {
+        await deps.saveContactId(client.id, approvedContactId);
+      }
+      ghlContactId = approvedContactId;
+    } else {
+      const identity =
+        batch.customerResolution === "existing"
+          ? {
+              firstName: client.firstName,
+              lastName: client.lastName,
+              email: client.email,
+              phone: client.phone,
+            }
+          : {
+              firstName: batch.proposedFirstName,
+              lastName: batch.proposedLastName,
+              email: batch.proposedEmail,
+              phone: batch.proposedPhone,
+            };
+      const resolved = await deps.resolveNewContact(
+        identity,
+        {
+          sessionId: session.id,
+          batchId: batch.id,
+          clientId: client.id,
+          savedGhlContactId: client.ghlContactId,
+        },
+      );
+      ghlContactId = resolved.id;
     }
 
     const summaries = buildGolfDemoSummaries(session);
@@ -239,7 +331,11 @@ export async function syncStagedFittingToGHL(
       ghlOpportunityId = session.ghlOpportunityId!;
     } else {
       const contactId = ghlContactId;
-      ghlOpportunityId = await deps.ensureOpportunityId(session.id, () =>
+      ghlOpportunityId = await deps.ensureOpportunityId(
+        session.id,
+        batch.id,
+        ghlContactId,
+        () =>
         deps.createOpportunity({
           name: golfDemoOpportunityName(client),
           contactId,
@@ -286,18 +382,21 @@ export async function syncStagedFittingToGHL(
     const message = err instanceof Error ? err.message : String(err);
     const retryable = !(
       err instanceof NonRetryableSyncError ||
-      err instanceof ContactNeedsReviewError
+      err instanceof ContactNeedsReviewError ||
+      err instanceof CreationNeedsReconciliationError
     );
-    try {
-      await deps.markFailed({
-        sessionId: session.id,
-        clientId: client.id,
-        ghlContactId,
-        message,
-        retryable,
-      });
-    } catch {
-      // Recording the failure is best-effort.
+    if (!(err instanceof CreationNeedsReconciliationError)) {
+      try {
+        await deps.markFailed({
+          sessionId: session.id,
+          clientId: client.id,
+          ghlContactId,
+          message,
+          retryable,
+        });
+      } catch {
+        // Recording the failure is best-effort.
+      }
     }
     return {
       ok: false,
@@ -305,6 +404,9 @@ export async function syncStagedFittingToGHL(
       demoSessionId: session.id,
       retryable,
       ...(err instanceof ContactNeedsReviewError ? { code: err.code } : {}),
+      ...(err instanceof CreationNeedsReconciliationError
+        ? { code: err.code }
+        : {}),
       error: message,
     };
   }

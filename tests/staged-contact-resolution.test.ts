@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   ContactNeedsReviewError,
+  findStagedContactMatch,
   resolveStagedContact,
   type ContactLookupPage,
   type GhlContactLite,
@@ -167,6 +168,22 @@ test("a single match with conflicting identity needs review", async () => {
 
   const otherName = fakeApi({ byEmail: [contact({ lastName: "Smith" })] });
   await needsReview(resolveStagedContact(otherName.api, INPUT, null), "identity_conflict");
+});
+
+test("staged contact recovery requires a unique exact match with consistent identity", async () => {
+  const found = fakeApi({
+    byEmail: [contact()],
+    byPhone: [contact()],
+    contacts: { c1: contact() },
+  });
+  assert.deepEqual(await findStagedContactMatch(found.api, INPUT), contact());
+  assert.deepEqual(found.log.gets, ["c1"]);
+
+  const conflict = fakeApi({
+    byEmail: [contact()],
+    contacts: { c1: contact({ phone: "+15125559999" }) },
+  });
+  await needsReview(findStagedContactMatch(conflict.api, INPUT), "identity_conflict");
 });
 
 test("missing identity fields on the existing contact are not conflicts", async () => {

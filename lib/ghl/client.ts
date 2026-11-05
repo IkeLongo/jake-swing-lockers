@@ -18,6 +18,17 @@ export class GhlDuplicateContactError extends Error {
   }
 }
 
+export class GhlApiError extends Error {
+  constructor(
+    readonly status: number,
+    statusText: string,
+    body: string,
+  ) {
+    super(`GHL API error: ${status} ${statusText} — ${body}`);
+    this.name = "GhlApiError";
+  }
+}
+
 function getToken(): string {
   const token = process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
   if (!token) {
@@ -70,9 +81,7 @@ export async function ghlFetch<T>(
       );
     }
 
-    throw new Error(
-      `GHL API error: ${res.status} ${res.statusText} — ${rawBody}`
-    );
+    throw new GhlApiError(res.status, res.statusText, rawBody);
   }
 
   return res.json() as Promise<T>;
@@ -131,7 +140,7 @@ export function makeGhlFetch(token: string): GhlFetchFn {
         );
       }
 
-      throw new Error(`GHL API error: ${res.status} ${res.statusText} — ${rawBody}`);
+      throw new GhlApiError(res.status, res.statusText, rawBody);
     }
 
     return res.json() as Promise<T>;

@@ -12,7 +12,7 @@ import {
   type FinalizeStore,
   type PlannableSummary,
 } from "./finalizationPlan";
-import { hasGhlContactId } from "./opportunity-resolution";
+import { getBatchGhlApprovalStatus, getCurrentGhlDecision } from "./ghl-approval-gate";
 
 // Local-only finalization of a staged TrackMan ImportBatch:
 // ImportBatch -> GolfClient -> DemoSession -> DemoClubTest -> ClubTestMetrics.
@@ -32,10 +32,23 @@ export interface StagedFinalizeBatch {
   proposedEmail: string | null;
   proposedPhone: string | null;
   newCustomerConfirmationSignature: string | null;
+  ghlContactDecision: string | null;
+  approvedGhlContactId: string | null;
+  ghlContactApprovalSignature: string | null;
+  ghlContactApprovedAt: Date | null;
+  ghlContactApprovedByStaffUserId: number | null;
+  ghlContactReviewSnapshot: unknown;
   opportunityResolution: string | null;
   selectedGhlOpportunityId: string | null;
   trackmanSessionDate: Date | null;
-  selectedGolfClient: { id: number; ghlContactId: string | null } | null;
+  selectedGolfClient: {
+    id: number;
+    ghlContactId: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+  } | null;
   demoSession: {
     id: number;
     status: string;
@@ -54,6 +67,8 @@ export interface NewDemoSessionInput {
 export interface StagedFinalizeTx<S extends PlannableSummary> {
   /** Must take an exclusive row lock on the ImportBatch (SELECT ... FOR UPDATE). */
   lockBatch(batchId: number): Promise<void>;
+  /** Must hold the singleton mutex row until the finalization transaction commits. */
+  lockNewCustomerCreation(): Promise<void>;
   loadBatch(batchId: number): Promise<StagedFinalizeBatch | null>;
   loadSummaries(batchId: number): Promise<S[]>;
   listClientsForDuplicateCheck(): Promise<ClientIdentity[]>;
@@ -63,6 +78,7 @@ export interface StagedFinalizeTx<S extends PlannableSummary> {
     email: string | null;
     phone: string | null;
   }): Promise<{ id: number }>;
+  associateClientWithGhlContact(clientId: number, ghlContactId: string): Promise<void>;
   createFinalizedSession(data: NewDemoSessionInput): Promise<{ id: number }>;
   markBatchFinalized(batchId: number, demoSessionId: number): Promise<void>;
   clubStore: FinalizeStore<S>;
@@ -82,12 +98,6 @@ export interface StagedFinalizeDeps<S extends PlannableSummary> {
   ): Promise<OpportunityValidation>;
   transaction<T>(fn: (tx: StagedFinalizeTx<S>) => Promise<T>): Promise<T>;
   now(): Date;
-  /**
-   * TEMPORARY (CP4c-A): blocks creating new staged finalizations until CP4d
-   * enforces the persisted GHL contact decision. REMOVE IN CP4d together with
-   * `cp4dFinalizationGuard`. Never applied to already-linked batches.
-   */
-  temporaryFinalizationGuard?: (batch: StagedFinalizeBatch) => Failure | null;
 }
 
 export type StagedFinalizeErrorCode =
@@ -103,7 +113,10 @@ export type StagedFinalizeErrorCode =
   | "opportunity_no_longer_valid"
   | "no_clubs"
   | "ghl_unavailable"
-  | "ghl_contact_integration_pending"
+  | "ghl_approval_required"
+  | "saved_contact_conflict"
+  | "ghl_contact_association_conflict"
+  | "new_contact_existing_opportunity"
   | "state_changed";
 
 export type StagedFinalizeResult =
@@ -158,19 +171,11 @@ function existingResult(
   );
 }
 
-/**
- * TEMPORARY (CP4c-A → remove in CP4d). Finalization and CRM sync do not yet
- * honor the persisted GHL contact decision, so a new staged finalization is
- * refused. Legacy batches that already have a DemoSession return before this
- * guard is evaluated.
- */
-export function cp4dFinalizationGuard(batch: StagedFinalizeBatch): Failure | null {
-  if (batch.demoSessionId !== null) return null;
-  return fail(
-    409,
-    "ghl_contact_integration_pending",
-    "Finalizing staged fittings is temporarily disabled until GHL contact approval is fully integrated.",
-  );
+export class GhlContactAssociationConflictError extends Error {
+  constructor() {
+    super("The approved GHL contact is already linked to a different local customer.");
+    this.name = "GhlContactAssociationConflictError";
+  }
 }
 
 /** Pure validation of the staged state; GHL and club checks happen elsewhere. */
@@ -203,6 +208,30 @@ export function validateStagedBatch(batch: StagedFinalizeBatch): Failure | null 
     );
   }
 
+  const approvalStatus = getBatchGhlApprovalStatus(batch, batch.selectedGolfClient);
+  const contactDecision = getCurrentGhlDecision(batch, batch.selectedGolfClient);
+  if (!contactDecision) {
+    return fail(
+      409,
+      "ghl_approval_required",
+      approvalStatus === "stale"
+        ? "The GHL contact approval is stale. Review and approve the contact again."
+        : "Approve the GHL contact before finalizing.",
+    );
+  }
+  if (
+    contactDecision === "existing" &&
+    batch.customerResolution === "existing" &&
+    batch.selectedGolfClient?.ghlContactId &&
+    batch.selectedGolfClient.ghlContactId !== batch.approvedGhlContactId
+  ) {
+    return fail(
+      409,
+      "saved_contact_conflict",
+      "The selected customer is already linked to a different GHL contact.",
+    );
+  }
+
   const resolution = batch.opportunityResolution;
   const opportunityId = batch.selectedGhlOpportunityId;
   if (resolution === null) {
@@ -228,11 +257,18 @@ export function validateStagedBatch(batch: StagedFinalizeBatch): Failure | null 
         "A new customer cannot be attached to an existing opportunity.",
       );
     }
-    if (!hasGhlContactId(batch.selectedGolfClient?.ghlContactId)) {
+    if (contactDecision === "new") {
       return fail(
         409,
-        "no_ghl_contact",
-        "This customer has no GHL contact, so an existing opportunity cannot be used.",
+        "new_contact_existing_opportunity",
+        "A new GHL contact decision cannot use an existing opportunity.",
+      );
+    }
+    if (!batch.approvedGhlContactId) {
+      return fail(
+        409,
+        "ghl_approval_required",
+        "Approve an existing GHL contact before using an existing opportunity.",
       );
     }
     return null;
@@ -251,6 +287,12 @@ function stateSignature(batch: StagedFinalizeBatch): string {
     batch.proposedEmail,
     batch.proposedPhone,
     batch.newCustomerConfirmationSignature,
+    batch.ghlContactDecision,
+    batch.approvedGhlContactId,
+    batch.ghlContactApprovalSignature,
+    batch.ghlContactApprovedAt,
+    batch.ghlContactApprovedByStaffUserId,
+    batch.ghlContactReviewSnapshot,
     batch.opportunityResolution,
     batch.selectedGhlOpportunityId,
   ]);
@@ -328,9 +370,6 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
   if (!batch) return fail(404, "batch_not_found", "Import batch not found.");
   if (batch.demoSessionId !== null) return existingResult(batch);
 
-  const blocked = deps.temporaryFinalizationGuard?.(batch);
-  if (blocked) return blocked;
-
   const invalid = validateStagedBatch(batch);
   if (invalid) return invalid;
 
@@ -347,7 +386,7 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
     try {
       const validation = await deps.validateOpportunity(
         batch.selectedGhlOpportunityId!,
-        batch.selectedGolfClient!.ghlContactId!,
+        batch.approvedGhlContactId!,
       );
       if (!validation.valid) {
         return fail(
@@ -377,9 +416,6 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
     if (!locked) return fail(404, "batch_not_found", "Import batch not found.");
     if (locked.demoSessionId !== null) return existingResult(locked);
 
-    const lockedBlocked = deps.temporaryFinalizationGuard?.(locked);
-    if (lockedBlocked) return lockedBlocked;
-
     const lockedInvalid = validateStagedBatch(locked);
     if (lockedInvalid) return lockedInvalid;
     if (stateSignature(locked) !== expectedSignature) {
@@ -400,9 +436,15 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
       );
     }
 
+    if (locked.customerResolution === "new") {
+      await tx.lockNewCustomerCreation();
+    }
     const resolvedClient = await resolveClientId(tx, locked);
     if (!resolvedClient.ok) return resolvedClient.failure;
     const clientId = resolvedClient.clientId;
+    if (getCurrentGhlDecision(locked, locked.selectedGolfClient) === "existing") {
+      await tx.associateClientWithGhlContact(clientId, locked.approvedGhlContactId!);
+    }
     const ghlOpportunityId =
       locked.opportunityResolution === "existing"
         ? locked.selectedGhlOpportunityId
@@ -427,5 +469,14 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
       ghlOpportunityId,
       clubCount,
     };
+  }).catch((error: unknown) => {
+    if (error instanceof GhlContactAssociationConflictError) {
+      return fail(
+        409,
+        "ghl_contact_association_conflict",
+        error.message,
+      );
+    }
+    throw error;
   });
 }

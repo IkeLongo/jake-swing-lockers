@@ -11,57 +11,63 @@ datasource db {
 }
 
 model GolfClient {
-  id               Int       @id @default(autoincrement())
-  ghlContactId     String?   @unique
-  ghlLastSyncedAt  DateTime?
-  ghlSyncStatus    String?
-  ghlSyncError     String?   @db.Text
-  firstName        String?
-  lastName         String?
-  email            String?
-  phone            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                      Int       @id @default(autoincrement())
+  ghlContactId            String?   @unique
+  ghlLastSyncedAt         DateTime?
+  ghlSyncStatus           String?
+  ghlSyncError            String?   @db.Text
+  ghlContactCreationState Json?
+  firstName               String?
+  lastName                String?
+  email                   String?
+  phone                   String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
-  demoSessions     DemoSession[]
+  demoSessions        DemoSession[]
   stagedImportBatches ImportBatch[]
-  swingLockerOtps  SwingLockerOtp[]
-  purchaseRequests PurchaseRequest[]
+  swingLockerOtps     SwingLockerOtp[]
+  purchaseRequests    PurchaseRequest[]
+}
+
+model StagedCustomerCreationMutex {
+  id Int @id
 }
 
 model DemoSession {
-  id                        Int       @id @default(autoincrement())
-  clientId                  Int
-  lockerToken               String    @unique
-  lockerUrl                 String?
-  demoDate                  DateTime  @default(now())
+  id                       Int       @id @default(autoincrement())
+  clientId                 Int
+  lockerToken              String    @unique
+  lockerUrl                String?
+  demoDate                 DateTime  @default(now())
   // Lifecycle: draft → uploaded → reviewing → finalized | failed
-  status                    String    @default("draft")
+  status                   String    @default("draft")
   // True when a finalized session's club summaries have been edited and re-finalization is required
-  needsRefinalization       Boolean   @default(false)
-  salesRep                  String?
-  journeyStage              String    @default("demo_completed")
-  currentClub               String?
-  clientGoal                String?
-  notes                     String?   @db.Text
-  ghlOpportunityId          String?
-  ghlLockerReadyTagAddedAt  DateTime?
-  ghlLastSyncedAt           DateTime?
-  ghlSyncStatus             String?
-  ghlSyncError              String?   @db.Text
+  needsRefinalization      Boolean   @default(false)
+  salesRep                 String?
+  journeyStage             String    @default("demo_completed")
+  currentClub              String?
+  clientGoal               String?
+  notes                    String?   @db.Text
+  ghlOpportunityId         String?
+  ghlLockerReadyTagAddedAt DateTime?
+  ghlLastSyncedAt          DateTime?
+  ghlSyncStatus            String?
+  ghlSyncError             String?   @db.Text
+  ghlSyncState             Json?
   // Access invite: null | pending | sent | failed
   // Future: background job reads pending rows, sends GHL message, sets sent + sentAt
-  accessInviteStatus        String?
-  accessInviteQueuedAt      DateTime?
-  accessInviteSentAt        DateTime?
-  accessInviteError         String?   @db.Text
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
+  accessInviteStatus       String?
+  accessInviteQueuedAt     DateTime?
+  accessInviteSentAt       DateTime?
+  accessInviteError        String?   @db.Text
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
-  client        GolfClient     @relation(fields: [clientId], references: [id])
-  clubTests     DemoClubTest[]
-  ghlSyncEvents GhlSyncEvent[]
-  importBatches ImportBatch[]
+  client           GolfClient        @relation(fields: [clientId], references: [id])
+  clubTests        DemoClubTest[]
+  ghlSyncEvents    GhlSyncEvent[]
+  importBatches    ImportBatch[]
   purchaseRequests PurchaseRequest[]
 
   @@index([clientId])
@@ -71,30 +77,30 @@ model DemoSession {
 }
 
 model DemoClubTest {
-  id             Int      @id @default(autoincrement())
-  demoSessionId  Int
-  clubType       String?
-  brand          String?
-  model          String?
-  shaft          String?
-  loft           String?
-  estimatedPrice Decimal? @db.Decimal(10, 2)
-  notes          String?  @db.Text
-  isRecommended  Boolean  @default(false)
-  sortOrder      Int      @default(0)
-  clubRole       String   @default("demo")
-  pairIndex      Int      @default(0)
+  id                Int      @id @default(autoincrement())
+  demoSessionId     Int
+  clubType          String?
+  brand             String?
+  model             String?
+  shaft             String?
+  loft              String?
+  estimatedPrice    Decimal? @db.Decimal(10, 2)
+  notes             String?  @db.Text
+  isRecommended     Boolean  @default(false)
+  sortOrder         Int      @default(0)
+  clubRole          String   @default("demo")
+  pairIndex         Int      @default(0)
   // Target model (Test -> Current): a finalized Test points at its single Current row.
   // Null for legacy/manual rows, which are grouped via pairIndex + clubRole.
   currentClubTestId Int?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  demoSession DemoSession      @relation(fields: [demoSessionId], references: [id])
-  metrics     ClubTestMetrics?
+  demoSession          DemoSession           @relation(fields: [demoSessionId], references: [id])
+  metrics              ClubTestMetrics?
   purchaseRequestItems PurchaseRequestItem[]
-  currentClubTest DemoClubTest?  @relation("DemoClubTestCurrent", fields: [currentClubTestId], references: [id], onDelete: SetNull)
-  comparedTests   DemoClubTest[] @relation("DemoClubTestCurrent")
+  currentClubTest      DemoClubTest?         @relation("DemoClubTestCurrent", fields: [currentClubTestId], references: [id], onDelete: SetNull)
+  comparedTests        DemoClubTest[]        @relation("DemoClubTestCurrent")
 
   @@index([demoSessionId])
   @@index([currentClubTestId])
@@ -146,16 +152,16 @@ model GhlSyncEvent {
 // stored as HTTP-only cookies. StaffOtp is single-use and expires in 10 minutes.
 
 model StaffUser {
-  id        Int        @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   // At least one of email or phone must be present (enforced at app level in V1)
-  email     String?    @unique
-  phone     String?    @unique
+  email     String?   @unique
+  phone     String?   @unique
   name      String?
   // App DB is source of truth for permissions — GHL tags mirror this for segmentation only
-  role      StaffRole  @default(sales_rep)
-  isActive  Boolean    @default(true)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  role      StaffRole @default(sales_rep)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   // GHL sync — Swing Locker subaccount only. RiverCity contact IDs are never stored.
   ghlContactId    String?   @unique
@@ -232,29 +238,29 @@ model SwingLockerOtp {
 // finalized data.  ImportRow is ephemeral staging storage only.
 
 model ImportBatch {
-  id                    Int       @id @default(autoincrement())
-  originalFileName      String
+  id                                Int       @id @default(autoincrement())
+  originalFileName                  String
   // Nullable in V1 — staff identity injection added in a future phase
-  uploadedByStaffUserId Int?
+  uploadedByStaffUserId             Int?
   // Lifecycle: uploaded → parsed → reviewing → approved | failed
-  status                String    @default("uploaded")
-  rowCount              Int       @default(0)
+  status                            String    @default("uploaded")
+  rowCount                          Int       @default(0)
   // "generic" | "trackman-result" — set at parse time, drives review UI
-  parserMode            String    @default("generic")
-  trackmanSessionId     String?
-  trackmanPlayerId      String?
-  trackmanPlayerName    String?
-  trackmanPlayerEmail   String?
-  trackmanSessionDate   DateTime?
-  trackmanMetadataError String?   @db.Text
-  customerResolution    String?
-  selectedGolfClientId  Int?
-  proposedFirstName        String?
-  proposedLastName         String?
-  proposedEmail            String?
-  proposedPhone            String?
-  opportunityResolution    String?
-  selectedGhlOpportunityId String?
+  parserMode                        String    @default("generic")
+  trackmanSessionId                 String?
+  trackmanPlayerId                  String?
+  trackmanPlayerName                String?
+  trackmanPlayerEmail               String?
+  trackmanSessionDate               DateTime?
+  trackmanMetadataError             String?   @db.Text
+  customerResolution                String?
+  selectedGolfClientId              Int?
+  proposedFirstName                 String?
+  proposedLastName                  String?
+  proposedEmail                     String?
+  proposedPhone                     String?
+  opportunityResolution             String?
+  selectedGhlOpportunityId          String?
   // Staff confirmation that a proposed new customer is a different person than
   // the duplicate candidates reviewed. The signature binds the proposed
   // identifiers and candidate set; it is recomputed and verified at finalization.
@@ -266,14 +272,14 @@ model ImportBatch {
   // approvedGhlContactId) or "new" (created at CRM sync). NULL = unresolved.
   // The signature binds the local identity, decision, contact and the signed
   // review snapshot (candidate IDs, discrepancies, acknowledgments; no PII).
-  ghlContactDecision              String?   @db.VarChar(16)
-  approvedGhlContactId            String?   @db.VarChar(64)
-  ghlContactApprovalSignature     String?   @db.VarChar(64)
-  ghlContactApprovedAt            DateTime?
-  ghlContactApprovedByStaffUserId Int?
-  ghlContactReviewSnapshot        Json?
-  createdAt                DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
+  ghlContactDecision                String?   @db.VarChar(16)
+  approvedGhlContactId              String?   @db.VarChar(64)
+  ghlContactApprovalSignature       String?   @db.VarChar(64)
+  ghlContactApprovedAt              DateTime?
+  ghlContactApprovedByStaffUserId   Int?
+  ghlContactReviewSnapshot          Json?
+  createdAt                         DateTime  @default(now())
+  updatedAt                         DateTime  @updatedAt
 
   selectedGolfClient GolfClient? @relation(fields: [selectedGolfClientId], references: [id], onDelete: Restrict)
 
@@ -292,22 +298,22 @@ model ImportBatch {
 }
 
 model ImportRow {
-  id                 Int      @id @default(autoincrement())
-  importBatchId      Int
-  rowIndex           Int
+  id                Int      @id @default(autoincrement())
+  importBatchId     Int
+  rowIndex          Int
   // Raw parsed row data — stored as-is from CSV/XLSX, no normalization
-  rawData            Json
+  rawData           Json
   // pending → reviewed | flagged
-  status             String   @default("pending")
+  status            String   @default("pending")
   // TODO: populate in validation phase when column mapping is known
-  validationErrors   Json?
+  validationErrors  Json?
   // Nullable for generic imports and legacy TrackMan rows that are not safely mapped.
-  clubSummaryId      Int?
-  includedInSummary  Boolean?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  clubSummaryId     Int?
+  includedInSummary Boolean?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  batch       ImportBatch       @relation(fields: [importBatchId], references: [id])
+  batch       ImportBatch        @relation(fields: [importBatchId], references: [id])
   clubSummary ImportClubSummary? @relation(fields: [clubSummaryId], references: [id], onDelete: SetNull)
 
   @@index([importBatchId])
@@ -319,7 +325,7 @@ model ImportRow {
 // Generated from ImportRow.rawData grouped by Club.Type.
 // Sales reps review and optionally edit these before final confirmation.
 model ImportClubSummary {
-  id               Int       @id @default(autoincrement())
+  id               Int     @id @default(autoincrement())
   importBatchId    Int
   // Original club name parsed from Club.Type (null if blank in source data)
   originalClubName String?
@@ -328,43 +334,43 @@ model ImportClubSummary {
   shotCount        Int
 
   // Averages — null when no valid values exist for that metric
-  avgClubSpeed     Decimal?  @db.Decimal(6, 2)
-  avgBallSpeed     Decimal?  @db.Decimal(6, 2)
-  avgSpinRate      Decimal?  @db.Decimal(8, 2)
-  avgMaxHeight     Decimal?  @db.Decimal(6, 2)
-  avgCarry         Decimal?  @db.Decimal(6, 2)
-  avgTotal         Decimal?  @db.Decimal(6, 2)
+  avgClubSpeed Decimal? @db.Decimal(6, 2)
+  avgBallSpeed Decimal? @db.Decimal(6, 2)
+  avgSpinRate  Decimal? @db.Decimal(8, 2)
+  avgMaxHeight Decimal? @db.Decimal(6, 2)
+  avgCarry     Decimal? @db.Decimal(6, 2)
+  avgTotal     Decimal? @db.Decimal(6, 2)
 
   // Count of shots that contributed a valid numeric value to each average
-  validClubSpeedCount  Int  @default(0)
-  validBallSpeedCount  Int  @default(0)
-  validSpinRateCount   Int  @default(0)
-  validMaxHeightCount  Int  @default(0)
-  validCarryCount      Int  @default(0)
-  validTotalCount      Int  @default(0)
+  validClubSpeedCount Int @default(0)
+  validBallSpeedCount Int @default(0)
+  validSpinRateCount  Int @default(0)
+  validMaxHeightCount Int @default(0)
+  validCarryCount     Int @default(0)
+  validTotalCount     Int @default(0)
 
-  isManuallyEdited Boolean   @default(false)
+  isManuallyEdited  Boolean             @default(false)
   // Staff can exclude a club from the final Swing Locker / report
-  includeInReport  Boolean   @default(true)
+  includeInReport   Boolean             @default(true)
   // Tags extracted from the Tags column for this Club+Tags group (JSON array of strings)
-  tags             Json      @default("[]")
+  tags              Json                @default("[]")
   // Optional price set during review; copied into DemoClubTest.estimatedPrice on finalization
-  estimatedPrice   Decimal?  @db.Decimal(10, 2)
+  estimatedPrice    Decimal?            @db.Decimal(10, 2)
   // Comparison link — null = standalone demo club; non-null = this row is a "current" comparison
   // club that will pair with the linked parent summary on finalization.
   // One child per parent (enforced at API level). Setting this auto-sets includeInReport = false.
-  linkedToSummaryId  Int?
-  linkedTo           ImportClubSummary?  @relation("ClubSummaryLink", fields: [linkedToSummaryId], references: [id], onDelete: SetNull)
-  linkedBy           ImportClubSummary[] @relation("ClubSummaryLink")
+  linkedToSummaryId Int?
+  linkedTo          ImportClubSummary?  @relation("ClubSummaryLink", fields: [linkedToSummaryId], references: [id], onDelete: SetNull)
+  linkedBy          ImportClubSummary[] @relation("ClubSummaryLink")
   // Target model (Test -> Current): a Test points at its Current/baseline summary.
   // One Current may be referenced by many Tests. Coexists with the legacy
   // linkedToSummaryId (Current -> Test) during the expand phase; not yet read or written by the app.
-  currentSummaryId   Int?
-  currentSummary     ImportClubSummary?  @relation("ClubSummaryCurrent", fields: [currentSummaryId], references: [id], onDelete: SetNull)
-  comparedTests      ImportClubSummary[] @relation("ClubSummaryCurrent")
-  shots              ImportRow[]
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  currentSummaryId  Int?
+  currentSummary    ImportClubSummary?  @relation("ClubSummaryCurrent", fields: [currentSummaryId], references: [id], onDelete: SetNull)
+  comparedTests     ImportClubSummary[] @relation("ClubSummaryCurrent")
+  shots             ImportRow[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   batch ImportBatch @relation(fields: [importBatchId], references: [id])
 
@@ -385,12 +391,12 @@ model ImportClubSummary {
 //         tag contact golf-demo:purchase-intent, notify assigned sales rep.
 
 model PurchaseRequest {
-  id             Int       @id @default(autoincrement())
-  golfClientId   Int
-  demoSessionId  Int
+  id            Int     @id @default(autoincrement())
+  golfClientId  Int
+  demoSessionId Int
   // new_request | reviewing | quote_sent | purchased | fulfilled | closed_lost
-  status         String    @default("new_request")
-  notes          String?   @db.Text
+  status        String  @default("new_request")
+  notes         String? @db.Text
 
   // GHL-ready fields — unused in V1, plug in later cleanly
   ghlSyncStatus    String?
@@ -401,9 +407,9 @@ model PurchaseRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  golfClient   GolfClient            @relation(fields: [golfClientId], references: [id])
-  demoSession  DemoSession           @relation(fields: [demoSessionId], references: [id])
-  items        PurchaseRequestItem[]
+  golfClient  GolfClient            @relation(fields: [golfClientId], references: [id])
+  demoSession DemoSession           @relation(fields: [demoSessionId], references: [id])
+  items       PurchaseRequestItem[]
 
   @@index([golfClientId])
   @@index([demoSessionId])
