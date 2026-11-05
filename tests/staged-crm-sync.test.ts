@@ -714,3 +714,69 @@ test("legacy upsertGolfDemoOpportunity still updates an existing ID and creates 
     globalThis.fetch = original;
   }
 });
+
+function recordCreateNames(h: ReturnType<typeof harness>): string[] {
+  const names: string[] = [];
+  const original = h.deps.createOpportunity;
+  h.deps.createOpportunity = async (input) => {
+    names.push(input.name);
+    return original(input);
+  };
+  return names;
+}
+
+test("a new opportunity is created with the persisted proposed name", async () => {
+  const h = harness(makeBatch({ proposedOpportunityName: "  Ann Lee — Driver Fitting — Nov 5, 2026 " }));
+  const names = recordCreateNames(h);
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok, true);
+  assert.deepEqual(names, ["Ann Lee — Driver Fitting — Nov 5, 2026"]);
+});
+
+test("a batch without a proposed name falls back to the legacy opportunity name", async () => {
+  const h = harness(makeBatch());
+  const names = recordCreateNames(h);
+  await syncStagedFittingToGHL(h.deps, 1);
+  assert.deepEqual(names, ["Ann Lee - Golf Demo"]);
+});
+
+test("a definitive rejection retries with the same persisted name", async () => {
+  const h = harness(makeBatch({ proposedOpportunityName: "Ann Lee — Golf Fitting — Nov 5, 2026" }));
+  const names = recordCreateNames(h);
+  h.opts.failAt = "create-rejected";
+  const first = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(first.ok, false);
+  h.opts.failAt = null;
+  const second = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(second.ok, true);
+  assert.deepEqual(names, [
+    "Ann Lee — Golf Fitting — Nov 5, 2026",
+    "Ann Lee — Golf Fitting — Nov 5, 2026",
+  ]);
+});
+
+test("an existing opportunity is never renamed or created, whatever name is stored", async () => {
+  const b = approveBatch(
+    makeBatch(
+      {
+        customerResolution: "existing",
+        selectedGolfClientId: 3,
+        opportunityResolution: "existing",
+        selectedGhlOpportunityId: "opp-x",
+        proposedOpportunityName: "Should be ignored",
+      },
+      {
+        ghlOpportunityId: "opp-x",
+        client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-approved" },
+      },
+    ),
+    "existing",
+    "contact-approved",
+  );
+  const h = harness(b);
+  const names = recordCreateNames(h);
+  const r = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(r.ok && r.ghlOpportunityId, "opp-x");
+  assert.deepEqual(names, []);
+  assert.equal(h.calls.createOpportunity, 0);
+});

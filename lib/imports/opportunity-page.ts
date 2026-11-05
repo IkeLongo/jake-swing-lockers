@@ -1,8 +1,19 @@
 import { hasPersistedCustomerResolution } from "./customer-workflow-routing";
+import {
+  buildSuggestedOpportunityName,
+  parseFittingDateOverride,
+  parseOpportunityName,
+} from "./opportunity-naming";
 import type {
   OpportunityResolution,
   OpportunityResolutionState,
 } from "./opportunity-resolution";
+
+/** The part of the staged state the current UI reads. */
+export type OpportunityChoiceState = Pick<
+  OpportunityResolutionState,
+  "opportunityResolution" | "selectedGhlOpportunityId"
+>;
 
 export interface OpportunityOption {
   id: string;
@@ -33,10 +44,129 @@ export function formatOpportunityMeta(
 }
 
 export interface OpportunityResolutionResponse {
-  state: OpportunityResolutionState;
+  state: OpportunityChoiceState;
   canModify: boolean;
   canSelectExisting: boolean;
   opportunities: OpportunityOption[];
+}
+
+/** Naming fields the GET adds for new opportunities (JSON-serialized dates). */
+export interface OpportunityNamingInfo {
+  fittingDate: string | null;
+  fittingDateSource: "trackman" | "override" | null;
+  suggestedOpportunityName: string | null;
+  customerName: string;
+  state: OpportunityChoiceState & {
+    proposedOpportunityName: string | null;
+    fittingDateOverride: string | null;
+  };
+}
+
+export interface NamingDraft {
+  name: string;
+  /** YYYY-MM-DD, or "" while no date is known. */
+  date: string;
+}
+
+export function suggestOpportunityNameFor(
+  customerName: string,
+  date: string,
+): string | null {
+  const parsed = parseFittingDateOverride(date);
+  if (!parsed.ok) return null;
+  return buildSuggestedOpportunityName({
+    firstName: customerName,
+    lastName: null,
+    fittingDate: parsed.value,
+  });
+}
+
+export function buildNamingDraft(
+  info: Pick<
+    OpportunityNamingInfo,
+    "fittingDate" | "suggestedOpportunityName" | "state"
+  >,
+): NamingDraft {
+  const date = info.fittingDate ? info.fittingDate.slice(0, 10) : "";
+  const stored =
+    info.state.opportunityResolution === "new"
+      ? info.state.proposedOpportunityName
+      : null;
+  return { date, name: stored ?? info.suggestedOpportunityName ?? "" };
+}
+
+export function isNameCustomized(
+  draft: NamingDraft,
+  customerName: string,
+): boolean {
+  return draft.name !== (suggestOpportunityNameFor(customerName, draft.date) ?? "");
+}
+
+/** A changed date re-suggests the name unless staff have customized it. */
+export function applyDateChange(
+  draft: NamingDraft,
+  customerName: string,
+  date: string,
+): NamingDraft {
+  const customized = isNameCustomized(draft, customerName);
+  return {
+    date,
+    name: customized ? draft.name : (suggestOpportunityNameFor(customerName, date) ?? ""),
+  };
+}
+
+export function resetToSuggested(
+  draft: NamingDraft,
+  customerName: string,
+): NamingDraft {
+  return {
+    ...draft,
+    name: suggestOpportunityNameFor(customerName, draft.date) ?? "",
+  };
+}
+
+export function validateNamingDraft(
+  draft: NamingDraft,
+  source: OpportunityNamingInfo["fittingDateSource"],
+): string | null {
+  if (source !== "trackman") {
+    const date = parseFittingDateOverride(draft.date);
+    if (!date.ok) return "Enter the fitting date.";
+  }
+  const name = parseOpportunityName(draft.name);
+  return name.ok ? null : name.error;
+}
+
+/** Always sends the name explicitly so a customized name survives a date change. */
+export function buildNewOpportunityBody(
+  draft: NamingDraft,
+  source: OpportunityNamingInfo["fittingDateSource"],
+): Record<string, unknown> {
+  return {
+    resolution: "new",
+    opportunityName: draft.name.trim(),
+    ...(source === "trackman" ? {} : { fittingDate: draft.date }),
+  };
+}
+
+export function isNamingSaved(
+  draft: NamingDraft,
+  info: Pick<OpportunityNamingInfo, "fittingDate" | "state">,
+): boolean {
+  if (info.state.opportunityResolution !== "new") return false;
+  return (
+    draft.name.trim() === (info.state.proposedOpportunityName ?? "") &&
+    draft.date === (info.fittingDate ? info.fittingDate.slice(0, 10) : "")
+  );
+}
+
+/** True when "Create New Opportunity" is chosen locally but not yet persisted. */
+export function requiresNamingSave(
+  newChosen: boolean,
+  draft: NamingDraft,
+  info: Pick<OpportunityNamingInfo, "fittingDate" | "state">,
+): boolean {
+  return newChosen && !isNamingSaved(draft, info);
 }
 
 export type OpportunityChoice =
@@ -81,7 +211,7 @@ export function getOpportunityChoiceBody(
 }
 
 export function isSameChoice(
-  state: OpportunityResolutionState,
+  state: OpportunityChoiceState,
   choice: OpportunityChoice,
 ): boolean {
   if (state.opportunityResolution !== choice.resolution) return false;

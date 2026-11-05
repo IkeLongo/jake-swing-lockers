@@ -34,6 +34,8 @@ const BATCH_SELECT = {
   ghlContactReviewSnapshot: true,
   opportunityResolution: true,
   selectedGhlOpportunityId: true,
+  proposedOpportunityName: true,
+  fittingDateOverride: true,
   trackmanSessionDate: true,
   selectedGolfClient: {
     select: {

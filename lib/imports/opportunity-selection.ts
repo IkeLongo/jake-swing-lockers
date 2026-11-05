@@ -3,6 +3,10 @@ import type { CustomerResolutionState } from "./customer-resolution";
 import type { GhlGateBatch, GhlGateClient } from "./ghl-approval-gate";
 import { getOpportunityContactScope } from "./opportunity-contact";
 import {
+  buildSuggestedOpportunityName,
+  resolveFittingDate,
+} from "./opportunity-naming";
+import {
   isOpportunityResolutionMutable,
   type OpportunityResolutionState,
 } from "./opportunity-resolution";
@@ -22,6 +26,9 @@ export interface OpportunitySelectionBatch extends GhlGateBatch {
   demoSessionId: number | null;
   opportunityResolution: string | null;
   selectedGhlOpportunityId: string | null;
+  proposedOpportunityName: string | null;
+  fittingDateOverride: Date | null;
+  trackmanSessionDate: Date | null;
   /** The selected GolfClient (existing customers only). */
   client: GhlGateClient | null;
 }
@@ -89,7 +96,29 @@ function stateOf(batch: OpportunitySelectionBatch): OpportunityResolutionState {
         ? batch.opportunityResolution
         : null,
     selectedGhlOpportunityId: batch.selectedGhlOpportunityId,
+    proposedOpportunityName: batch.proposedOpportunityName,
+    fittingDateOverride: batch.fittingDateOverride,
   };
+}
+
+function customerDisplayName(batch: OpportunitySelectionBatch): string {
+  const source = batch.client ?? {
+    firstName: batch.proposedFirstName,
+    lastName: batch.proposedLastName,
+  };
+  return `${source.firstName ?? ""} ${source.lastName ?? ""}`.trim();
+}
+
+function suggestedName(batch: OpportunitySelectionBatch, fittingDate: Date): string {
+  const source = batch.client ?? {
+    firstName: batch.proposedFirstName,
+    lastName: batch.proposedLastName,
+  };
+  return buildSuggestedOpportunityName({
+    firstName: source.firstName,
+    lastName: source.lastName,
+    fittingDate,
+  });
 }
 
 function isMutable(batch: OpportunitySelectionBatch): boolean {
@@ -106,8 +135,13 @@ export async function getOpportunityOptions(
 ): Promise<
   | {
       ok: true;
-      body: OpportunityResolutionResponse & {
+      body: Omit<OpportunityResolutionResponse, "state"> & {
+        state: OpportunityResolutionState;
         contactDecision: "existing" | "new" | null;
+        fittingDate: string | null;
+        fittingDateSource: "trackman" | "override" | null;
+        suggestedOpportunityName: string | null;
+        customerName: string;
       };
     }
   | OpportunityFailure
@@ -133,12 +167,21 @@ export async function getOpportunityOptions(
     }
   }
 
+  const fittingDate = resolveFittingDate(batch);
   return {
     ok: true,
     body: {
       state: stateOf(batch),
       canModify: mutable,
       canSelectExisting,
+      fittingDate: fittingDate ? fittingDate.toISOString() : null,
+      fittingDateSource: batch.trackmanSessionDate
+        ? "trackman"
+        : batch.fittingDateOverride
+          ? "override"
+          : null,
+      suggestedOpportunityName: fittingDate ? suggestedName(batch, fittingDate) : null,
+      customerName: customerDisplayName(batch),
       contactDecision:
         scope.kind === "existing" ? "existing" : scope.kind === "new" ? "new" : null,
       opportunities: opportunities.map((o) => ({
@@ -152,11 +195,24 @@ export async function getOpportunityOptions(
   };
 }
 
+/** A requested decision; naming fields are optional and default to "keep or suggest". */
+export type OpportunitySelectionRequest = Pick<
+  OpportunityResolutionState,
+  "opportunityResolution" | "selectedGhlOpportunityId"
+> &
+  Partial<Pick<OpportunityResolutionState, "proposedOpportunityName" | "fittingDateOverride">>;
+
 export async function saveOpportunitySelection(
   deps: OpportunitySelectionDeps,
   batchId: number,
-  next: OpportunityResolutionState,
+  request: OpportunitySelectionRequest,
 ): Promise<{ ok: true; state: OpportunityResolutionState } | OpportunityFailure> {
+  const next: OpportunityResolutionState = {
+    opportunityResolution: request.opportunityResolution,
+    selectedGhlOpportunityId: request.selectedGhlOpportunityId,
+    proposedOpportunityName: request.proposedOpportunityName ?? null,
+    fittingDateOverride: request.fittingDateOverride ?? null,
+  };
   const batch = await deps.loadBatch(batchId);
   if (!batch) return fail(404, "batch_not_found", "Import batch not found.");
 
@@ -204,12 +260,44 @@ export async function saveOpportunitySelection(
     }
   }
 
-  if (!(await deps.commit(batch, next))) {
+  let toCommit = next;
+  if (next.opportunityResolution === "new") {
+    if (batch.trackmanSessionDate && next.fittingDateOverride) {
+      return fail(
+        400,
+        "fitting_date_not_allowed",
+        "TrackMan supplied the fitting date, so it cannot be overridden.",
+      );
+    }
+    const keep = batch.opportunityResolution === "new";
+    const override = batch.trackmanSessionDate
+      ? null
+      : (next.fittingDateOverride ?? (keep ? batch.fittingDateOverride : null));
+    const fittingDate = batch.trackmanSessionDate ?? override;
+    if (!fittingDate) {
+      return fail(
+        400,
+        "fitting_date_required",
+        "The TrackMan file has no fitting date. Provide the fitting date to create a new opportunity.",
+      );
+    }
+    // A stored name is kept only while the date it was built from is unchanged.
+    const keptName =
+      keep && !next.fittingDateOverride ? batch.proposedOpportunityName : null;
+    toCommit = {
+      ...next,
+      fittingDateOverride: override,
+      proposedOpportunityName:
+        next.proposedOpportunityName ?? keptName ?? suggestedName(batch, fittingDate),
+    };
+  }
+
+  if (!(await deps.commit(batch, toCommit))) {
     return fail(
       409,
       "state_changed",
       "Opportunity resolution changed concurrently. Reload and retry.",
     );
   }
-  return { ok: true, state: next };
+  return { ok: true, state: toCommit };
 }

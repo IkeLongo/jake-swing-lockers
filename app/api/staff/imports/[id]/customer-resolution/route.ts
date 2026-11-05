@@ -72,6 +72,8 @@ export async function PUT(
       proposedPhone: true,
       opportunityResolution: true,
       selectedGhlOpportunityId: true,
+      proposedOpportunityName: true,
+      fittingDateOverride: true,
       newCustomerConfirmationSignature: true,
       ghlContactDecision: true,
       approvedGhlContactId: true,
@@ -167,6 +169,8 @@ export async function PUT(
           ? batch.opportunityResolution
           : null,
       selectedGhlOpportunityId: batch.selectedGhlOpportunityId,
+      proposedOpportunityName: batch.proposedOpportunityName,
+      fittingDateOverride: batch.fittingDateOverride,
     },
   );
 
@@ -183,6 +187,8 @@ export async function PUT(
       proposedPhone: batch.proposedPhone,
       opportunityResolution: batch.opportunityResolution,
       selectedGhlOpportunityId: batch.selectedGhlOpportunityId,
+      proposedOpportunityName: batch.proposedOpportunityName,
+      fittingDateOverride: batch.fittingDateOverride,
       newCustomerConfirmationSignature: batch.newCustomerConfirmationSignature,
       ghlContactDecision: batch.ghlContactDecision,
       approvedGhlContactId: batch.approvedGhlContactId,

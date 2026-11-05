@@ -13,6 +13,7 @@ import {
   type PlannableSummary,
 } from "./finalizationPlan";
 import { getBatchGhlApprovalStatus, getCurrentGhlDecision } from "./ghl-approval-gate";
+import { resolveFittingDate } from "./opportunity-naming";
 
 // Local-only finalization of a staged TrackMan ImportBatch:
 // ImportBatch -> GolfClient -> DemoSession -> DemoClubTest -> ClubTestMetrics.
@@ -40,6 +41,8 @@ export interface StagedFinalizeBatch {
   ghlContactReviewSnapshot: unknown;
   opportunityResolution: string | null;
   selectedGhlOpportunityId: string | null;
+  proposedOpportunityName: string | null;
+  fittingDateOverride: Date | null;
   trackmanSessionDate: Date | null;
   selectedGolfClient: {
     id: number;
@@ -234,6 +237,18 @@ export function validateStagedBatch(batch: StagedFinalizeBatch): Failure | null 
 
   const resolution = batch.opportunityResolution;
   const opportunityId = batch.selectedGhlOpportunityId;
+  // The name and date override belong only to a new opportunity, and the
+  // override only applies when TrackMan supplied no date. NULL name is a batch
+  // staged before naming existed; sync falls back to the legacy name.
+  if (
+    (resolution !== "new" &&
+      (batch.proposedOpportunityName !== null || batch.fittingDateOverride !== null)) ||
+    (batch.trackmanSessionDate !== null && batch.fittingDateOverride !== null) ||
+    (batch.proposedOpportunityName !== null &&
+      batch.proposedOpportunityName.trim().length === 0)
+  ) {
+    return fail(409, "invalid_opportunity_state", "The staged opportunity naming is inconsistent.");
+  }
   if (resolution === null) {
     if (opportunityId !== null) {
       return fail(409, "invalid_opportunity_state", "The staged opportunity decision is inconsistent.");
@@ -295,6 +310,9 @@ function stateSignature(batch: StagedFinalizeBatch): string {
     batch.ghlContactReviewSnapshot,
     batch.opportunityResolution,
     batch.selectedGhlOpportunityId,
+    batch.proposedOpportunityName,
+    batch.fittingDateOverride,
+    batch.trackmanSessionDate,
   ]);
 }
 
@@ -452,7 +470,7 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
 
     const session = await tx.createFinalizedSession({
       clientId,
-      demoDate: locked.trackmanSessionDate ?? deps.now(),
+      demoDate: resolveFittingDate(locked) ?? deps.now(),
       salesRep,
       ghlOpportunityId,
     });

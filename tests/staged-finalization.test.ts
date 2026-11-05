@@ -52,6 +52,8 @@ function makeBatch(over: Partial<StagedFinalizeBatch> = {}): StagedFinalizeBatch
     ghlContactReviewSnapshot: null,
     opportunityResolution: "existing",
     selectedGhlOpportunityId: "opp-1",
+    proposedOpportunityName: null,
+    fittingDateOverride: null,
     trackmanSessionDate: new Date("2026-05-08T12:00:00Z"),
     selectedGolfClient: {
       id: 10,
@@ -855,4 +857,80 @@ test("approval changed between precheck and transaction blocks all finalization 
   assert.equal(h.state.sessions.length, 0);
   assert.equal(h.state.clients.length, 0);
   assert.equal(h.state.clubs.length, 0);
+});
+
+const NEW_OPP = {
+  opportunityResolution: "new",
+  selectedGhlOpportunityId: null,
+  proposedOpportunityName: "Ann Lee — Golf Fitting — May 8, 2026",
+} as const;
+
+test("a new opportunity finalizes with the TrackMan fitting date as demoDate", async () => {
+  const h = harness(makeBatch(NEW_OPP), [summary(1)]);
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok, true);
+  assert.equal(h.state.sessions[0]!.demoDate.toISOString(), "2026-05-08T12:00:00.000Z");
+});
+
+test("a missing TrackMan date uses the staff fitting-date override, never the upload/finalize time", async () => {
+  const h = harness(
+    makeBatch({
+      ...NEW_OPP,
+      trackmanSessionDate: null,
+      fittingDateOverride: new Date("2026-03-09T00:00:00Z"),
+    }),
+    [summary(1)],
+  );
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok, true);
+  assert.equal(h.state.sessions[0]!.demoDate.toISOString(), "2026-03-09T00:00:00.000Z");
+});
+
+test("inconsistent naming state blocks finalization before any write", async () => {
+  for (const over of [
+    // override alongside a TrackMan date
+    { ...NEW_OPP, fittingDateOverride: new Date("2026-03-09T00:00:00Z") },
+    // naming attached to an existing-opportunity decision
+    { proposedOpportunityName: "Rename me" },
+    // blank name
+    { ...NEW_OPP, proposedOpportunityName: "   " },
+  ]) {
+    const h = harness(makeBatch(over), [summary(1)]);
+    const r = await finalizeStagedImport(h.deps, input);
+    assert.equal(r.ok === false && r.code, "invalid_opportunity_state");
+    assert.equal(h.state.sessions.length, 0);
+  }
+});
+
+test("a legacy batch without a proposed name still finalizes", async () => {
+  const h = harness(
+    makeBatch({ opportunityResolution: "new", selectedGhlOpportunityId: null }),
+    [summary(1)],
+  );
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok, true);
+});
+
+test("a name changed between precheck and transaction blocks finalization", async () => {
+  const h = harness(makeBatch(NEW_OPP), [summary(1)]);
+  const load = h.deps.loadBatch;
+  let calls = 0;
+  h.deps.loadBatch = async (id) => {
+    const batch = await load(id);
+    if (++calls === 1) {
+      h.state.batch = { ...h.state.batch, proposedOpportunityName: "Changed name" };
+    }
+    return batch;
+  };
+  const r = await finalizeStagedImport(h.deps, input);
+  assert.equal(r.ok === false && r.code, "state_changed");
+  assert.equal(h.state.sessions.length, 0);
+});
+
+test("retrying a finalized batch with a custom name is idempotent", async () => {
+  const h = harness(makeBatch(NEW_OPP), [summary(1)]);
+  const first = await finalizeStagedImport(h.deps, input);
+  const second = await finalizeStagedImport(h.deps, input);
+  assert.equal(first.ok && second.ok && second.alreadyFinalized, true);
+  assert.equal(h.state.sessions.length, 1);
 });

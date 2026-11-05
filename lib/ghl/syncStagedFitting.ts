@@ -45,6 +45,8 @@ export interface StagedSyncBatch {
   status: string;
   opportunityResolution: string | null;
   selectedGhlOpportunityId: string | null;
+  /** NULL for batches staged before opportunity naming existed. */
+  proposedOpportunityName?: string | null;
   customerResolution: string | null;
   selectedGolfClientId: number | null;
   proposedFirstName: string | null;
@@ -337,7 +339,7 @@ export async function syncStagedFittingToGHL(
         ghlContactId,
         () =>
         deps.createOpportunity({
-          name: golfDemoOpportunityName(client),
+          name: batch.proposedOpportunityName?.trim() || golfDemoOpportunityName(client),
           contactId,
           monetaryValue: summaries.monetaryValue,
         }),

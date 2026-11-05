@@ -73,7 +73,12 @@ export function createPrismaApprovalDeps(db: PrismaClient): ApprovalDeps {
             ? (write.snapshot as unknown as Prisma.InputJsonValue)
             : Prisma.DbNull,
           ...(write.clearOpportunity
-            ? { opportunityResolution: null, selectedGhlOpportunityId: null }
+            ? {
+                opportunityResolution: null,
+                selectedGhlOpportunityId: null,
+                proposedOpportunityName: null,
+                fittingDateOverride: null,
+              }
             : {}),
         },
       });

@@ -261,6 +261,10 @@ model ImportBatch {
   proposedPhone                     String?
   opportunityResolution             String?
   selectedGhlOpportunityId          String?
+  // Staff-approved name for a NEW opportunity, and a UTC-midnight fitting date
+  // used only when TrackMan supplied none. Both NULL for existing opportunities.
+  proposedOpportunityName           String?   @db.VarChar(255)
+  fittingDateOverride               DateTime?
   // Staff confirmation that a proposed new customer is a different person than
   // the duplicate candidates reviewed. The signature binds the proposed
   // identifiers and candidate set; it is recomputed and verified at finalization.

@@ -40,12 +40,15 @@ function mutableBatch(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const NO_NAMING = { proposedOpportunityName: null, fittingDateOverride: null };
+
 test("opportunity resolution parser handles unresolved, existing, and create-new states", () => {
   assert.deepEqual(parseOpportunityResolution({ resolution: null }), {
     success: true,
     state: {
       opportunityResolution: null,
       selectedGhlOpportunityId: null,
+      ...NO_NAMING,
     },
   });
   assert.deepEqual(
@@ -58,6 +61,7 @@ test("opportunity resolution parser handles unresolved, existing, and create-new
       state: {
         opportunityResolution: "existing",
         selectedGhlOpportunityId: "opp-123",
+        ...NO_NAMING,
       },
     },
   );
@@ -66,8 +70,38 @@ test("opportunity resolution parser handles unresolved, existing, and create-new
     state: {
       opportunityResolution: "new",
       selectedGhlOpportunityId: null,
+      ...NO_NAMING,
     },
   });
+});
+
+test("opportunity resolution parser validates the custom name and fitting date", () => {
+  const ok = parseOpportunityResolution({
+    resolution: "new",
+    opportunityName: "  Ann Lee — Driver Fitting — Nov 5, 2026 ",
+    fittingDate: "2026-11-05",
+  });
+  assert.deepEqual(ok, {
+    success: true,
+    state: {
+      opportunityResolution: "new",
+      selectedGhlOpportunityId: null,
+      proposedOpportunityName: "Ann Lee — Driver Fitting — Nov 5, 2026",
+      fittingDateOverride: new Date("2026-11-05T00:00:00.000Z"),
+    },
+  });
+  for (const body of [
+    { resolution: "new", opportunityName: "   " },
+    { resolution: "new", opportunityName: 5 },
+    { resolution: "new", opportunityName: "x".repeat(256) },
+    { resolution: "new", opportunityName: "bad\nname" },
+    { resolution: "new", fittingDate: "2026-02-30" },
+    { resolution: "new", fittingDate: "11/05/2026" },
+    { resolution: "existing", selectedGhlOpportunityId: "o", opportunityName: "Rename" },
+    { resolution: null, fittingDate: "2026-11-05" },
+  ]) {
+    assert.equal(parseOpportunityResolution(body).success, false, JSON.stringify(body));
+  }
 });
 
 test("opportunity resolution parser rejects invalid state combinations", () => {
@@ -91,6 +125,7 @@ test("existing-opportunity choice is unavailable without a GHL contact", () => {
     state: {
       opportunityResolution: "new",
       selectedGhlOpportunityId: null,
+      ...NO_NAMING,
     },
   });
 });
@@ -117,6 +152,7 @@ test("customer identity comparison preserves the same existing or proposed custo
   const stagedOpportunity = {
     opportunityResolution: "existing" as const,
     selectedGhlOpportunityId: "opp-1",
+    ...NO_NAMING,
   };
   assert.equal(
     hasSameCustomerIdentity(existingCustomer, { ...existingCustomer }),
@@ -139,6 +175,7 @@ test("customer identity comparison preserves the same existing or proposed custo
     {
       opportunityResolution: null,
       selectedGhlOpportunityId: null,
+      ...NO_NAMING,
     },
   );
   assert.equal(

@@ -395,6 +395,7 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
           ghlContactReviewSnapshot: true,
           opportunityResolution: true,
           selectedGhlOpportunityId: true,
+          proposedOpportunityName: true,
           demoSession: {
             select: {
               id: true,

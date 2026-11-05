@@ -5,14 +5,25 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { IconArrowLeft, IconCheck, IconPlus } from "@tabler/icons-react";
 import {
+  applyDateChange,
+  buildNamingDraft,
+  buildNewOpportunityBody,
   canContinueFromOpportunity,
   formatOpportunityMeta,
   getContinueHint,
   getOpportunityChoiceBody,
+  isNameCustomized,
+  requiresNamingSave,
   isSameChoice,
+  resetToSuggested,
+  validateNamingDraft,
+  type NamingDraft,
   type OpportunityChoice,
+  type OpportunityNamingInfo,
   type OpportunityResolutionResponse,
 } from "@/lib/imports/opportunity-page";
+
+type LoadedData = OpportunityResolutionResponse & OpportunityNamingInfo;
 
 interface Props {
   batchId: number;
@@ -46,7 +57,10 @@ function Radio({ selected }: { selected: boolean }) {
 
 export function OpportunitySection({ batchId }: Props) {
   const router = useRouter();
-  const [data, setData] = useState<OpportunityResolutionResponse | null>(null);
+  const [data, setData] = useState<LoadedData | null>(null);
+  const [draft, setDraft] = useState<NamingDraft>({ name: "", date: "" });
+  // "Create New" chosen but not yet saved (needed while the fitting date is unknown).
+  const [pendingNew, setPendingNew] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -58,7 +72,7 @@ export function OpportunitySection({ batchId }: Props) {
     try {
       const response = await fetch(endpoint, { cache: "no-store" });
       const body = (await response.json()) as
-        | (OpportunityResolutionResponse & {
+        | (LoadedData & {
             contactDecision?: "existing" | "new" | null;
           })
         | { error: string; code?: string };
@@ -77,6 +91,8 @@ export function OpportunitySection({ batchId }: Props) {
         return;
       }
       setData(body);
+      setDraft(buildNamingDraft(body));
+      setPendingNew(false);
     } catch {
       setLoadError("Could not load opportunities. Please try again.");
     }
@@ -87,17 +103,14 @@ export function OpportunitySection({ batchId }: Props) {
     void load();
   }, [load]);
 
-  async function choose(choice: OpportunityChoice) {
-    if (!data || saving || !data.canModify || isSameChoice(data.state, choice)) {
-      return;
-    }
+  async function put(requestBody: Record<string, unknown>): Promise<boolean> {
     setSaving(true);
     setSaveError(null);
     try {
       const response = await fetch(endpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(getOpportunityChoiceBody(choice)),
+        body: JSON.stringify(requestBody),
       });
       const body = (await response.json()) as
         | { success: true; state: OpportunityResolutionResponse["state"] }
@@ -105,18 +118,44 @@ export function OpportunitySection({ batchId }: Props) {
       if (!response.ok || !("success" in body)) {
         if ("code" in body && body.code === "ghl_approval_required") {
           router.replace(`/staff/imports/${batchId}/customer`);
-          return;
+          return false;
         }
         setSaveError(
           "error" in body ? body.error : "Could not save your selection.",
         );
-        return;
+        return false;
       }
-      setData({ ...data, state: body.state });
+      return true;
     } catch {
       setSaveError("Could not save your selection. Please try again.");
+      return false;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function choose(choice: OpportunityChoice) {
+    if (!data || saving || !data.canModify) return;
+    if (choice.resolution === "new") {
+      // Only reveals the naming form; persisted by "Save and Continue".
+      setSaveError(null);
+      setPendingNew(true);
+      return;
+    }
+    setPendingNew(false);
+    if (isSameChoice(data.state, choice)) return;
+    if (await put(getOpportunityChoiceBody(choice))) await load();
+  }
+
+  async function saveAndContinue() {
+    if (!data || saving) return;
+    const error = validateNamingDraft(draft, data.fittingDateSource);
+    if (error) {
+      setSaveError(error);
+      return;
+    }
+    if (await put(buildNewOpportunityBody(draft, data.fittingDateSource))) {
+      router.push(`/staff/imports/${batchId}/confirm`);
     }
   }
 
@@ -146,10 +185,16 @@ export function OpportunitySection({ batchId }: Props) {
   }
 
   const { state, opportunities } = data;
-  const isNew = state.opportunityResolution === "new";
-  const canContinue = canContinueFromOpportunity(data);
-  const hint = getContinueHint(data);
+  const isNew = state.opportunityResolution === "new" || pendingNew;
+  const needsSave = requiresNamingSave(isNew, draft, data);
+  // Unsaved or edited new-opportunity details can only proceed via save.
+  const canContinue = canContinueFromOpportunity(data) && !needsSave;
+  const hint = isNew ? null : getContinueHint(data);
   const noExisting = opportunities.length === 0;
+  const fromTrackman = data.fittingDateSource === "trackman";
+  const customized = isNameCustomized(draft, data.customerName);
+  const inputClass =
+    "mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground font-body disabled:opacity-60";
 
   return (
     <div className="space-y-4">
@@ -180,6 +225,7 @@ export function OpportunitySection({ batchId }: Props) {
           <ul className="mt-2 space-y-2" role="radiogroup">
             {opportunities.map((opportunity) => {
               const selected =
+                !pendingNew &&
                 state.opportunityResolution === "existing" &&
                 state.selectedGhlOpportunityId === opportunity.id;
               return (
@@ -246,6 +292,79 @@ export function OpportunitySection({ batchId }: Props) {
             </span>
           </span>
         </button>
+
+        {isNew && (
+          <div className="mt-3 space-y-3 rounded-xl border border-border bg-card px-4 py-3">
+            <div>
+              <span className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
+                Fitting date
+              </span>
+              {fromTrackman ? (
+                <p className="mt-1 text-sm text-foreground font-body">
+                  {new Date(`${draft.date}T00:00:00Z`).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                    timeZone: "UTC",
+                  })}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    from the TrackMan file
+                  </span>
+                </p>
+              ) : (
+                <>
+                  <input
+                    type="date"
+                    aria-label="Fitting date"
+                    required
+                    value={draft.date}
+                    disabled={saving || !data.canModify}
+                    onChange={(event) =>
+                      setDraft(
+                        applyDateChange(draft, data.customerName, event.target.value),
+                      )
+                    }
+                    className={inputClass}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground font-body">
+                    The TrackMan file has no fitting date. Enter it to continue.
+                  </p>
+                </>
+              )}
+            </div>
+            <div>
+              <label
+                htmlFor="opportunity-name"
+                className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading"
+              >
+                Opportunity name
+              </label>
+              <input
+                id="opportunity-name"
+                type="text"
+                maxLength={255}
+                value={draft.name}
+                disabled={saving || !data.canModify}
+                onChange={(event) =>
+                  setDraft({ ...draft, name: event.target.value })
+                }
+                className={inputClass}
+              />
+              <div className="mt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={saving || !data.canModify || !customized}
+                  onClick={() =>
+                    setDraft(resetToSuggested(draft, data.customerName))
+                  }
+                  className="rounded-lg border border-border px-3 py-1.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 font-subheading"
+                >
+                  Reset to suggested
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       {saving && (
@@ -266,11 +385,15 @@ export function OpportunitySection({ batchId }: Props) {
           </Link>
           <button
             type="button"
-            disabled={!canContinue || saving}
-            onClick={() => router.push(`/staff/imports/${batchId}/confirm`)}
+            disabled={saving || (needsSave ? !data.canModify : !canContinue)}
+            onClick={() =>
+              needsSave
+                ? void saveAndContinue()
+                : router.push(`/staff/imports/${batchId}/confirm`)
+            }
             className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 font-subheading"
           >
-            Continue →
+            {isNew ? "Save and Continue →" : "Continue →"}
           </button>
         </div>
       </div>

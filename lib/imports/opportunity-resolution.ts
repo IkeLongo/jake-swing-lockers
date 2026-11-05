@@ -3,12 +3,17 @@ import {
   type CustomerResolutionState,
 } from "./customer-resolution";
 import { hasPersistedCustomerResolution } from "./customer-workflow-routing";
+import { parseFittingDateOverride, parseOpportunityName } from "./opportunity-naming";
 
 export type OpportunityResolution = "existing" | "new" | null;
 
 export interface OpportunityResolutionState {
   opportunityResolution: OpportunityResolution;
   selectedGhlOpportunityId: string | null;
+  /** New opportunities only; NULL in a request means "keep or suggest". */
+  proposedOpportunityName: string | null;
+  /** Only when TrackMan supplied no date; NULL in a request means "keep". */
+  fittingDateOverride: Date | null;
 }
 
 export type OpportunityResolutionParseResult =
@@ -24,6 +29,8 @@ export interface OpportunityResolutionBatch
 const EMPTY_STATE: OpportunityResolutionState = {
   opportunityResolution: null,
   selectedGhlOpportunityId: null,
+  proposedOpportunityName: null,
+  fittingDateOverride: null,
 };
 
 export function getOpportunityStateAfterCustomerChange(
@@ -46,7 +53,15 @@ export function parseOpportunityResolution(
   const body = input as Record<string, unknown>;
   const resolution = body.resolution;
   const selectedGhlOpportunityId = body.selectedGhlOpportunityId;
+  const hasNaming = (key: string) =>
+    body[key] !== undefined && body[key] !== null;
 
+  if (resolution !== "new" && (hasNaming("opportunityName") || hasNaming("fittingDate"))) {
+    return {
+      success: false,
+      error: "opportunityName and fittingDate apply only to a new opportunity.",
+    };
+  }
   if (resolution === null) {
     if (
       selectedGhlOpportunityId !== undefined &&
@@ -70,11 +85,25 @@ export function parseOpportunityResolution(
         error: "A new-opportunity decision cannot include an opportunity ID.",
       };
     }
+    let proposedOpportunityName: string | null = null;
+    if (hasNaming("opportunityName")) {
+      const name = parseOpportunityName(body.opportunityName);
+      if (!name.ok) return { success: false, error: name.error };
+      proposedOpportunityName = name.value;
+    }
+    let fittingDateOverride: Date | null = null;
+    if (hasNaming("fittingDate")) {
+      const date = parseFittingDateOverride(body.fittingDate);
+      if (!date.ok) return { success: false, error: date.error };
+      fittingDateOverride = date.value;
+    }
     return {
       success: true,
       state: {
         opportunityResolution: "new",
         selectedGhlOpportunityId: null,
+        proposedOpportunityName,
+        fittingDateOverride,
       },
     };
   }
@@ -95,6 +124,8 @@ export function parseOpportunityResolution(
       state: {
         opportunityResolution: "existing",
         selectedGhlOpportunityId: selectedGhlOpportunityId.trim(),
+        proposedOpportunityName: null,
+        fittingDateOverride: null,
       },
     };
   }
