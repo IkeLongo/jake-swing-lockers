@@ -182,7 +182,6 @@ export function CustomerResolutionSection({
 
   async function saveChoice(
     target: ClientPickerValue | null = choice,
-    confirmSignature?: string,
   ): Promise<boolean> {
     if (!target || !isValidChoice(target) || saving) return false;
     setSaving(true);
@@ -197,9 +196,6 @@ export function CustomerResolutionSection({
             proposedLastName: target.lastName,
             proposedEmail: target.email,
             proposedPhone: target.phone,
-            ...(confirmSignature
-              ? { confirmNewCustomer: true, reviewSignature: confirmSignature }
-              : {}),
           };
 
     try {
@@ -261,8 +257,6 @@ export function CustomerResolutionSection({
   const showExistingSummary = choice?.mode === "existing" && !showPicker;
   const newReview = choice?.mode === "new" ? review : null;
   const reviewBlocking = isReviewBlocking(newReview);
-  const reviewConfirmed =
-    newReview !== null && newReview.kind !== "none" && newReview.confirmed;
   const canContinue = canContinueWithApproval(approval);
   const continueHint = getApprovalContinueHint(approval);
 
@@ -443,9 +437,7 @@ export function CustomerResolutionSection({
             {choice?.mode === "new" && persisted && !reviewBlocking && (
               <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-primary font-body">
                 <IconCheck className="h-3.5 w-3.5" />
-                {reviewConfirmed
-                  ? "Confirmed as a new customer (different from the matches reviewed)"
-                  : "New customer details saved"}
+                New customer details saved
               </p>
             )}
             {newReview && reviewBlocking && (
@@ -453,7 +445,6 @@ export function CustomerResolutionSection({
                 review={newReview}
                 saving={saving}
                 onUseExisting={(candidate) => void selectExisting(candidate)}
-                onConfirmNew={(signature) => void saveChoice(choice, signature)}
               />
             )}
             {choice && !persisted && !reviewBlocking && (

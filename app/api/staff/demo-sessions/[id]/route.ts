@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
+import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
 
 // ── DELETE /api/staff/demo-sessions/[id] ─────────────────────────────────────
 //
@@ -263,28 +263,25 @@ export async function PATCH(
       );
     }
 
-    const email = rawEmail ? normalizeEmail(rawEmail) : null;
-    const phone = rawPhone ? normalizePhone(rawPhone) : null;
-
-    // Dedup: find existing client by email or phone
-    const orClauses: Array<{ email: string } | { phone: string }> = [];
-    if (email) orClauses.push({ email });
-    if (phone) orClauses.push({ phone });
-
-    const dupClient = await db.golfClient.findFirst({
-      where: { OR: orClauses },
-      select: { id: true },
+    const result = await createGolfClientIfUnique(db, {
+      firstName,
+      lastName,
+      email: rawEmail || null,
+      phone: rawPhone || null,
     });
-
-    if (dupClient) {
-      resolvedClientId = dupClient.id;
-    } else {
-      const created = await db.golfClient.create({
-        data: { firstName, lastName, email, phone },
-        select: { id: true },
-      });
-      resolvedClientId = created.id;
+    if (result.status === "invalid") {
+      return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    if (result.status === "duplicate") {
+      return NextResponse.json(
+        {
+          error: "A customer already matches this email or phone. Select the existing customer instead of creating another.",
+          matchingCustomerIds: result.candidates.map((candidate) => candidate.id),
+        },
+        { status: 409 },
+      );
+    }
+    resolvedClientId = result.client.id;
   }
 
   // ── Update DemoSession ───────────────────────────────────────────────────────

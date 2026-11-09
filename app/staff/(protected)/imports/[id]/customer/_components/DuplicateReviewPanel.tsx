@@ -10,7 +10,6 @@ interface Props {
   review: NewCustomerReview;
   saving: boolean;
   onUseExisting: (candidate: DuplicateCandidate) => void;
-  onConfirmNew: (signature: string) => void;
 }
 
 const MATCH_LABEL: Record<DuplicateCandidate["matchedOn"], string> = {
@@ -24,17 +23,17 @@ function headline(review: NewCustomerReview): { title: string; body: string } {
     case "exact_email":
       return {
         title: "A customer with this email already exists",
-        body: "Use the existing customer, or confirm this is a different person.",
+        body: "Select the existing customer or correct the email before creating a new customer.",
       };
     case "possible_phone":
       return {
         title: "Possible duplicate: same phone number",
-        body: "A shared phone number does not prove it is the same person. Use the existing customer, or confirm this is a different person.",
+        body: "This phone number is already assigned to a customer. Select that customer or correct the phone number before creating a new customer.",
       };
     default:
       return {
         title: "Multiple customers match",
-        body: "The email and phone number match different customers. Choose one, or confirm this is a different person.",
+        body: "The email and phone number match different customers. Select the correct customer or correct the identifiers before creating a new customer.",
       };
   }
 }
@@ -50,7 +49,6 @@ export function DuplicateReviewPanel({
   review,
   saving,
   onUseExisting,
-  onConfirmNew,
 }: Props) {
   const { title, body } = headline(review);
 
@@ -89,14 +87,6 @@ export function DuplicateReviewPanel({
           </li>
         ))}
       </ul>
-      <button
-        type="button"
-        onClick={() => onConfirmNew(review.signature)}
-        disabled={saving}
-        className="mt-3 text-sm font-medium text-primary hover:text-primary-hover disabled:opacity-50 font-subheading"
-      >
-        {saving ? "Saving…" : "This is a different person — add as new customer"}
-      </button>
     </div>
   );
 }

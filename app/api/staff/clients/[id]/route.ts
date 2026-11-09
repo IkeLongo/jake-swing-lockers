@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
 import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
+import { updateGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
 
 // ── PATCH /api/staff/clients/[id] ─────────────────────────────────────────────
 // Update a GolfClient's profile fields.
@@ -31,12 +31,6 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  // Ensure the client exists
-  const existing = await db.golfClient.findUnique({ where: { id }, select: { id: true } });
-  if (!existing) {
-    return NextResponse.json({ error: "Client not found." }, { status: 404 });
-  }
-
   const patch: {
     firstName?: string;
     lastName?: string;
@@ -59,21 +53,33 @@ export async function PATCH(
     patch.lastName = v;
   }
   if (typeof body.email === "string") {
-    patch.email = body.email.trim() ? normalizeEmail(body.email.trim()) : null;
+    patch.email = body.email.trim() || null;
   }
   if (typeof body.phone === "string") {
-    patch.phone = body.phone.trim() ? normalizePhone(body.phone.trim()) : null;
+    patch.phone = body.phone.trim() || null;
   }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "No fields to update." }, { status: 400 });
   }
 
-  const updated = await db.golfClient.update({
-    where: { id },
-    data: patch,
-    select: { id: true, firstName: true, lastName: true, email: true, phone: true, updatedAt: true },
-  });
+  const result = await updateGolfClientIfUnique(db, id, patch);
+  if (result.status === "missing") {
+    return NextResponse.json({ error: "Client not found." }, { status: 404 });
+  }
+  if (result.status === "invalid") {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+  if (result.status === "duplicate") {
+    return NextResponse.json(
+      {
+        error: "The email or phone number already belongs to another customer.",
+        candidates: result.candidates,
+      },
+      { status: 409 },
+    );
+  }
+  const updated = result.client;
 
   void syncGolfClientContact(id).catch((err) => {
     console.error("[GolfClient Sync] PATCH failed:", err);

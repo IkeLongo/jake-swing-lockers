@@ -23,7 +23,24 @@ async function lookup(param: "email" | "phone", value: string): Promise<ContactL
     `/contacts/lookup?${qs.toString()}`,
     { headers: { Version: "v3" } },
   );
-  if (!Array.isArray(res?.contacts)) {
+  if (
+    !Array.isArray(res?.contacts) ||
+    (res.nextCursor !== undefined &&
+      res.nextCursor !== null &&
+      typeof res.nextCursor !== "string") ||
+    res.contacts.some(
+      (contact) =>
+        !contact ||
+        typeof contact !== "object" ||
+        typeof contact.id !== "string" ||
+        !contact.id.trim() ||
+        (contact.locationId != null && typeof contact.locationId !== "string") ||
+        (contact.firstName != null && typeof contact.firstName !== "string") ||
+        (contact.lastName != null && typeof contact.lastName !== "string") ||
+        (contact.email != null && typeof contact.email !== "string") ||
+        (contact.phone != null && typeof contact.phone !== "string"),
+    )
+  ) {
     throw new Error("GHL contact lookup returned an unexpected response.");
   }
   return { contacts: res.contacts, hasMore: Boolean(res.nextCursor) };

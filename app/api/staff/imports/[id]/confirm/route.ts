@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
 import { getLegacyConfirmBlock } from "@/lib/imports/legacy-confirm-guard";
+import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
 
 // ── Request body types ────────────────────────────────────────────────────────
 
@@ -152,34 +152,25 @@ export async function POST(
       );
     }
 
-    const email = rawEmail ? normalizeEmail(rawEmail) : null;
-    const phone = rawPhone ? normalizePhone(rawPhone) : null;
-
-    // Dedup: check if a client already exists with this email or phone
-    const existing = await db.golfClient.findFirst({
-      where: {
-        OR: [
-          ...(email ? [{ email }] : []),
-          ...(phone ? [{ phone }] : []),
-        ],
-      },
-      select: { id: true, firstName: true, lastName: true },
+    const result = await createGolfClientIfUnique(db, {
+      firstName: rawFirstName || null,
+      lastName: rawLastName || null,
+      email: rawEmail || null,
+      phone: rawPhone || null,
     });
-
-    if (existing) {
-      // Reuse the matched client rather than creating a duplicate
-      client = existing;
-    } else {
-      client = await db.golfClient.create({
-        data: {
-          firstName: rawFirstName || null,
-          lastName: rawLastName || null,
-          email,
-          phone,
-        },
-        select: { id: true, firstName: true, lastName: true },
-      });
+    if (result.status === "invalid") {
+      return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    if (result.status === "duplicate") {
+      return NextResponse.json(
+        {
+          error: "A customer already matches this email or phone. Select the existing customer instead of creating another.",
+          matchingCustomerIds: result.candidates.map((candidate) => candidate.id),
+        },
+        { status: 409 },
+      );
+    }
+    client = result.client;
   }
 
   // ── Determine sales rep name for the session ─────────────────────────────────

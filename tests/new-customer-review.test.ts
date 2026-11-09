@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { PrismaClient } from "../app/generated/prisma/client";
 import {
   classifyReview,
   findDuplicateCandidates,
@@ -11,6 +12,7 @@ import {
   computeReviewSignature,
   decideNewCustomerSave,
 } from "@/lib/imports/new-customer-review-server";
+import { updateGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
 
 const client = (
   id: number,
@@ -91,7 +93,7 @@ test("duplicate without signature requires review and persists nothing", () => {
   assert.equal(d.outcome, "review_required");
 });
 
-test("matching submitted signature sets a minimal-PII confirmation", () => {
+test("matching submitted signature cannot override a duplicate identifier", () => {
   const d = decideNewCustomerSave({
     clients,
     proposed,
@@ -99,11 +101,7 @@ test("matching submitted signature sets a minimal-PII confirmation", () => {
     storedSignature: null,
     submittedSignature: currentSig,
   });
-  assert.equal(d.outcome, "save");
-  if (d.outcome !== "save" || d.confirmation.action !== "set") return assert.fail();
-  assert.equal(d.confirmation.signature, currentSig);
-  assert.deepEqual(d.confirmation.snapshot.candidates, [{ id: 1, matchedOn: "phone" }]);
-  assert.equal(JSON.stringify(d.confirmation.snapshot).includes("firstName"), false);
+  assert.equal(d.outcome, "review_required");
 });
 
 test("stale signature (candidate set changed) is review_changed", () => {
@@ -128,10 +126,10 @@ test("signature from a different proposed identity is rejected", () => {
   assert.equal(d.outcome, "review_changed");
 });
 
-test("stored confirmation is kept only when identity unchanged and still current", () => {
+test("stored confirmation cannot override a duplicate identifier", () => {
   const base = { clients, proposed, storedSignature: currentSig, submittedSignature: null };
   const kept = decideNewCustomerSave({ ...base, identityUnchanged: true });
-  assert.equal(kept.outcome === "save" && kept.confirmation.action, "keep");
+  assert.equal(kept.outcome, "review_required");
 
   const changed = decideNewCustomerSave({ ...base, identityUnchanged: false });
   assert.equal(changed.outcome, "review_required");
@@ -156,10 +154,72 @@ test("no candidates clears any confirmation", () => {
 });
 
 test("persisted review survives refresh (recomputed confirmed flag)", () => {
-  assert.equal(buildNewCustomerReview(clients, proposed, currentSig).confirmed, true);
+  assert.equal(buildNewCustomerReview(clients, proposed, currentSig).confirmed, false);
   assert.equal(buildNewCustomerReview(clients, proposed, "b".repeat(64)).confirmed, false);
   assert.equal(
     buildNewCustomerReview([...clients, client(9, "ann@example.com", null)], proposed, currentSig).confirmed,
     false,
   );
+});
+
+function fakeGolfClientDb(
+  rows: ClientIdentity[],
+  current: ClientIdentity & { ghlContactId: string | null },
+) {
+  const tx = {
+    async $queryRaw() {
+      return [];
+    },
+    golfClient: {
+      async findUnique() {
+        return { ...current };
+      },
+      async findMany() {
+        return rows;
+      },
+      async update(args: { data: Partial<ClientIdentity> }) {
+        Object.assign(current, args.data);
+        return { ...current };
+      },
+    },
+  };
+  return {
+    async $transaction<T>(callback: (transaction: typeof tx) => Promise<T>) {
+      return callback(tx);
+    },
+  } as unknown as PrismaClient;
+}
+
+test("name-only customer updates are allowed despite historical duplicate identifiers", async () => {
+  const current = {
+    ...client(1, " ANN@example.com ", "(210) 555-0100"),
+    ghlContactId: null,
+  };
+  const db = fakeGolfClientDb(
+    [
+      current,
+      client(2, "ann@example.com", "+12105550100"),
+    ],
+    current,
+  );
+  const result = await updateGolfClientIfUnique(db, current.id, {
+    firstName: "Anne",
+  });
+  assert.equal(result.status, "updated");
+  if (result.status === "updated") assert.equal(result.client.firstName, "Anne");
+});
+
+test("changing an identifier to a historical duplicate remains blocked", async () => {
+  const current = {
+    ...client(1, "old@example.com", null),
+    ghlContactId: null,
+  };
+  const db = fakeGolfClientDb(
+    [current, client(2, "ann@example.com", null)],
+    current,
+  );
+  const result = await updateGolfClientIfUnique(db, current.id, {
+    email: " ANN@example.com ",
+  });
+  assert.equal(result.status, "duplicate");
 });

@@ -460,7 +460,7 @@ test("legacy-formatted phone duplicate is detected at finalization", async () =>
   assert.equal(r.ok === false && r.code, "duplicate_customer_unresolved");
 });
 
-test("valid confirmation lets finalization create a different person", async () => {
+test("a previous duplicate confirmation cannot create a second normalized identity", async () => {
   const sig = computeReviewSignature(
     { email: "ann@example.com", phone: "+12105550100" },
     [{ ...existingClient(7, null, "210-555-0100"), matchedOn: "phone" }],
@@ -471,9 +471,9 @@ test("valid confirmation lets finalization create a different person", async () 
   );
   h.state.clients.push(existingClient(7, null, "210-555-0100"));
   const r = await finalizeStagedImport(h.deps, input);
-  assert.equal(r.ok, true);
-  assert.equal(h.state.clients.length, 2);
-  assert.equal(h.state.sessions.length, 1);
+  assert.equal(r.ok === false && r.code, "duplicate_customer_unresolved");
+  assert.equal(h.state.clients.length, 1);
+  assert.equal(h.state.sessions.length, 0);
 });
 
 test("confirmation is rejected when a new match appeared after review", async () => {
@@ -706,6 +706,31 @@ test("missing and stale GHL approvals block finalization before external checks 
     assert.equal(h.state.sessions.length, 0);
     assert.equal(h.state.clients.length, 0);
   }
+});
+
+test("a signed approve-new snapshot containing candidates cannot finalize locally", async () => {
+  const batch = approveBatch(newCustomerBatch(), "new", null, {
+    v: 1,
+    discoverySignature: "a".repeat(64),
+    incomplete: false,
+    candidates: [
+      {
+        id: "contact-1",
+        reasons: ["phone"],
+        discrepancies: [],
+        locationVerified: true,
+        linkedClientIds: [],
+      },
+    ],
+    acknowledgedDiscrepancies: [],
+    acknowledgedCandidateIds: ["contact-1"],
+  });
+  const h = harness(batch, [summary(1)]);
+  const result = await finalizeStagedImport(h.deps, input);
+  assert.equal(result.ok === false && result.code, "ghl_approval_required");
+  assert.equal(h.opts.ghlCalls, 0);
+  assert.equal(h.state.sessions.length, 0);
+  assert.equal(h.state.clients.length, 0);
 });
 
 test("a new-contact decision cannot be finalized with an existing opportunity", async () => {

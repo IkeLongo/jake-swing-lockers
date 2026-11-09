@@ -18,6 +18,7 @@ import {
 } from "@/lib/ghl/discoverStagedContacts";
 import type { GhlContactLite } from "@/lib/ghl/resolveStagedContact";
 import {
+  computeApprovalSignature,
   evaluateApproval,
   getApprovalStatus,
   parseApprovalRequest,
@@ -396,14 +397,14 @@ test("new-contact approval is rejected when the search is incomplete", async () 
   assert.equal(w.batch.ghlContactDecision, null);
 });
 
-test("new-contact approval requires acknowledging phone-only matches and is blocked by an email match", async () => {
+test("new-contact approval is blocked by phone-only and email matches even when acknowledged", async () => {
   const phoneOnly = contact("c1", { email: "other@example.com" });
   const w = makeWorld({ byPhone: { contacts: [phoneOnly] }, records: { c1: phoneOnly } });
   const sig = await signatureOf(w);
   const missing = await updateGhlApproval(makeDeps(w), 1, newContact(sig), 1);
-  assert.equal(missing.ok === false && missing.code, "candidate_acknowledgment_required");
-  const ok = await updateGhlApproval(makeDeps(w), 1, newContact(sig, ["c1"]), 1);
-  assert.equal(ok.ok, true);
+  assert.equal(missing.ok === false && missing.code, "phone_match_exists");
+  const acknowledged = await updateGhlApproval(makeDeps(w), 1, newContact(sig, ["c1"]), 1);
+  assert.equal(acknowledged.ok === false && acknowledged.code, "phone_match_exists");
 
   const w2 = makeWorld({
     byEmail: { contacts: [contact("c2")] },
@@ -416,6 +417,28 @@ test("new-contact approval requires acknowledging phone-only matches and is bloc
     1,
   );
   assert.equal(blocked.ok === false && blocked.code, "email_match_exists");
+});
+
+test("new-contact approval reports when email and phone match different contacts", async () => {
+  const emailContact = contact("email-contact", { phone: "+12105550999" });
+  const phoneContact = contact("phone-contact", { email: "other@example.com" });
+  const w = makeWorld({
+    byEmail: { contacts: [emailContact] },
+    byPhone: { contacts: [phoneContact] },
+    records: {
+      "email-contact": emailContact,
+      "phone-contact": phoneContact,
+    },
+  });
+  const sig = await signatureOf(w);
+  const result = await updateGhlApproval(
+    makeDeps(w),
+    1,
+    newContact(sig, ["email-contact", "phone-contact"]),
+    1,
+  );
+  assert.equal(result.ok === false && result.code, "identifier_conflict");
+  assert.equal(w.batch.ghlContactDecision, null);
 });
 
 test("unsearchable identifiers block new-contact approval", () => {
@@ -728,4 +751,56 @@ test("approval status distinguishes unresolved, approved and stale states", () =
     getApprovalStatus({ ...empty, decision: "bogus", signature: "x", snapshot: {} }, identity),
     "stale",
   );
+});
+
+test("approve-new approvals with a saved candidate or incomplete discovery are stale", () => {
+  const identity = resolveBatchLocalIdentity(baseBatch(), null)!;
+  const snapshot = {
+    v: 1 as const,
+    discoverySignature: "a".repeat(64),
+    incomplete: false,
+    candidates: [
+      {
+        id: "c1",
+        reasons: ["phone" as const],
+        discrepancies: [],
+        locationVerified: true,
+        linkedClientIds: [],
+      },
+    ],
+    acknowledgedDiscrepancies: [],
+    acknowledgedCandidateIds: ["c1"],
+  };
+  const signed = {
+    decision: "new",
+    approvedContactId: null,
+    signature: computeApprovalSignature({
+      identity,
+      decision: "new",
+      approvedContactId: null,
+      snapshot,
+    }),
+    approvedAt: null,
+    approvedByStaffUserId: null,
+    snapshot,
+  };
+  assert.equal(getApprovalStatus(signed, identity), "stale");
+
+  const incompleteSnapshot = {
+    ...snapshot,
+    incomplete: true,
+    candidates: [],
+    acknowledgedCandidateIds: [],
+  };
+  const signedIncomplete = {
+    ...signed,
+    snapshot: incompleteSnapshot,
+    signature: computeApprovalSignature({
+      identity,
+      decision: "new",
+      approvedContactId: null,
+      snapshot: incompleteSnapshot,
+    }),
+  };
+  assert.equal(getApprovalStatus(signedIncomplete, identity), "stale");
 });

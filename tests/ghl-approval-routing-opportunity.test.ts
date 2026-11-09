@@ -363,23 +363,24 @@ test("ui: contact approval is blocked for wrong/unverified location, other custo
   assert.equal(candidateApprovalBlock(d, candidate()), null);
 });
 
-test("ui: new contact is blocked when incomplete, unsearchable, saved, or email-matched", () => {
+test("ui: new contact is blocked when incomplete, unsearchable, saved, or identifier-matched", () => {
   assert.equal(newContactBlock(discovery([])), null);
   assert.ok(newContactBlock(discovery([], { flags: { ...flags, incomplete: true } })));
   assert.ok(newContactBlock(discovery([], { unsearchable: ["phone"] })));
   assert.ok(newContactBlock(discovery([], { searched: { email: false, phone: false } })));
   assert.ok(newContactBlock(discovery([], { savedLink: { id: "s", status: "verified" } })));
   assert.ok(newContactBlock(discovery([candidate()])));
-  assert.equal(
-    newContactBlock(discovery([candidate({ reasons: ["phone"] })])),
-    null,
+  assert.match(
+    newContactBlock(discovery([candidate({ reasons: ["phone"] })])) ?? "",
+    /phone/,
   );
 });
 
-test("ui: every phone-only candidate needs a different-person acknowledgment", () => {
+test("ui: candidate acknowledgments remain explicit but cannot unblock creation", () => {
   const d = discovery([candidate({ id: "a", reasons: ["phone"] }), candidate({ id: "b", reasons: ["phone"] })]);
   assert.deepEqual(missingCandidateAcks(d, ["a"]), ["b"]);
   assert.deepEqual(missingCandidateAcks(d, ["a", "b"]), []);
+  assert.ok(newContactBlock(d));
 });
 
 test("ui: stale codes trigger a new lookup", () => {

@@ -4,7 +4,6 @@ import {
   findDuplicateCandidates,
   type ClientIdentity,
 } from "./new-customer-review";
-import { computeReviewSignature } from "./new-customer-review-server";
 import {
   flattenPlan,
   persistPlan,
@@ -328,9 +327,8 @@ type ClientResolution =
   | { ok: true; clientId: number }
   | { ok: false; failure: Failure };
 
-// Never reuses an existing customer. A new customer is created only when no
-// GolfClient matches, or when staff confirmed this exact candidate set; the
-// confirmation is recomputed here, inside the locked transaction.
+// Never reuses an existing customer or creates another record with an existing
+// normalized identifier. Candidates must be resolved on the customer step.
 async function resolveClientId<S extends PlannableSummary>(
   tx: StagedFinalizeTx<S>,
   batch: StagedFinalizeBatch,
@@ -357,12 +355,7 @@ async function resolveClientId<S extends PlannableSummary>(
     await tx.listClientsForDuplicateCheck(),
     { email, phone },
   );
-  if (
-    candidates.length > 0 &&
-    (batch.newCustomerConfirmationSignature === null ||
-      batch.newCustomerConfirmationSignature !==
-        computeReviewSignature({ email, phone }, candidates))
-  ) {
+  if (candidates.length > 0) {
     return {
       ok: false,
       failure: fail(

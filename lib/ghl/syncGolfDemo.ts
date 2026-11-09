@@ -59,7 +59,24 @@ export async function syncGolfDemoToGHL(
         email: client.email,
         phone: client.phone,
       },
-      client.ghlContactId
+      client.ghlContactId,
+      {
+        contactMatchPolicy: "require-review",
+        ownClientId: client.id,
+        findLinkedClients: (contactIds) =>
+          db.golfClient.findMany({
+            where: {
+              id: { not: client.id },
+              ghlContactId: { in: contactIds },
+            },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              ghlContactId: true,
+            },
+          }),
+      },
     );
     resolvedGhlContactId = resolution.id;
 

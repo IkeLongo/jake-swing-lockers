@@ -52,8 +52,20 @@ export function newContactBlock(discovery: ContactDiscovery): string | null {
   ) {
     return "Every email and phone must be searchable in GHL.";
   }
+  if (discovery.flags.identifierConflict) {
+    return "The email and phone match different GHL contacts. Review the identity and approve the correct existing contact.";
+  }
+  if (discovery.flags.multipleMatches) {
+    return "Multiple GHL contacts match these identifiers. Review and approve the correct existing contact.";
+  }
   if (discovery.candidates.some((c) => c.reasons.includes("email"))) {
     return "A GHL contact already uses this email. Use that contact instead.";
+  }
+  if (discovery.candidates.some((c) => c.reasons.includes("phone"))) {
+    return "A GHL contact already uses this phone. Review and approve that contact instead.";
+  }
+  if (discovery.candidates.length > 0) {
+    return "A GHL contact already matches this customer. Review and approve that contact instead.";
   }
   return null;
 }

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
 import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
+import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
 
 // ── GET /api/staff/clients ────────────────────────────────────────────────────
 // Returns all GolfClient records with demo session counts and last demo date.
@@ -109,19 +109,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const email = rawEmail ? normalizeEmail(rawEmail) : null;
-  const phone = rawPhone ? normalizePhone(rawPhone) : null;
-
-  // Dedup check
-  const orClauses = [
-    ...(email ? [{ email }] : []),
-    ...(phone ? [{ phone }] : []),
-  ];
-  const existing = await db.golfClient.findFirst({
-    where: { OR: orClauses },
-    select: { id: true, firstName: true, lastName: true },
+  const result = await createGolfClientIfUnique(db, {
+    firstName,
+    lastName,
+    email: rawEmail || null,
+    phone: rawPhone || null,
   });
-  if (existing) {
+  if (result.status === "invalid") {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+  if (result.status === "duplicate") {
+    const existing = result.candidates[0]!;
     const name =
       [existing.firstName, existing.lastName].filter(Boolean).join(" ") ||
       `#${existing.id}`;
@@ -134,10 +132,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const client = await db.golfClient.create({
-    data: { firstName, lastName, email, phone },
-    select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true },
-  });
+  const client = {
+    id: result.client.id,
+    firstName: result.client.firstName,
+    lastName: result.client.lastName,
+    email: result.client.email,
+    phone: result.client.phone,
+    createdAt: result.client.createdAt,
+  };
 
   void syncGolfClientContact(client.id).catch((err) => {
     console.error("[GolfClient Sync] POST failed:", err);

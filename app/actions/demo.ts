@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { demoFormSchema, type ActionResult, type ClubTabValues } from "@/lib/validations/demo";
 import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
 import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
+import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
 
 export async function createDemoSession(
   rawData: unknown
@@ -28,29 +29,23 @@ export async function createDemoSession(
 
   try {
     // ── 2. Upsert GolfClient ──────────────────────────────────────────────────
-    let client = data.email
-      ? await db.golfClient.findFirst({ where: { email: data.email } })
-      : null;
-
-    if (client) {
-      client = await db.golfClient.update({
-        where: { id: client.id },
-        data: {
-          firstName: data.firstName ?? client.firstName,
-          lastName: data.lastName ?? client.lastName,
-          phone: data.phone ?? client.phone,
-        },
-      });
-    } else {
-      client = await db.golfClient.create({
-        data: {
-          firstName: data.firstName,
-          lastName: data.lastName,
-          email: data.email,
-          phone: data.phone,
-        },
-      });
+    const clientResult = await createGolfClientIfUnique(db, {
+      firstName: data.firstName ?? null,
+      lastName: data.lastName ?? null,
+      email: data.email ?? null,
+      phone: data.phone ?? null,
+    });
+    if (clientResult.status === "invalid") {
+      return { success: false, message: clientResult.error };
     }
+    if (clientResult.status === "duplicate") {
+      return {
+        success: false,
+        message:
+          "A customer already matches this email or phone. Review and select the existing customer instead of creating another.",
+      };
+    }
+    const client = clientResult.client;
 
     // ── 3. Generate a secure unique locker token ──────────────────────────────
     const lockerToken = randomUUID();
@@ -157,6 +152,5 @@ export async function createDemoSession(
     };
   }
 }
-
 
 

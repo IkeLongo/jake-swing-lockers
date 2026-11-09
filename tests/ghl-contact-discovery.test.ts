@@ -359,7 +359,7 @@ test("discovery is refused while a local duplicate review is unresolved", async 
   assert.deepEqual(calls, []);
 });
 
-test("discovery proceeds once a valid local confirmation exists", async () => {
+test("a local duplicate review signature cannot bypass duplicate identity blocking", async () => {
   const localClients = [{ id: 7, firstName: "X", lastName: "Y", email: "ann@example.com", phone: null }];
   const { signature } = buildNewCustomerReview(
     localClients,
@@ -368,7 +368,8 @@ test("discovery proceeds once a valid local confirmation exists", async () => {
   );
   const { deps } = batchDeps(batchRow({ newCustomerConfirmationSignature: signature }), { localClients });
   const r = await discoverContactForBatch(deps, 1);
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.code, "local_review_required");
 });
 
 test("missing, finalized, and non-TrackMan batches are rejected", async () => {

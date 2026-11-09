@@ -33,16 +33,14 @@ export function buildNewCustomerReview(
   proposed: ProposedIdentifiers,
   storedSignature: string | null,
 ): NewCustomerReview {
+  void storedSignature;
   const candidates = findDuplicateCandidates(clients, proposed);
   const signature = computeReviewSignature(proposed, candidates);
   return {
     kind: classifyReview(candidates),
     signature,
     candidates,
-    confirmed:
-      candidates.length > 0 &&
-      storedSignature !== null &&
-      storedSignature === signature,
+    confirmed: false,
   };
 }
 
@@ -84,9 +82,9 @@ export type NewCustomerSaveDecision =
     };
 
 /**
- * Decides whether a new-customer save may proceed. Candidates are always
- * recomputed from `clients`; the only client-supplied input is the signature
- * of the candidate set the staff member saw, which must still be current.
+ * Decides whether a new-customer save may proceed. A normalized identifier
+ * match can never be confirmed as a distinct customer; candidates must be
+ * resolved by selecting an existing customer or correcting the identifiers.
  */
 export function decideNewCustomerSave(input: {
   clients: readonly ClientIdentity[];
@@ -97,6 +95,8 @@ export function decideNewCustomerSave(input: {
   submittedSignature: string | null;
 }): NewCustomerSaveDecision {
   const { proposed, submittedSignature } = input;
+  void input.identityUnchanged;
+  void input.storedSignature;
   const review = buildNewCustomerReview(input.clients, proposed, null);
 
   if (submittedSignature !== null && submittedSignature !== review.signature) {
@@ -105,26 +105,6 @@ export function decideNewCustomerSave(input: {
 
   if (review.candidates.length === 0) {
     return { outcome: "save", confirmation: { action: "clear" }, review };
-  }
-
-  if (submittedSignature !== null) {
-    return {
-      outcome: "save",
-      confirmation: {
-        action: "set",
-        signature: review.signature,
-        snapshot: buildReviewSnapshot(proposed, review.candidates),
-      },
-      review: { ...review, confirmed: true },
-    };
-  }
-
-  if (input.identityUnchanged && input.storedSignature === review.signature) {
-    return {
-      outcome: "save",
-      confirmation: { action: "keep" },
-      review: { ...review, confirmed: true },
-    };
   }
 
   return { outcome: "review_required", review };

@@ -98,6 +98,10 @@ export type ApprovalErrorCode =
   | "discovery_incomplete"
   | "nothing_searched"
   | "email_match_exists"
+  | "phone_match_exists"
+  | "identifier_conflict"
+  | "multiple_matches"
+  | "contact_match_exists"
   | "candidate_acknowledgment_required";
 
 export interface ApprovalError {
@@ -435,6 +439,22 @@ export function evaluateApproval(input: {
       { unsearchable: discovery.unsearchable },
     );
   }
+  if (discovery.flags.identifierConflict) {
+    return conflict(
+      "identifier_conflict",
+      "The customer's email and phone match different GHL contacts. Review the identity and approve the correct existing contact.",
+      {
+        candidateIds: discovery.candidates.map((candidate) => candidate.id),
+      },
+    );
+  }
+  if (discovery.flags.multipleMatches || discovery.flags.incomplete) {
+    return conflict(
+      "multiple_matches",
+      "GHL returned multiple or incomplete contact matches. Review the contacts and approve the correct existing contact.",
+      { candidateIds: discovery.candidates.map((candidate) => candidate.id) },
+    );
+  }
   const emailMatches = discovery.candidates.filter((c) =>
     c.reasons.includes("email"),
   );
@@ -445,22 +465,34 @@ export function evaluateApproval(input: {
       { candidateIds: emailMatches.map((c) => c.id) },
     );
   }
-  const candidateIds = discovery.candidates.map((c) => c.id);
-  const missingIds = candidateIds.filter(
-    (id) => !request.acknowledgedCandidateIds.includes(id),
+  const phoneMatches = discovery.candidates.filter((c) =>
+    c.reasons.includes("phone"),
   );
-  if (missingIds.length > 0) {
+  if (phoneMatches.length > 0) {
+    return conflict(
+      "phone_match_exists",
+      "A GHL contact already uses this phone number. Review and approve the existing contact instead of creating another.",
+      { candidateIds: phoneMatches.map((c) => c.id) },
+    );
+  }
+  if (discovery.candidates.length > 0) {
+    return conflict(
+      "contact_match_exists",
+      "A GHL contact already matches this customer. Review and approve the existing contact instead of creating another.",
+      { candidateIds: discovery.candidates.map((candidate) => candidate.id) },
+    );
+  }
+  if (request.acknowledgedCandidateIds.length > 0) {
     return conflict(
       "candidate_acknowledgment_required",
-      "Confirm that none of the matching GHL contacts is this customer.",
-      { required: candidateIds, missing: missingIds },
+      "The acknowledged GHL contacts no longer match the current discovery. Review the contacts again.",
     );
   }
   return finish(
     identity,
     "new",
     null,
-    buildSnapshot(discovery, currentSignature, [], candidateIds),
+    buildSnapshot(discovery, currentSignature, [], []),
   );
 }
 
@@ -505,6 +537,14 @@ export function getApprovalStatus(
 
   const snapshot = parseSnapshot(stored.snapshot);
   if (!snapshot || !stored.signature) return "stale";
+  if (
+    decision === "new" &&
+    (snapshot.incomplete ||
+      snapshot.candidates.length > 0 ||
+      snapshot.acknowledgedCandidateIds.length > 0)
+  ) {
+    return "stale";
+  }
 
   const expected = computeApprovalSignature({
     identity,

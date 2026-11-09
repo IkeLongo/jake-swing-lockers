@@ -435,7 +435,7 @@ export function GhlContactDiscoverySection({
           (c) => c.id === approvedExisting && c.locationVerified && !c.wrongLocation,
         )
       : approval?.decision === "new"
-        ? newBlock === null || discovery.candidates.length > 0
+        ? newBlock === null && discovery.candidates.length === 0
         : null;
   const controlsDisabled = busy || loading || !signature;
   const missingNewAcks = discovery ? missingCandidateAcks(discovery, newAcked) : [];
@@ -556,7 +556,9 @@ export function GhlContactDiscoverySection({
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
                 New GHL contact
               </p>
-              {approvedNew && <Badge tone="match">Approved</Badge>}
+              {approvedNew && confirmedInLookup !== false && (
+                <Badge tone="match">Approved</Badge>
+              )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground font-body">
               Approves creating a contact when the CRM sync runs. Nothing is created now.

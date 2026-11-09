@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { upsertContact } from "./contacts";
+import { resolveSwingLockerCustomerContact } from "./swingLockerContactResolution";
 import { addTagsToContact } from "./tags";
 import {
   upsertRiverCityContact,
@@ -62,16 +62,22 @@ export async function sendSwingLockerAccess(
 
   try {
     // ── 2. Sync contact to SwingLocker GHL ───────────────────────────────────
-    const resolution = await upsertContact(
-      {
-        firstName: client.firstName,
-        lastName: client.lastName,
-        email: client.email,
-        phone: client.phone,
-      },
-      client.ghlContactId
+    resolvedGhlContactId = await resolveSwingLockerCustomerContact(
+      client,
+      (contactIds) =>
+        db.golfClient.findMany({
+          where: {
+            id: { not: client.id },
+            ghlContactId: { in: contactIds },
+          },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            ghlContactId: true,
+          },
+        }),
     );
-    resolvedGhlContactId = resolution.id;
 
     // ── 3. Save resolved contact ID to GolfClient ────────────────────────────
     if (resolvedGhlContactId !== client.ghlContactId) {
