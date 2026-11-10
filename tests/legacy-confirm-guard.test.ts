@@ -21,8 +21,7 @@ test("the route checks the persisted batch (not the request) before any write", 
   assert.ok(guard > 0, "route must call the guard with the loaded batch");
   assert.ok(source.indexOf("db.importBatch.findUnique") < guard);
   for (const write of [
-    "db.golfClient.create",
-    "db.golfClient.findFirst",
+    "createGolfClientIfUnique(db,",
     "db.demoSession.create",
     "db.importBatch.update",
   ]) {

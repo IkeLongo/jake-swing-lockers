@@ -26,8 +26,45 @@ model GolfClient {
 
   demoSessions        DemoSession[]
   stagedImportBatches ImportBatch[]
+  syncState           GolfClientSyncState?
   swingLockerOtps     SwingLockerOtp[]
   purchaseRequests    PurchaseRequest[]
+}
+
+model GolfClientSyncState {
+  golfClientId Int        @id
+  client       GolfClient @relation(fields: [golfClientId], references: [id], onDelete: Cascade)
+
+  desiredVersion Int    @default(1) @db.UnsignedInt
+  syncedVersion  Int    @default(0) @db.UnsignedInt
+  workStatus     String @default("pending") @db.VarChar(32)
+
+  contactVerificationStatus String    @default("unverified") @db.VarChar(24)
+  verifiedGhlLocationId     String?   @db.VarChar(64)
+  contactVerifiedAt         DateTime?
+
+  attemptCount   Int       @default(0) @db.UnsignedInt
+  nextAttemptAt  DateTime?
+  lastAttemptAt  DateTime?
+  claimToken     String?   @db.VarChar(36)
+  claimedVersion Int?      @db.UnsignedInt
+  leaseExpiresAt DateTime?
+
+  creationAttemptId      String?   @db.VarChar(36)
+  creationAttemptVersion Int?      @db.UnsignedInt
+  creationAttemptStatus  String?   @db.VarChar(24)
+  creationAttemptedAt    DateTime?
+
+  lastErrorCode     String?  @db.VarChar(64)
+  lastError         String?  @db.Text
+  lastSyncedSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workStatus, nextAttemptAt])
+  @@index([leaseExpiresAt])
+  @@index([creationAttemptId])
 }
 
 model StagedCustomerCreationMutex {

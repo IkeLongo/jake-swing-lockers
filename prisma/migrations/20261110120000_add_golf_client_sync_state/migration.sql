@@ -1,0 +1,31 @@
+CREATE TABLE `GolfClientSyncState` (
+  `golfClientId` INTEGER NOT NULL,
+  `desiredVersion` INTEGER UNSIGNED NOT NULL DEFAULT 1,
+  `syncedVersion` INTEGER UNSIGNED NOT NULL DEFAULT 0,
+  `workStatus` VARCHAR(32) NOT NULL DEFAULT 'pending',
+  `contactVerificationStatus` VARCHAR(24) NOT NULL DEFAULT 'unverified',
+  `verifiedGhlLocationId` VARCHAR(64) NULL,
+  `contactVerifiedAt` DATETIME(3) NULL,
+  `attemptCount` INTEGER UNSIGNED NOT NULL DEFAULT 0,
+  `nextAttemptAt` DATETIME(3) NULL,
+  `lastAttemptAt` DATETIME(3) NULL,
+  `claimToken` VARCHAR(36) NULL,
+  `claimedVersion` INTEGER UNSIGNED NULL,
+  `leaseExpiresAt` DATETIME(3) NULL,
+  `creationAttemptId` VARCHAR(36) NULL,
+  `creationAttemptVersion` INTEGER UNSIGNED NULL,
+  `creationAttemptStatus` VARCHAR(24) NULL,
+  `creationAttemptedAt` DATETIME(3) NULL,
+  `lastErrorCode` VARCHAR(64) NULL,
+  `lastError` TEXT NULL,
+  `lastSyncedSnapshot` JSON NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`golfClientId`),
+  INDEX `GolfClientSyncState_workStatus_nextAttemptAt_idx` (`workStatus`, `nextAttemptAt`),
+  INDEX `GolfClientSyncState_leaseExpiresAt_idx` (`leaseExpiresAt`),
+  INDEX `GolfClientSyncState_creationAttemptId_idx` (`creationAttemptId`),
+  CONSTRAINT `GolfClientSyncState_golfClientId_fkey`
+    FOREIGN KEY (`golfClientId`) REFERENCES `GolfClient` (`id`)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
