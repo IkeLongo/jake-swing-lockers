@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient, type Prisma as PrismaTypes } from "@/app/generated/prisma/client";
+import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
 import type { CustomerSyncClaim } from "./customerSyncWorkerState";
 import { isValidGhlContactId } from "@/lib/imports/ghl-contact-approval";
+import {
+  parseEmailStrict,
+  parsePhoneStrict,
+} from "@/lib/imports/customer-identifiers";
 
 type Owner =
   | { kind: "worker"; token: string; version: number }
@@ -31,6 +36,37 @@ export type AttemptTransitionResult =
   | { status: "lost_attempt" }
   | { status: "needs_reconciliation" }
   | { status: "contact_conflict" };
+
+export interface CustomerContactIdentity {
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
+export type VerifiedContactLinkResult =
+  | { status: "linked" }
+  | { status: "already_linked" }
+  | {
+      status:
+        | "customer_missing"
+        | "lost_claim"
+        | "version_changed"
+        | "identity_changed"
+        | "invalid_identity"
+        | "attempt_unresolved"
+        | "contact_conflict";
+    };
+
+export type ApprovedContactAssociationResult =
+  | { status: "linked" }
+  | { status: "already_linked" }
+  | {
+      status:
+        | "customer_missing"
+        | "attempt_unresolved"
+        | "contact_conflict";
+    };
 
 interface Marker {
   version: 2;
@@ -118,7 +154,14 @@ async function lockRows(tx: PrismaTypes.TransactionClient, id: number) {
   if (!customers.length) return null;
   const client = await tx.golfClient.findUniqueOrThrow({
     where: { id },
-    select: { ghlContactId: true, ghlContactCreationState: true },
+    select: {
+      ghlContactId: true,
+      ghlContactCreationState: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+    },
   });
   const states = await tx.$queryRaw<Array<{ golfClientId: number }>>`
     SELECT golfClientId FROM GolfClientSyncState WHERE golfClientId = ${id} FOR UPDATE
@@ -149,6 +192,231 @@ function hasAttempt(state: NonNullable<Awaited<ReturnType<typeof lockRows>>>["st
     state.creationAttemptId !== null || state.creationAttemptVersion !== null ||
     state.creationAttemptStatus !== null || state.creationAttemptedAt !== null
   ));
+}
+
+function normalizedText(value: string | null): string {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function sameCustomerIdentity(
+  current: CustomerContactIdentity,
+  expected: CustomerContactIdentity,
+): boolean {
+  return (
+    normalizedText(current.firstName) === normalizedText(expected.firstName) &&
+    normalizedText(current.lastName) === normalizedText(expected.lastName) &&
+    normalizeEmail(current.email ?? "") === normalizeEmail(expected.email ?? "") &&
+    normalizePhone(current.phone ?? "") === normalizePhone(expected.phone ?? "")
+  );
+}
+
+function parseExpectedIdentity(
+  identity: CustomerContactIdentity,
+): CustomerContactIdentity | null {
+  const email = parseEmailStrict(identity.email);
+  if (!email.ok) return null;
+  const phone = parsePhoneStrict(identity.phone);
+  if (!phone.ok || (phone.value && !/^\+1\d{10}$/.test(phone.value))) {
+    return null;
+  }
+  if (!email.value && !phone.value) return null;
+  return {
+    ...identity,
+    email: email.value,
+    phone: phone.value,
+  };
+}
+
+class ContactLinkConflictError extends Error {}
+
+/**
+ * Links a contact already verified by the caller. The worker claim remains
+ * active so profile synchronization can continue under the same version.
+ */
+export async function linkVerifiedCustomerContact(
+  db: PrismaClient,
+  input: {
+    claim: CustomerSyncClaim;
+    contactId: string;
+    verifiedLocationId: string;
+    expectedIdentity: CustomerContactIdentity;
+  },
+): Promise<VerifiedContactLinkResult> {
+  const { claim, contactId, verifiedLocationId } = input;
+  assertId(claim.golfClientId);
+  if (!UUID.test(claim.token) || !Number.isSafeInteger(claim.version) || claim.version < 1) {
+    throw new Error("A valid customer sync claim token and version are required.");
+  }
+  if (!isValidGhlContactId(contactId)) {
+    throw new Error("A valid verified GHL contact ID is required.");
+  }
+  if (
+    !verifiedLocationId.trim() ||
+    verifiedLocationId.trim().length > 64 ||
+    verifiedLocationId !== verifiedLocationId.trim()
+  ) {
+    throw new Error("A valid verified GHL location ID is required.");
+  }
+  const expectedIdentity = parseExpectedIdentity(input.expectedIdentity);
+  if (!expectedIdentity) return { status: "invalid_identity" };
+
+  try {
+    return await db.$transaction(async (tx): Promise<VerifiedContactLinkResult> => {
+      const row = await lockRows(tx, claim.golfClientId);
+      if (!row) return { status: "customer_missing" };
+      if (!row.state) return { status: "lost_claim" };
+      if (row.client.ghlContactCreationState !== null || hasAttempt(row.state)) {
+        return { status: "attempt_unresolved" };
+      }
+
+      const state = row.state;
+      if (
+        state.workStatus !== "processing" ||
+        state.claimToken !== claim.token ||
+        state.claimedVersion !== claim.version ||
+        state.leaseExpiresAt === null
+      ) {
+        return { status: "lost_claim" };
+      }
+      if (
+        state.desiredVersion !== claim.version ||
+        state.syncedVersion > claim.version
+      ) {
+        return { status: "version_changed" };
+      }
+
+      const currentIdentity: CustomerContactIdentity = {
+        firstName: row.client.firstName,
+        lastName: row.client.lastName,
+        email: row.client.email,
+        phone: row.client.phone,
+      };
+      if (!sameCustomerIdentity(currentIdentity, expectedIdentity)) {
+        return { status: "identity_changed" };
+      }
+      if (
+        row.client.ghlContactId !== null &&
+        row.client.ghlContactId !== contactId
+      ) {
+        return { status: "contact_conflict" };
+      }
+
+      const owner = await tx.golfClient.findUnique({
+        where: { ghlContactId: contactId },
+        select: { id: true },
+      });
+      if (owner && owner.id !== claim.golfClientId) {
+        return { status: "contact_conflict" };
+      }
+
+      const verified = await tx.$executeRaw`
+        UPDATE GolfClientSyncState
+        SET contactVerificationStatus = 'verified',
+            verifiedGhlLocationId = ${verifiedLocationId},
+            contactVerifiedAt = CURRENT_TIMESTAMP(3),
+            updatedAt = CURRENT_TIMESTAMP(3)
+        WHERE golfClientId = ${claim.golfClientId}
+          AND workStatus = 'processing' AND claimToken = ${claim.token}
+          AND claimedVersion = ${claim.version} AND desiredVersion = ${claim.version}
+          AND leaseExpiresAt > CURRENT_TIMESTAMP(3)
+          AND creationAttemptId IS NULL AND creationAttemptVersion IS NULL
+          AND creationAttemptStatus IS NULL AND creationAttemptedAt IS NULL
+      `;
+      if (verified !== 1) return { status: "lost_claim" };
+
+      if (row.client.ghlContactId === contactId) {
+        return { status: "already_linked" };
+      }
+
+      try {
+        const linked = await tx.golfClient.updateMany({
+          where: {
+            id: claim.golfClientId,
+            OR: [{ ghlContactId: null }, { ghlContactId: contactId }],
+          },
+          data: { ghlContactId: contactId },
+        });
+        if (linked.count !== 1) throw new ContactLinkConflictError();
+      } catch (error) {
+        if (
+          error instanceof ContactLinkConflictError ||
+          (error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === "P2002")
+        ) {
+          throw new ContactLinkConflictError();
+        }
+        throw error;
+      }
+      return { status: "linked" };
+    }, OPTIONS);
+  } catch (error) {
+    if (error instanceof ContactLinkConflictError) {
+      return { status: "contact_conflict" };
+    }
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return { status: "contact_conflict" };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Associates a staff-approved contact inside the staged-finalization
+ * transaction. Customer and sync-state locks prevent a concurrent creation
+ * reservation from being overwritten.
+ */
+export async function associateApprovedContactInTransaction(
+  tx: PrismaTypes.TransactionClient,
+  golfClientId: number,
+  contactId: string,
+): Promise<ApprovedContactAssociationResult> {
+  assertId(golfClientId);
+  if (!isValidGhlContactId(contactId)) return { status: "contact_conflict" };
+
+  const row = await lockRows(tx, golfClientId);
+  if (!row) return { status: "customer_missing" };
+  if (row.client.ghlContactCreationState !== null || hasAttempt(row.state)) {
+    return { status: "attempt_unresolved" };
+  }
+  if (
+    row.client.ghlContactId !== null &&
+    row.client.ghlContactId !== contactId
+  ) {
+    return { status: "contact_conflict" };
+  }
+
+  const owner = await tx.golfClient.findUnique({
+    where: { ghlContactId: contactId },
+    select: { id: true },
+  });
+  if (owner && owner.id !== golfClientId) {
+    return { status: "contact_conflict" };
+  }
+
+  try {
+    const linked = await tx.golfClient.updateMany({
+      where: {
+        id: golfClientId,
+        OR: [{ ghlContactId: null }, { ghlContactId: contactId }],
+      },
+      data: { ghlContactId: contactId },
+    });
+    if (linked.count !== 1) return { status: "contact_conflict" };
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return { status: "contact_conflict" };
+    }
+    throw error;
+  }
+  return row.client.ghlContactId === contactId
+    ? { status: "already_linked" }
+    : { status: "linked" };
 }
 
 /**

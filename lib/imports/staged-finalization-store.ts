@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { Prisma } from "@/app/generated/prisma/client";
+import { associateApprovedContactInTransaction } from "@/lib/ghl/customerContactCreationCoordinator";
 import { enqueueCustomerSync } from "@/lib/ghl/customerSyncOutbox";
 import type {
   ImportClubSummary,
@@ -100,33 +101,13 @@ function createTx(
       return customer;
     },
     async associateClientWithGhlContact(clientId, ghlContactId) {
-      const currentOwner = await tx.golfClient.findUnique({
-        where: { ghlContactId },
-        select: { id: true },
-      });
-      if (currentOwner && currentOwner.id !== clientId) {
+      const result = await associateApprovedContactInTransaction(
+        tx,
+        clientId,
+        ghlContactId,
+      );
+      if (result.status !== "linked" && result.status !== "already_linked") {
         throw new GhlContactAssociationConflictError();
-      }
-
-      try {
-        const result = await tx.golfClient.updateMany({
-          where: {
-            id: clientId,
-            OR: [{ ghlContactId: null }, { ghlContactId }],
-          },
-          data: { ghlContactId },
-        });
-        if (result.count !== 1) {
-          throw new GhlContactAssociationConflictError();
-        }
-      } catch (error) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2002"
-        ) {
-          throw new GhlContactAssociationConflictError();
-        }
-        throw error;
       }
     },
     createFinalizedSession: (data) =>

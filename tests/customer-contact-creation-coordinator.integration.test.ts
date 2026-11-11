@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, afterEach, before, describe, test } from "node:test";
 import {
+  associateApprovedContactInTransaction,
   acknowledgeContactCreation,
+  linkVerifiedCustomerContact,
   markContactCreationUncertain,
   rejectContactCreation,
   reserveContactCreation,
@@ -10,7 +12,10 @@ import {
   type ContactCreationAttempt,
 } from "../lib/ghl/customerContactCreationCoordinator";
 import { enqueueCustomerSync } from "../lib/ghl/customerSyncOutbox";
-import { claimCustomerSync } from "../lib/ghl/customerSyncWorkerState";
+import {
+  claimCustomerSync,
+  completeCustomerSync,
+} from "../lib/ghl/customerSyncWorkerState";
 import { updateGolfClientIfUnique } from "../lib/imports/new-customer-review-store";
 import {
   assertCustomerSyncTestDatabaseIdentity,
@@ -69,6 +74,230 @@ describe("customer contact creation coordinator MySQL integration", { skip }, ()
     if (result.status !== "reserved") throw new Error("reservation failed");
     return result.attempt;
   }
+  const identity = (client: { firstName: string | null; lastName: string | null; email: string | null; phone: string | null }) => ({
+    firstName: client.firstName,
+    lastName: client.lastName,
+    email: client.email,
+    phone: client.phone,
+  });
+  const linkInput = (
+    claim: { golfClientId: number; token: string; version: number },
+    contactId: string,
+    expectedIdentity: ReturnType<typeof identity>,
+  ) => ({
+    claim,
+    contactId,
+    verifiedLocationId: "test-location",
+    expectedIdentity,
+  });
+
+  test("worker links a verified contact atomically without completing profile sync", async () => {
+    const customer = await fixture();
+    const claimed = await claimCustomerSync(db, customer.id, 60_000);
+    assert.equal(claimed.status, "claimed");
+    if (claimed.status !== "claimed") return;
+    const contactId = `c-${randomUUID()}`;
+
+    assert.deepEqual(
+      await linkVerifiedCustomerContact(
+        db,
+        linkInput(claimed.claim, contactId, identity(customer)),
+      ),
+      { status: "linked" },
+    );
+
+    const [linked, state] = await Promise.all([
+      db.golfClient.findUniqueOrThrow({ where: { id: customer.id } }),
+      db.golfClientSyncState.findUniqueOrThrow({
+        where: { golfClientId: customer.id },
+      }),
+    ]);
+    assert.equal(linked.ghlContactId, contactId);
+    assert.equal(state.contactVerificationStatus, "verified");
+    assert.equal(state.verifiedGhlLocationId, "test-location");
+    assert.ok(state.contactVerifiedAt);
+    assert.equal(state.workStatus, "processing");
+    assert.equal(state.claimToken, claimed.claim.token);
+    assert.equal(state.claimedVersion, claimed.claim.version);
+    assert.equal(state.syncedVersion, 0);
+  });
+
+  test("worker link rejects stale claims, changed identity, and unresolved creation attempts", async () => {
+    const staleCustomer = await fixture();
+    const staleClaim = await claimCustomerSync(db, staleCustomer.id, 60_000);
+    assert.equal(staleClaim.status, "claimed");
+    if (staleClaim.status !== "claimed") return;
+    assert.deepEqual(
+      await linkVerifiedCustomerContact(
+        db,
+        linkInput(
+          { ...staleClaim.claim, token: randomUUID() },
+          `c-${randomUUID()}`,
+          identity(staleCustomer),
+        ),
+      ),
+      { status: "lost_claim" },
+    );
+
+    const changed = await fixture();
+    const changedClaim = await claimCustomerSync(db, changed.id, 60_000);
+    assert.equal(changedClaim.status, "claimed");
+    if (changedClaim.status !== "claimed") return;
+    await db.golfClient.update({
+      where: { id: changed.id },
+      data: { email: `changed-${randomUUID()}@example.test` },
+    });
+    assert.deepEqual(
+      await linkVerifiedCustomerContact(
+        db,
+        linkInput(changedClaim.claim, `c-${randomUUID()}`, identity(changed)),
+      ),
+      { status: "identity_changed" },
+    );
+
+    const unresolved = await fixture();
+    const unresolvedClaim = await claimCustomerSync(db, unresolved.id, 60_000);
+    assert.equal(unresolvedClaim.status, "claimed");
+    if (unresolvedClaim.status !== "claimed") return;
+    const attempt = await reserveContactCreation(db, {
+      golfClientId: unresolved.id,
+      expectedVersion: unresolvedClaim.claim.version,
+      workerClaim: unresolvedClaim.claim,
+    });
+    assert.equal(attempt.status, "reserved");
+    assert.deepEqual(
+      await linkVerifiedCustomerContact(
+        db,
+        linkInput(
+          unresolvedClaim.claim,
+          `c-${randomUUID()}`,
+          identity(unresolved),
+        ),
+      ),
+      { status: "attempt_unresolved" },
+    );
+    if (attempt.status !== "reserved") return;
+    assert.equal(
+      (
+        await markContactCreationUncertain(
+          db,
+          attempt.attempt,
+          "uncertain",
+          "Uncertain response",
+        )
+      ).status,
+      "applied",
+    );
+    assert.deepEqual(
+      await linkVerifiedCustomerContact(
+        db,
+        linkInput(
+          unresolvedClaim.claim,
+          `c-${randomUUID()}`,
+          identity(unresolved),
+        ),
+      ),
+      { status: "attempt_unresolved" },
+    );
+  });
+
+  test("different customers cannot concurrently link the same GHL contact", async () => {
+    const first = await fixture();
+    const second = await fixture();
+    const firstClaim = await claimCustomerSync(db, first.id, 60_000);
+    const secondClaim = await claimCustomerSync(db, second.id, 60_000);
+    assert.equal(firstClaim.status, "claimed");
+    assert.equal(secondClaim.status, "claimed");
+    if (firstClaim.status !== "claimed" || secondClaim.status !== "claimed") return;
+    const contactId = `c-${randomUUID()}`;
+
+    const results = await Promise.all([
+      linkVerifiedCustomerContact(
+        db,
+        linkInput(firstClaim.claim, contactId, identity(first)),
+      ),
+      linkVerifiedCustomerContact(
+        db,
+        linkInput(secondClaim.claim, contactId, identity(second)),
+      ),
+    ]);
+
+    assert.equal(results.filter((result) => result.status === "linked").length, 1);
+    assert.equal(results.filter((result) => result.status === "contact_conflict").length, 1);
+    const owners = await db.golfClient.findMany({
+      where: { ghlContactId: contactId },
+      select: { id: true },
+    });
+    assert.equal(owners.length, 1);
+  });
+
+  test("profile changes during link remain pending and are not marked synchronized", async () => {
+    const customer = await fixture();
+    const claimed = await claimCustomerSync(db, customer.id, 60_000);
+    assert.equal(claimed.status, "claimed");
+    if (claimed.status !== "claimed") return;
+    const contactId = `c-${randomUUID()}`;
+    const [link, update] = await Promise.all([
+      linkVerifiedCustomerContact(
+        db,
+        linkInput(claimed.claim, contactId, identity(customer)),
+      ),
+      updateGolfClientIfUnique(db, customer.id, { firstName: "Updated" }),
+    ]);
+    assert.ok(
+      link.status === "linked" ||
+      link.status === "identity_changed" ||
+      link.status === "version_changed",
+    );
+    assert.equal(update.status, "updated");
+    assert.equal((await completeCustomerSync(db, claimed.claim)).status, "applied");
+    const [persisted, state] = await Promise.all([
+      db.golfClient.findUniqueOrThrow({ where: { id: customer.id } }),
+      db.golfClientSyncState.findUniqueOrThrow({
+        where: { golfClientId: customer.id },
+      }),
+    ]);
+    assert.equal(persisted.firstName, "Updated");
+    assert.equal(state.desiredVersion, 2);
+    assert.equal(state.syncedVersion, 1);
+    assert.equal(state.workStatus, "pending");
+    if (link.status === "linked") assert.equal(persisted.ghlContactId, contactId);
+  });
+
+  test("staged approval linking and worker contact creation cannot race", async () => {
+    const customer = await fixture();
+    const contactId = `c-${randomUUID()}`;
+    const [reservation, association] = await Promise.all([
+      reserveContactCreation(db, {
+        golfClientId: customer.id,
+        expectedVersion: 1,
+      }),
+      db.$transaction((tx) =>
+        associateApprovedContactInTransaction(tx, customer.id, contactId),
+      ),
+    ]);
+
+    if (reservation.status === "linked") {
+      assert.equal(reservation.contactId, contactId);
+      assert.ok(
+        association.status === "linked" ||
+        association.status === "already_linked",
+      );
+      assert.equal(
+        (await db.golfClient.findUniqueOrThrow({ where: { id: customer.id } }))
+          .ghlContactId,
+        contactId,
+      );
+    } else {
+      assert.equal(reservation.status, "reserved");
+      assert.equal(association.status, "attempt_unresolved");
+      assert.equal(
+        (await db.golfClient.findUniqueOrThrow({ where: { id: customer.id } }))
+          .ghlContactId,
+        null,
+      );
+    }
+  });
 
   test("two concurrent reservations produce one durable attempt", async () => {
     const client = await fixture();

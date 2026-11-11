@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { Prisma } from "../app/generated/prisma/client";
 import {
   acknowledgeContactCreation,
+  linkVerifiedCustomerContact,
   markContactCreationUncertain,
   rejectContactCreation,
   reserveContactCreation,
@@ -11,7 +12,14 @@ import {
   type ContactCreationAttempt,
 } from "../lib/ghl/customerContactCreationCoordinator";
 
-type Client = { ghlContactId: string | null; ghlContactCreationState: unknown };
+type Client = {
+  ghlContactId: string | null;
+  ghlContactCreationState: unknown;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+};
 interface Session {
   id: number;
   clientId: number;
@@ -33,6 +41,9 @@ interface State {
   nextAttemptAt: number | null;
   lastErrorCode: string | null;
   lastError: string | null;
+  contactVerificationStatus: string;
+  verifiedGhlLocationId: string | null;
+  contactVerifiedAt: number | null;
 }
 
 function harness(over: {
@@ -41,14 +52,26 @@ function harness(over: {
   missingState?: boolean;
   sessions?: Session[];
   failSessionWrite?: boolean;
+  otherOwners?: { id: number; ghlContactId: string }[];
 } = {}) {
-  let client: Client = { ghlContactId: null, ghlContactCreationState: null, ...over.client };
+  let client: Client = {
+    ghlContactId: null,
+    ghlContactCreationState: null,
+    firstName: "Ann",
+    lastName: "Lee",
+    email: "ann@example.com",
+    phone: "+12105550100",
+    ...over.client,
+  };
   let state: State = {
     desiredVersion: 1, syncedVersion: 0, workStatus: "pending",
     claimToken: null, claimedVersion: null, leaseExpiresAt: null,
     creationAttemptId: null, creationAttemptVersion: null,
     creationAttemptStatus: null, creationAttemptedAt: null,
     nextAttemptAt: null, lastErrorCode: null, lastError: null,
+    contactVerificationStatus: "unverified",
+    verifiedGhlLocationId: null,
+    contactVerifiedAt: null,
     ...over.state,
   };
   let stateExists = !over.missingState;
@@ -97,6 +120,27 @@ function harness(over: {
         },
         golfClient: {
           async findUniqueOrThrow() { return { ...currentClient }; },
+          async findUnique(args: { where: { ghlContactId: string } }) {
+            if (currentClient.ghlContactId === args.where.ghlContactId) {
+              return { id: 1 };
+            }
+            return over.otherOwners?.find(
+              (owner) => owner.ghlContactId === args.where.ghlContactId,
+            ) ?? null;
+          },
+          async updateMany(args: {
+            where: { id: number; OR: { ghlContactId: string | null }[] };
+            data: { ghlContactId: string };
+          }) {
+            if (
+              args.where.id !== 1 ||
+              !args.where.OR.some((entry) =>
+                entry.ghlContactId === currentClient.ghlContactId,
+              )
+            ) return { count: 0 };
+            currentClient.ghlContactId = args.data.ghlContactId;
+            return { count: 1 };
+          },
           async update(args: { data: { ghlContactId?: string; ghlContactCreationState: unknown } }) {
             if (failCustomerWrite) throw new Error("customer write failed");
             currentClient = {
@@ -139,6 +183,26 @@ function harness(over: {
           const query = parts.join("?");
           sql.push(query);
           if (!currentStateExists) return 0;
+          if (query.includes("contactVerificationStatus = 'verified'")) {
+            const [locationId, id, token, claimedVersion, desiredVersion] = values;
+            if (
+              Number(id) !== 1 ||
+              currentState.workStatus !== "processing" ||
+              currentState.claimToken !== token ||
+              currentState.claimedVersion !== claimedVersion ||
+              currentState.desiredVersion !== desiredVersion ||
+              currentState.leaseExpiresAt === null ||
+              currentState.leaseExpiresAt <= now ||
+              currentState.creationAttemptId !== null ||
+              currentState.creationAttemptVersion !== null ||
+              currentState.creationAttemptStatus !== null ||
+              currentState.creationAttemptedAt !== null
+            ) return 0;
+            currentState.contactVerificationStatus = "verified";
+            currentState.verifiedGhlLocationId = String(locationId);
+            currentState.contactVerifiedAt = now;
+            return 1;
+          }
           if (query.includes("SET claimToken = NULL")) {
             if (expireAtFinalCheck && currentState.leaseExpiresAt !== null) now = currentState.leaseExpiresAt;
             const [, status, token, version] = values;
@@ -536,4 +600,125 @@ test("staged reservation and completion roll back together when either record wr
     (completionFailure.sessions.get(10)?.ghlSyncState as { contact: { status: string } }).contact.status,
     "creating",
   );
+});
+
+test("verified existing contact linking persists verification without completing sync", async () => {
+  const token = randomUUID();
+  const claim = { golfClientId: 1, token, version: 1 };
+  const h = harness({
+    state: {
+      workStatus: "processing",
+      claimToken: token,
+      claimedVersion: 1,
+      leaseExpiresAt: 2000,
+    },
+  });
+
+  assert.deepEqual(await linkVerifiedCustomerContact(h.db, {
+    claim,
+    contactId: "contact-verified",
+    verifiedLocationId: "location-1",
+    expectedIdentity: {
+      firstName: "Ann",
+      lastName: "Lee",
+      email: "Ann@Example.com",
+      phone: "(210) 555-0100",
+    },
+  }), { status: "linked" });
+
+  assert.equal(h.client.ghlContactId, "contact-verified");
+  assert.equal(h.state.contactVerificationStatus, "verified");
+  assert.equal(h.state.verifiedGhlLocationId, "location-1");
+  assert.ok(h.state.contactVerifiedAt);
+  assert.equal(h.state.workStatus, "processing");
+  assert.equal(h.state.claimToken, token);
+  assert.equal(h.state.syncedVersion, 0);
+});
+
+test("verified contact linking rejects stale claims, changed identity, and newer versions", async () => {
+  const token = randomUUID();
+  const input = {
+    claim: { golfClientId: 1, token, version: 1 },
+    contactId: "contact-verified",
+    verifiedLocationId: "location-1",
+    expectedIdentity: {
+      firstName: "Ann",
+      lastName: "Lee",
+      email: "ann@example.com",
+      phone: "+12105550100",
+    },
+  };
+  const stale = harness({
+    state: {
+      workStatus: "processing",
+      claimToken: randomUUID(),
+      claimedVersion: 1,
+      leaseExpiresAt: 2000,
+    },
+  });
+  assert.deepEqual(await linkVerifiedCustomerContact(stale.db, input), { status: "lost_claim" });
+
+  const changedIdentity = harness({
+    client: { email: "new@example.com" },
+    state: {
+      workStatus: "processing",
+      claimToken: token,
+      claimedVersion: 1,
+      leaseExpiresAt: 2000,
+    },
+  });
+  assert.deepEqual(await linkVerifiedCustomerContact(changedIdentity.db, input), { status: "identity_changed" });
+  assert.equal(changedIdentity.client.ghlContactId, null);
+
+  const newerVersion = harness({
+    state: {
+      workStatus: "processing",
+      claimToken: token,
+      claimedVersion: 1,
+      desiredVersion: 2,
+      leaseExpiresAt: 2000,
+    },
+  });
+  assert.deepEqual(await linkVerifiedCustomerContact(newerVersion.db, input), { status: "version_changed" });
+  assert.equal(newerVersion.state.desiredVersion, 2);
+  assert.equal(newerVersion.state.syncedVersion, 0);
+  assert.equal(newerVersion.state.workStatus, "processing");
+});
+
+test("verified contact linking rejects unresolved creation attempts and another owner", async () => {
+  const token = randomUUID();
+  const input = {
+    claim: { golfClientId: 1, token, version: 1 },
+    contactId: "contact-verified",
+    verifiedLocationId: "location-1",
+    expectedIdentity: {
+      firstName: "Ann",
+      lastName: "Lee",
+      email: "ann@example.com",
+      phone: "+12105550100",
+    },
+  };
+  const attempt = harness({
+    state: {
+      workStatus: "processing",
+      claimToken: token,
+      claimedVersion: 1,
+      leaseExpiresAt: 2000,
+      creationAttemptStatus: "unknown",
+    },
+  });
+  assert.deepEqual(await linkVerifiedCustomerContact(attempt.db, input), { status: "attempt_unresolved" });
+  assert.equal(attempt.client.ghlContactId, null);
+
+  const owned = harness({
+    state: {
+      workStatus: "processing",
+      claimToken: token,
+      claimedVersion: 1,
+      leaseExpiresAt: 2000,
+    },
+    otherOwners: [{ id: 2, ghlContactId: "contact-verified" }],
+  });
+  assert.deepEqual(await linkVerifiedCustomerContact(owned.db, input), { status: "contact_conflict" });
+  assert.equal(owned.client.ghlContactId, null);
 });
