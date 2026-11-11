@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 import {
   ContactResolutionError,
   upsertContact,
+  updateContactProfile,
 } from "../lib/ghl/contacts";
 import { resolveSwingLockerCustomerContact } from "../lib/ghl/swingLockerContactResolution";
 
@@ -279,6 +280,27 @@ test("a verified saved contact is updated without changing its link", async () =
   assert.deepEqual(result, { id: "saved" });
   assert.equal(calls.some((call) => call.method === "POST"), false);
   assert.equal(calls.some((call) => call.method === "PUT"), true);
+});
+
+test("profile-only update writes to the verified ID and never searches or creates", async () => {
+  const calls = mockFetch(lookupResponder());
+
+  assert.deepEqual(
+    await updateContactProfile("verified-contact", {
+      firstName: " Ann ",
+      email: " ANN@example.com ",
+      phone: "(210) 555-0100",
+    }),
+    { id: "verified-contact" },
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url.pathname, "/contacts/verified-contact");
+  assert.equal(calls[0]?.method, "PUT");
+  assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
+    firstName: "Ann",
+    email: "ann@example.com",
+    phone: "+12105550100",
+  });
 });
 
 test("editing identifiers on the same saved contact updates that contact", async () => {

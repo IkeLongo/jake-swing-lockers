@@ -1,5 +1,9 @@
 import { db } from "@/lib/db";
 import { resolveSwingLockerCustomerContact } from "./swingLockerContactResolution";
+import {
+  isCustomerContactSyncEnabled,
+  processCustomerContactSync,
+} from "./customerContactSyncProcessor";
 import { addTagsToContact } from "./tags";
 import {
   upsertRiverCityContact,
@@ -56,31 +60,47 @@ export async function sendSwingLockerAccess(
   }
 
   const client = session.client;
+  const customerContactSyncEnabled = isCustomerContactSyncEnabled();
 
   // Track for error-path GhlSyncEvent
   let resolvedGhlContactId: string | undefined;
 
   try {
     // ── 2. Sync contact to SwingLocker GHL ───────────────────────────────────
-    resolvedGhlContactId = await resolveSwingLockerCustomerContact(
-      client,
-      (contactIds) =>
-        db.golfClient.findMany({
-          where: {
-            id: { not: client.id },
-            ghlContactId: { in: contactIds },
-          },
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            ghlContactId: true,
-          },
-        }),
-    );
+    if (customerContactSyncEnabled) {
+      const result = await processCustomerContactSync(client.id);
+      if (result.status !== "synced") {
+        const detail =
+          "message" in result && result.message ? ` ${result.message}` : "";
+        throw new Error(
+          `Customer contact sync is ${result.status}.${detail}`,
+        );
+      }
+      resolvedGhlContactId = result.contactId;
+    } else {
+      resolvedGhlContactId = await resolveSwingLockerCustomerContact(
+        client,
+        (contactIds) =>
+          db.golfClient.findMany({
+            where: {
+              id: { not: client.id },
+              ghlContactId: { in: contactIds },
+            },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              ghlContactId: true,
+            },
+          }),
+      );
+    }
 
     // ── 3. Save resolved contact ID to GolfClient ────────────────────────────
-    if (resolvedGhlContactId !== client.ghlContactId) {
+    if (
+      !customerContactSyncEnabled &&
+      resolvedGhlContactId !== client.ghlContactId
+    ) {
       await db.golfClient.update({
         where: { id: client.id },
         data: {

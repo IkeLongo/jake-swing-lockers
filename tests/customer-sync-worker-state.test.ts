@@ -317,6 +317,22 @@ test("retry scheduling uses due time and preserves review and reconciliation sta
   assert.equal((await claimCustomerSync(h.db, 3, 1000)).status, "unavailable");
 });
 
+test("idempotent contact updates are accepted as safe retryable work", async () => {
+  const h = harness([row(1)]);
+  const claim = await claimed(h, 1);
+  assert.deepEqual(
+    await failCustomerSync(h.db, claim, {
+      kind: "retryable",
+      retrySafety: "idempotent_update",
+      delayMs: 1000,
+      code: "contact_update",
+      message: "Retry the same desired-state PUT.",
+    }),
+    { status: "applied" },
+  );
+  assert.equal(h.rows.get(1)?.workStatus, "retryable_failed");
+});
+
 test("creation attempts block claims and even a live claim cannot complete through one", async () => {
   const h = harness([row(1, { legacyClaim: { status: "creating" } }), row(2)]);
   assert.equal((await claimCustomerSync(h.db, 1, 1000)).status, "needs_reconciliation");

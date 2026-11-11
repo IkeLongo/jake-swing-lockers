@@ -20,7 +20,10 @@ export type CustomerSyncTransitionResult =
 export type CustomerSyncFailure =
   | {
       kind: "retryable";
-      retrySafety: "no_remote_write" | "definitively_rejected";
+      retrySafety:
+        | "no_remote_write"
+        | "definitively_rejected"
+        | "idempotent_update";
       delayMs: number;
       code: string;
       message: string;
@@ -245,7 +248,11 @@ async function transitionCustomerSync(
     }
     if (failure.kind === "retryable") {
       assertDuration(failure.delayMs, "delayMs");
-      if (failure.retrySafety !== "no_remote_write" && failure.retrySafety !== "definitively_rejected") {
+      if (
+        failure.retrySafety !== "no_remote_write" &&
+        failure.retrySafety !== "definitively_rejected" &&
+        failure.retrySafety !== "idempotent_update"
+      ) {
         throw new Error("Retryable failures require a definitive safe-to-retry classification.");
       }
     }

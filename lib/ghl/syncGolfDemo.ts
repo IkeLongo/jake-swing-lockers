@@ -1,5 +1,13 @@
 import { db } from "@/lib/db";
-import { upsertContact, updateContactCustomFields } from "./contacts";
+import {
+  upsertContact,
+  updateContactCustomFields,
+  type ContactResolution,
+} from "./contacts";
+import {
+  isCustomerContactSyncEnabled,
+  processCustomerContactSync,
+} from "./customerContactSyncProcessor";
 import { addTagsToContact } from "./tags";
 import { upsertGolfDemoOpportunity } from "./opportunities";
 import {
@@ -44,6 +52,7 @@ export async function syncGolfDemoToGHL(
   }
 
   const client = session.client;
+  const customerContactSyncEnabled = isCustomerContactSyncEnabled();
   const appUrl = process.env.APP_BASE_URL ?? "https://jlgolfsales.rivercitycreatives.com";
   const lockerUrl = `${appUrl}/swing-locker/${session.lockerToken}`;
 
@@ -52,39 +61,54 @@ export async function syncGolfDemoToGHL(
 
   try {
     // ── 2. Upsert GHL contact ───────────────────────────────────────────────
-    const resolution = await upsertContact(
-      {
-        firstName: client.firstName,
-        lastName: client.lastName,
-        email: client.email,
-        phone: client.phone,
-      },
-      client.ghlContactId,
-      {
-        contactMatchPolicy: "require-review",
-        ownClientId: client.id,
-        findLinkedClients: (contactIds) =>
-          db.golfClient.findMany({
-            where: {
-              id: { not: client.id },
-              ghlContactId: { in: contactIds },
-            },
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              ghlContactId: true,
-            },
-          }),
-      },
-    );
+    let resolution: ContactResolution;
+    if (customerContactSyncEnabled) {
+      const result = await processCustomerContactSync(client.id);
+      if (result.status !== "synced") {
+        const detail =
+          "message" in result && result.message ? ` ${result.message}` : "";
+        throw new Error(
+          `Customer contact sync is ${result.status}.${detail}`,
+        );
+      }
+      resolution = { id: result.contactId };
+    } else {
+      resolution = await upsertContact(
+        {
+          firstName: client.firstName,
+          lastName: client.lastName,
+          email: client.email,
+          phone: client.phone,
+        },
+        client.ghlContactId,
+        {
+          contactMatchPolicy: "require-review",
+          ownClientId: client.id,
+          findLinkedClients: (contactIds) =>
+            db.golfClient.findMany({
+              where: {
+                id: { not: client.id },
+                ghlContactId: { in: contactIds },
+              },
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                ghlContactId: true,
+              },
+            }),
+        },
+      );
+    }
     resolvedGhlContactId = resolution.id;
 
     // ── 3. Save contact ID to DB immediately (before any later step fails) ──
     await db.golfClient.update({
       where: { id: client.id },
       data: {
-        ghlContactId: resolvedGhlContactId,
+        ...(!customerContactSyncEnabled
+          ? { ghlContactId: resolvedGhlContactId }
+          : {}),
         ghlLastSyncedAt: new Date(),
         ghlSyncStatus: "contact_resolved",
         ghlSyncError: null,
@@ -182,7 +206,7 @@ export async function syncGolfDemoToGHL(
       await db.golfClient.update({
         where: { id: client.id },
         data: {
-          ...(resolvedGhlContactId
+          ...(!customerContactSyncEnabled && resolvedGhlContactId
             ? { ghlContactId: resolvedGhlContactId }
             : {}),
           ghlLastSyncedAt: new Date(),

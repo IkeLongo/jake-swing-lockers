@@ -170,6 +170,10 @@ function assertDiscoveryUsable(
   }
 }
 
+export function normalizeContactProfile(input: ContactUpsertInput) {
+  return normalizedIdentity(input);
+}
+
 async function updateContact(
   contactId: string,
   input: ReturnType<typeof normalizedIdentity>,
@@ -191,6 +195,18 @@ async function updateContact(
     throw new Error("GHL contact update returned an unexpected response.");
   }
   return response.contact.id;
+}
+
+/** Updates one already-verified contact without searching or creating contacts. */
+export async function updateContactProfile(
+  contactId: string,
+  input: ContactUpsertInput,
+): Promise<ContactResolution> {
+  const savedContactId = contactId.trim();
+  if (!savedContactId) {
+    throw new Error("A verified GHL contact ID is required for profile updates.");
+  }
+  return { id: await updateContact(savedContactId, normalizedIdentity(input)) };
 }
 
 /**

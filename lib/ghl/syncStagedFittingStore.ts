@@ -9,6 +9,7 @@ import {
 } from "./resolveStagedContact";
 import { stagedContactApi } from "./stagedContactApi";
 import {
+  associateApprovedContactInTransaction,
   acknowledgeContactCreation,
   markContactCreationUncertain,
   rejectContactCreation,
@@ -259,7 +260,8 @@ async function verifyApprovedContact(
 
 export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
   const coordinatorEnabled = () =>
-    process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED === "true";
+    process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED === "true" ||
+    process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED === "true";
 
   const requireCreationReconciliation = async (
     attempt: ContactCreationAttempt,
@@ -792,8 +794,19 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
     },
 
     async saveContactId(clientId, ghlContactId) {
-      await assertContactAvailableToClient(db, clientId, ghlContactId);
-      await persistClientContact(db, clientId, ghlContactId);
+      const association = await db.$transaction(
+        (tx) => associateApprovedContactInTransaction(tx, clientId, ghlContactId),
+        { maxWait: 10_000, timeout: 30_000 },
+      );
+      if (association.status !== "linked" && association.status !== "already_linked") {
+        if (association.status === "attempt_unresolved") {
+          throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+        }
+        throw new ContactNeedsReviewError(
+          "identity_conflict",
+          `The approved GHL contact could not be linked safely (${association.status}).`,
+        );
+      }
       await db.golfClient.update({
         where: { id: clientId },
         data: { ghlLastSyncedAt: new Date(), ghlSyncStatus: "contact_resolved", ghlSyncError: null },

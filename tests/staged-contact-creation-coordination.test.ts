@@ -271,12 +271,14 @@ function installFakeGhlApi(opts: {
   duplicateOnCreate?: boolean;
   failContactRead?: boolean;
   coordinatorEnabled?: boolean;
+  customerSyncEnabled?: boolean;
   omitCoordinatorFlag?: boolean;
 } = {}) {
   const originalFetch = globalThis.fetch;
   const originalToken = process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
   const originalLocationId = process.env.GHL_SWINGLOCKER_LOCATION_ID;
   const originalCoordinatorFlag = process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED;
+  const originalCustomerSyncFlag = process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
   const contacts = new Map<string, Record<string, unknown>>();
   let creates = 0;
   let onCreate: () => void = () => {};
@@ -330,6 +332,9 @@ function installFakeGhlApi(opts: {
   };
   process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN = "test-token";
   process.env.GHL_SWINGLOCKER_LOCATION_ID = "loc-test";
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = opts.customerSyncEnabled
+    ? "true"
+    : "false";
   if (opts.omitCoordinatorFlag) {
     delete process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED;
   } else {
@@ -348,6 +353,8 @@ function installFakeGhlApi(opts: {
       else process.env.GHL_SWINGLOCKER_LOCATION_ID = originalLocationId;
       if (originalCoordinatorFlag === undefined) delete process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED;
       else process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED = originalCoordinatorFlag;
+      if (originalCustomerSyncFlag === undefined) delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
+      else process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = originalCustomerSyncFlag;
     },
     observeCreate(callback: () => void) {
       onCreate = callback;
@@ -548,6 +555,26 @@ test("enabled coordinator reserves and atomically resolves customer and session 
     assert.ok((fake.sessions.get(7)?.ghlSyncState as {
       contact: { attemptId: string };
     }).contact.attemptId);
+  } finally {
+    ghl.restore();
+  }
+});
+
+test("customer sync flag also coordinates staff-approved staged contact creation", async () => {
+  const fake = fakeDatabase();
+  const ghl = installFakeGhlApi({
+    coordinatorEnabled: false,
+    customerSyncEnabled: true,
+  });
+  try {
+    const deps = createPrismaStagedSyncDeps(fake.db as never);
+    assert.deepEqual(
+      await deps.resolveNewContact(contactInput, resolveArgs(7)),
+      { id: "contact-created" },
+    );
+    assert.equal(fake.client.ghlContactId, "contact-created");
+    assert.equal(fake.syncState.workStatus, "pending");
+    assert.ok(fake.syncState.creationAttemptId === null);
   } finally {
     ghl.restore();
   }

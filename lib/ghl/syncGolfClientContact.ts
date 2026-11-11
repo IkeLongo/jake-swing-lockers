@@ -1,6 +1,10 @@
 import { db } from "@/lib/db";
 import { upsertContact } from "./contacts";
 import {
+  isCustomerContactSyncEnabled,
+  processCustomerContactSync,
+} from "./customerContactSyncProcessor";
+import {
   addTagsToContact,
   TAG_SL_CLIENT,
   TAG_RC_TEMP_SMS,
@@ -40,45 +44,58 @@ export async function syncGolfClientContact(clientId: number): Promise<void> {
     console.warn("[syncGolfClientContact] GolfClient not found:", clientId);
     return;
   }
+  const customerContactSyncEnabled = isCustomerContactSyncEnabled();
 
   // ── Swing Locker upsert ────────────────────────────────────────────────────
   let ghlContactId: string;
 
   try {
-    const resolution = await upsertContact(
-      {
-        firstName: client.firstName,
-        lastName: client.lastName,
-        email: client.email,
-        phone: client.phone,
-      },
-      client.ghlContactId,
-      {
-        contactMatchPolicy: "require-review",
-        ownClientId: client.id,
-        findLinkedClients: (contactIds) =>
-          db.golfClient.findMany({
-            where: {
-              id: { not: client.id },
-              ghlContactId: { in: contactIds },
-            },
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              ghlContactId: true,
-            },
-          }),
-      },
-    );
-    ghlContactId = resolution.id;
+    if (customerContactSyncEnabled) {
+      const result = await processCustomerContactSync(client.id);
+      if (result.status !== "synced") {
+        const detail =
+          "message" in result && result.message ? ` ${result.message}` : "";
+        throw new Error(
+          `Customer contact sync is ${result.status}.${detail}`,
+        );
+      }
+      ghlContactId = result.contactId;
+    } else {
+      const resolution = await upsertContact(
+        {
+          firstName: client.firstName,
+          lastName: client.lastName,
+          email: client.email,
+          phone: client.phone,
+        },
+        client.ghlContactId,
+        {
+          contactMatchPolicy: "require-review",
+          ownClientId: client.id,
+          findLinkedClients: (contactIds) =>
+            db.golfClient.findMany({
+              where: {
+                id: { not: client.id },
+                ghlContactId: { in: contactIds },
+              },
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                ghlContactId: true,
+              },
+            }),
+        },
+      );
+      ghlContactId = resolution.id;
+    }
 
     await addTagsToContact(ghlContactId, [TAG_SL_CLIENT]);
 
     await db.golfClient.update({
       where: { id: clientId },
       data: {
-        ghlContactId,
+        ...(!customerContactSyncEnabled ? { ghlContactId } : {}),
         ghlSyncStatus: "synced",
         ghlSyncError: null,
         ghlLastSyncedAt: new Date(),
