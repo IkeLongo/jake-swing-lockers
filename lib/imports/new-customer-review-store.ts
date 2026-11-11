@@ -10,6 +10,7 @@ import {
   phoneMatchKey,
 } from "./customer-identifiers";
 import type { ClientIdentity } from "./new-customer-review";
+import { enqueueCustomerSync } from "@/lib/ghl/customerSyncOutbox";
 
 type GolfClientReader = Pick<Prisma.TransactionClient, "golfClient">;
 
@@ -68,6 +69,10 @@ export async function createGolfClientIfUnique(
           phone: phone.value,
         },
       });
+      await enqueueCustomerSync(tx, {
+        golfClientId: client.id,
+        reason: "created",
+      });
       return { status: "created", client };
     },
     { maxWait: 10_000, timeout: 30_000 },
@@ -106,7 +111,6 @@ export async function updateGolfClientIfUnique(
       await tx.$queryRaw`SELECT id FROM StagedCustomerCreationMutex WHERE id = 1 FOR UPDATE`;
       const current = await tx.golfClient.findUnique({
         where: { id },
-        select: { id: true, email: true, phone: true, ghlContactId: true },
       });
       if (!current) return { status: "missing" };
 
@@ -124,6 +128,12 @@ export async function updateGolfClientIfUnique(
       const phoneChanged =
         parsedPhone?.ok === true &&
         phoneMatchKey(parsedPhone.value) !== phoneMatchKey(current.phone);
+      const firstNameChanged =
+        patch.firstName !== undefined && patch.firstName !== current.firstName;
+      const lastNameChanged =
+        patch.lastName !== undefined && patch.lastName !== current.lastName;
+      const syncProfileChanged =
+        firstNameChanged || lastNameChanged || emailChanged || phoneChanged;
       const identityChanged = emailChanged || phoneChanged;
       const validEmail = parseEmailStrict(email);
       const validPhone = parsePhoneStrict(phone);
@@ -158,10 +168,21 @@ export async function updateGolfClientIfUnique(
         ...(parsedEmail?.ok === true ? { email: parsedEmail.value } : {}),
         ...(parsedPhone?.ok === true ? { phone: parsedPhone.value } : {}),
       };
-      const client = await tx.golfClient.update({
-        where: { id },
-        data,
-      });
+      const persistedProfileChanged =
+        (data.firstName !== undefined && data.firstName !== current.firstName) ||
+        (data.lastName !== undefined && data.lastName !== current.lastName) ||
+        (data.email !== undefined && data.email !== current.email) ||
+        (data.phone !== undefined && data.phone !== current.phone);
+      const client = persistedProfileChanged
+        ? await tx.golfClient.update({ where: { id }, data })
+        : current;
+
+      if (syncProfileChanged) {
+        await enqueueCustomerSync(tx, {
+          golfClientId: id,
+          reason: "profile_changed",
+        });
+      }
       return { status: "updated", client };
     },
     { maxWait: 10_000, timeout: 30_000 },

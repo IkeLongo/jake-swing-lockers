@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { Prisma } from "@/app/generated/prisma/client";
+import { enqueueCustomerSync } from "@/lib/ghl/customerSyncOutbox";
 import type {
   ImportClubSummary,
   PrismaClient,
@@ -87,8 +88,17 @@ function createTx(
     loadBatch: (batchId) => loadBatch(tx, batchId),
     loadSummaries: (batchId) => loadSummaries(tx, batchId),
     listClientsForDuplicateCheck: () => loadClientsForDuplicateCheck(tx),
-    createClient: (data) =>
-      tx.golfClient.create({ data, select: { id: true } }),
+    async createClient(data) {
+      const customer = await tx.golfClient.create({
+        data,
+        select: { id: true },
+      });
+      await enqueueCustomerSync(tx, {
+        golfClientId: customer.id,
+        reason: "created",
+      });
+      return customer;
+    },
     async associateClientWithGhlContact(clientId, ghlContactId) {
       const currentOwner = await tx.golfClient.findUnique({
         where: { ghlContactId },

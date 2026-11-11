@@ -166,8 +166,13 @@ function fakeGolfClientDb(
   rows: ClientIdentity[],
   current: ClientIdentity & { ghlContactId: string | null },
 ) {
+  const syncStates = new Map<number, { desiredVersion: number; workStatus: string }>();
   const tx = {
-    async $queryRaw() {
+    async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+      if (strings.join(" ").includes("FROM GolfClient WHERE id")) {
+        const requestedId = Number(values[0]);
+        return requestedId === current.id ? [{ id: current.id }] : [];
+      }
       return [];
     },
     golfClient: {
@@ -180,6 +185,32 @@ function fakeGolfClientDb(
       async update(args: { data: Partial<ClientIdentity> }) {
         Object.assign(current, args.data);
         return { ...current };
+      },
+    },
+    golfClientSyncState: {
+      async findUnique(args: { where: { golfClientId: number } }) {
+        return syncStates.get(args.where.golfClientId) ?? null;
+      },
+      async create(args: { data: Record<string, unknown> }) {
+        const state = {
+          desiredVersion: args.data.desiredVersion as number,
+          workStatus: args.data.workStatus as string,
+        };
+        syncStates.set(args.data.golfClientId as number, state);
+        return state;
+      },
+      async update(args: {
+        where: { golfClientId: number };
+        data: { desiredVersion: { increment: number }; workStatus?: string };
+      }) {
+        const state = syncStates.get(args.where.golfClientId);
+        if (!state) throw new Error("sync state not found");
+        const updated = {
+          desiredVersion: state.desiredVersion + args.data.desiredVersion.increment,
+          workStatus: args.data.workStatus ?? state.workStatus,
+        };
+        syncStates.set(args.where.golfClientId, updated);
+        return updated;
       },
     },
   };
