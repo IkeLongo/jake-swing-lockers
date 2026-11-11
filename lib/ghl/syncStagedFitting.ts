@@ -22,6 +22,7 @@ export interface StagedSyncClient {
   email: string | null;
   phone: string | null;
   ghlContactId: string | null;
+  syncState?: { desiredVersion: number } | null;
 }
 
 export interface StagedSyncSession {
@@ -97,6 +98,7 @@ export interface StagedSyncDeps {
       batchId: number;
       clientId: number;
       savedGhlContactId: string | null;
+      expectedVersion?: number | null;
     },
   ): Promise<{ id: string }>;
   saveContactId(clientId: number, ghlContactId: string): Promise<void>;
@@ -307,6 +309,7 @@ export async function syncStagedFittingToGHL(
           batchId: batch.id,
           clientId: client.id,
           savedGhlContactId: client.ghlContactId,
+          expectedVersion: client.syncState?.desiredVersion ?? null,
         },
       );
       ghlContactId = resolved.id;

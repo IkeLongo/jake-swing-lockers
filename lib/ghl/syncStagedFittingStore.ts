@@ -8,6 +8,13 @@ import {
   usablePhone,
 } from "./resolveStagedContact";
 import { stagedContactApi } from "./stagedContactApi";
+import {
+  acknowledgeContactCreation,
+  markContactCreationUncertain,
+  rejectContactCreation,
+  reserveStagedContactCreation,
+  type ContactCreationAttempt,
+} from "./customerContactCreationCoordinator";
 import { encodeSyncError } from "./syncErrorMarker";
 import { addTagsToContact } from "./tags";
 import {
@@ -251,6 +258,136 @@ async function verifyApprovedContact(
 }
 
 export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
+  const coordinatorEnabled = () =>
+    process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED === "true";
+
+  const requireCreationReconciliation = async (
+    attempt: ContactCreationAttempt,
+    code: string,
+    message: string,
+  ): Promise<never> => {
+    let transitionStatus = "not_recorded";
+    let transitionError: string | null = null;
+    try {
+      const result = await markContactCreationUncertain(db, attempt, code, message);
+      transitionStatus = result.status;
+    } catch (error) {
+      transitionError = error instanceof Error ? error.message : String(error);
+    }
+    throw new CreationNeedsReconciliationError(
+      `${RECONCILIATION_REQUIRED} ${message} (attempt transition: ${transitionStatus}${transitionError ? `; ${transitionError}` : ""})`,
+    );
+  };
+
+  const createCoordinatedContact = async (
+    input: { firstName: string | null; lastName: string | null; email: string | null; phone: string | null },
+    args: { sessionId: number; batchId: number; clientId: number; expectedVersion?: number | null },
+    email: string | null,
+    phone: string | null,
+  ): Promise<{ id: string }> => {
+    const reservation = await reserveStagedContactCreation(db, {
+      golfClientId: args.clientId,
+      sessionId: args.sessionId,
+      batchId: args.batchId,
+      expectedVersion: args.expectedVersion,
+    });
+    if (reservation.status === "blocked") {
+      throw new CreationNeedsReconciliationError(
+        `${RECONCILIATION_REQUIRED} The staged contact reservation was blocked (${reservation.reason}).`,
+      );
+    }
+    if (reservation.status === "linked") {
+      await verifyApprovedContact(db, reservation.contactId, args.clientId);
+      throw new ContactNeedsReviewError(
+        "identity_conflict",
+        "This customer already has a verified GHL contact. Review and approve that contact instead of creating another.",
+      );
+    }
+
+    let createdId: string;
+    try {
+      const created = await stagedContactApi.createContact({
+        ...(input.firstName ? { firstName: input.firstName } : {}),
+        ...(input.lastName ? { lastName: input.lastName } : {}),
+        ...(email ? { email } : {}),
+        ...(phone ? { phone } : {}),
+      });
+      createdId = created.id;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof GhlDuplicateContactError || isDefinitiveRejection(error)) {
+        let result;
+        try {
+          result = await rejectContactCreation(
+            db,
+            reservation.attempt,
+            error instanceof GhlDuplicateContactError ? "duplicate_contact" : "ghl_rejected",
+            message,
+          );
+        } catch (transitionError) {
+          const detail = transitionError instanceof Error
+            ? transitionError.message
+            : String(transitionError);
+          throw new CreationNeedsReconciliationError(
+            `${RECONCILIATION_REQUIRED} GHL rejected contact creation, but the rejection could not be recorded: ${detail}`,
+          );
+        }
+        if (result.status !== "applied") {
+          throw new CreationNeedsReconciliationError(
+            `${RECONCILIATION_REQUIRED} GHL rejected contact creation, but the staged attempt is no longer owned.`,
+          );
+        }
+        if (error instanceof GhlDuplicateContactError) {
+          throw new ContactNeedsReviewError(
+            "duplicate_on_create",
+            "GHL rejected the new contact as a duplicate. Review the matching contact before syncing.",
+          );
+        }
+        throw error;
+      }
+      return await requireCreationReconciliation(
+        reservation.attempt,
+        "ghl_contact_create_uncertain",
+        `GHL contact creation returned an uncertain result: ${message}`,
+      );
+    }
+
+    try {
+      const createdContact = await stagedContactApi.getContact(createdId);
+      if (!createdContact || createdContact.locationId !== stagedContactApi.locationId()) {
+        throw new Error("The created GHL contact could not be verified in the configured location.");
+      }
+      await assertContactAvailableToClient(db, args.clientId, createdId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return await requireCreationReconciliation(
+        reservation.attempt,
+        "ghl_contact_verification_uncertain",
+        `The GHL contact ${createdId} was created but could not be verified safely: ${detail}`,
+      );
+    }
+
+    let acknowledgment: Awaited<ReturnType<typeof acknowledgeContactCreation>>;
+    try {
+      acknowledgment = await acknowledgeContactCreation(db, reservation.attempt, createdId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return await requireCreationReconciliation(
+        reservation.attempt,
+        "ghl_contact_acknowledgment_uncertain",
+        `GHL created and verified contact ${createdId}, but local acknowledgment failed: ${detail}`,
+      );
+    }
+    if (acknowledgment.status !== "applied") {
+      return await requireCreationReconciliation(
+        reservation.attempt,
+        "ghl_contact_acknowledgment_conflict",
+        `GHL created and verified contact ${createdId}, but local acknowledgment returned ${acknowledgment.status}.`,
+      );
+    }
+    return { id: createdId };
+  };
+
   const persistResolvedNewContact = async (
     sessionId: number,
     batchId: number,
@@ -427,6 +564,9 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
                   email: true,
                   phone: true,
                   ghlContactId: true,
+                  syncState: {
+                    select: { desiredVersion: true },
+                  },
                 },
               },
             },
@@ -437,7 +577,13 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
     verifyApprovedContact: (ghlContactId, clientId) =>
       verifyApprovedContact(db, ghlContactId, clientId),
 
-    async resolveNewContact(input, { sessionId, batchId, clientId, savedGhlContactId }) {
+    async resolveNewContact(input, {
+      sessionId,
+      batchId,
+      clientId,
+      savedGhlContactId,
+      expectedVersion,
+    }) {
       const [loadedSession, loadedClient] = await Promise.all([
         db.demoSession.findUniqueOrThrow({
           where: { id: sessionId },
@@ -496,6 +642,9 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
       }
 
       if (persistedContactId || savedGhlContactId) {
+        if (coordinatorEnabled() && persistedContactId) {
+          await verifyApprovedContact(db, persistedContactId, clientId);
+        }
         throw new ContactNeedsReviewError(
           "identity_conflict",
           "This customer already has a saved GHL contact. Review the customer decision instead of creating or reusing another contact.",
@@ -525,6 +674,15 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
         throw new ContactNeedsReviewError(
           "missing_identifier",
           "This customer has no usable email or phone number to create a GHL contact.",
+        );
+      }
+
+      if (coordinatorEnabled()) {
+        return createCoordinatedContact(
+          input,
+          { sessionId, batchId, clientId, expectedVersion },
+          email,
+          phone,
         );
       }
 

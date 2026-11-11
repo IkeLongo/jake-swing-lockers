@@ -221,14 +221,14 @@ export async function reserveContactCreation(
  */
 export async function reserveStagedContactCreation(
   db: PrismaClient,
-  input: { golfClientId: number; sessionId: number; batchId: number; expectedVersion?: number },
+  input: { golfClientId: number; sessionId: number; batchId: number; expectedVersion?: number | null },
 ): Promise<ReservationResult> {
   const { golfClientId, sessionId, batchId, expectedVersion } = input;
   assertId(golfClientId);
   assertId(sessionId);
   assertId(batchId);
   if (
-    expectedVersion !== undefined &&
+    expectedVersion !== undefined && expectedVersion !== null &&
     (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
   ) throw new RangeError("Invalid expected version.");
 
@@ -248,6 +248,10 @@ export async function reserveStagedContactCreation(
       return { status: "blocked", reason: "session_state_unresolved" };
     }
 
+    const stateWasMissing = row.state === null;
+    if (expectedVersion === null && !stateWasMissing) {
+      return { status: "blocked", reason: "version_changed" };
+    }
     let state = row.state;
     if (!state) {
       state = await tx.golfClientSyncState.create({
@@ -260,7 +264,7 @@ export async function reserveStagedContactCreation(
       state.claimedVersion !== null ||
       state.leaseExpiresAt !== null
     ) return { status: "blocked", reason: "work_not_available" };
-    if (expectedVersion !== undefined && state.desiredVersion !== expectedVersion) {
+    if (expectedVersion !== undefined && expectedVersion !== null && state.desiredVersion !== expectedVersion) {
       return { status: "blocked", reason: "version_changed" };
     }
     if (

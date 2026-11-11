@@ -219,6 +219,7 @@ describe("customer contact creation coordinator MySQL integration", { skip }, ()
       golfClientId: client.id,
       sessionId: session.id,
       batchId: 77,
+      expectedVersion: null,
     });
     assert.equal(reserved.status, "reserved");
     if (reserved.status !== "reserved") return;
@@ -252,6 +253,24 @@ describe("customer contact creation coordinator MySQL integration", { skip }, ()
     assert.equal(resolved.contact.status, "resolved");
     assert.equal(resolved.contact.contactId, contactId);
     assert.equal(resolved.contact.attemptId, reserved.attempt.id);
+  });
+
+  test("staged reservation rejects a sync row that appeared after the caller observed no row", async () => {
+    const client = await fixture();
+    const session = await stagedSession(client.id);
+    const result = await reserveStagedContactCreation(db, {
+      golfClientId: client.id,
+      sessionId: session.id,
+      batchId: 78,
+      expectedVersion: null,
+    });
+    assert.deepEqual(result, { status: "blocked", reason: "version_changed" });
+    assert.equal((await db.golfClientSyncState.findUniqueOrThrow({
+      where: { golfClientId: client.id },
+    })).creationAttemptId, null);
+    assert.equal((await db.demoSession.findUniqueOrThrow({
+      where: { id: session.id },
+    })).ghlSyncState, null);
   });
 
   test("legacy claims, active worker claims, and uncertain staged outcomes remain blocked", async () => {
