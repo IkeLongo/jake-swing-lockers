@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { Prisma } from "../app/generated/prisma/client";
 import {
   acknowledgeContactCreation,
   markContactCreationUncertain,
   rejectContactCreation,
   reserveContactCreation,
+  reserveStagedContactCreation,
   type ContactCreationAttempt,
 } from "../lib/ghl/customerContactCreationCoordinator";
 
 type Client = { ghlContactId: string | null; ghlContactCreationState: unknown };
+interface Session {
+  id: number;
+  clientId: number;
+  ghlSyncState: unknown;
+  ghlSyncStatus: string | null;
+  ghlSyncError: string | null;
+}
 interface State {
   desiredVersion: number;
   syncedVersion: number;
@@ -26,7 +35,13 @@ interface State {
   lastError: string | null;
 }
 
-function harness(over: { client?: Partial<Client>; state?: Partial<State> } = {}) {
+function harness(over: {
+  client?: Partial<Client>;
+  state?: Partial<State>;
+  missingState?: boolean;
+  sessions?: Session[];
+  failSessionWrite?: boolean;
+} = {}) {
   let client: Client = { ghlContactId: null, ghlContactCreationState: null, ...over.client };
   let state: State = {
     desiredVersion: 1, syncedVersion: 0, workStatus: "pending",
@@ -36,9 +51,15 @@ function harness(over: { client?: Partial<Client>; state?: Partial<State> } = {}
     nextAttemptAt: null, lastErrorCode: null, lastError: null,
     ...over.state,
   };
+  let stateExists = !over.missingState;
+  let sessions = new Map((over.sessions ?? [
+    { id: 10, clientId: 1, ghlSyncState: null, ghlSyncStatus: null, ghlSyncError: null },
+    { id: 11, clientId: 1, ghlSyncState: null, ghlSyncStatus: null, ghlSyncError: null },
+  ]).map((session) => [session.id, { ...session }]));
   let tail = Promise.resolve();
   let now = 1000;
   let failCustomerWrite = false;
+  let failSessionWrite = over.failSessionWrite ?? false;
   let expireAtFinalCheck = false;
   const statements: string[][] = [];
   const db = {
@@ -49,6 +70,8 @@ function harness(over: { client?: Partial<Client>; state?: Partial<State> } = {}
       await previous;
       let currentClient = { ...client };
       const currentState = { ...state };
+      let currentStateExists = stateExists;
+      const currentSessions = new Map([...sessions].map(([id, session]) => [id, { ...session }]));
       const sql: string[] = [];
       statements.push(sql);
       const tx = {
@@ -62,6 +85,13 @@ function harness(over: { client?: Partial<Client>; state?: Partial<State> } = {}
                 currentState.claimToken === values[1] && currentState.claimedVersion === values[2] &&
                 currentState.leaseExpiresAt !== null && currentState.leaseExpiresAt > now),
             }];
+          }
+          if (query.includes("FROM GolfClientSyncState")) {
+            return currentStateExists ? [{ golfClientId: 1 }] : [];
+          }
+          if (query.includes("FROM DemoSession")) {
+            const session = currentSessions.get(Number(values[0]));
+            return session ? [{ id: session.id }] : [];
           }
           return [{ id: 1, golfClientId: 1 }];
         },
@@ -81,10 +111,34 @@ function harness(over: { client?: Partial<Client>; state?: Partial<State> } = {}
         },
         golfClientSyncState: {
           async findUniqueOrThrow() { return { ...currentState }; },
+          async create(args: { data: Partial<State> & { golfClientId: number } }) {
+            Object.assign(currentState, args.data);
+            currentStateExists = true;
+            return { ...currentState };
+          },
+        },
+        demoSession: {
+          async findUniqueOrThrow(args: { where: { id: number } }) {
+            const session = currentSessions.get(args.where.id);
+            if (!session) throw new Error("session not found");
+            return { ...session };
+          },
+          async update(args: {
+            where: { id: number };
+            data: Partial<Session> & { ghlSyncState?: unknown };
+          }) {
+            if (failSessionWrite) throw new Error("session write failed");
+            const session = currentSessions.get(args.where.id);
+            if (!session) throw new Error("session not found");
+            Object.assign(session, args.data);
+            if (args.data.ghlSyncState === Prisma.DbNull) session.ghlSyncState = null;
+            return session;
+          },
         },
         async $executeRaw(parts: TemplateStringsArray, ...values: (string | number | boolean | null)[]) {
           const query = parts.join("?");
           sql.push(query);
+          if (!currentStateExists) return 0;
           if (query.includes("SET claimToken = NULL")) {
             if (expireAtFinalCheck && currentState.leaseExpiresAt !== null) now = currentState.leaseExpiresAt;
             const [, status, token, version] = values;
@@ -135,6 +189,8 @@ function harness(over: { client?: Partial<Client>; state?: Partial<State> } = {}
         const result = await callback(tx as never);
         client = currentClient;
         state = currentState;
+        stateExists = currentStateExists;
+        sessions = currentSessions;
         return result;
       } finally { release(); }
     },
@@ -143,10 +199,13 @@ function harness(over: { client?: Partial<Client>; state?: Partial<State> } = {}
     db: db as never,
     get client() { return client; },
     get state() { return state; },
+    get stateExists() { return stateExists; },
+    get sessions() { return sessions; },
     statements,
     advance(ms: number) { now += ms; },
     setState(patch: Partial<State>) { state = { ...state, ...patch }; },
     failCustomerWrite(value: boolean) { failCustomerWrite = value; },
+    failSessionWrite(value: boolean) { failSessionWrite = value; },
     expireOnFinalCheck() { expireAtFinalCheck = true; },
   };
 }
@@ -291,4 +350,190 @@ test("reservation and acknowledgement roll back if updating the customer fails",
   await assert.rejects(acknowledgeContactCreation(h.db, attempt, "contact-1"), /customer write failed/);
   assert.equal(h.state.creationAttemptId, attempt.id);
   assert.ok(h.client.ghlContactCreationState);
+});
+
+test("staged reservations serialize different sessions and lock customer, sync state, then session", async () => {
+  const h = harness();
+  const results = await Promise.all([
+    reserveStagedContactCreation(h.db, { golfClientId: 1, sessionId: 10, batchId: 20 }),
+    reserveStagedContactCreation(h.db, { golfClientId: 1, sessionId: 11, batchId: 21 }),
+  ]);
+  assert.deepEqual(results.map((result) => result.status), ["reserved", "blocked"]);
+  const reserved = results.find((result) => result.status === "reserved");
+  assert.ok(reserved?.status === "reserved");
+  assert.deepEqual(reserved.attempt.owner, { kind: "staged", sessionId: 10, batchId: 20 });
+  assert.equal(h.sessions.get(10)?.ghlSyncState && (h.sessions.get(10)?.ghlSyncState as { contact?: { attemptId: string } }).contact?.attemptId, reserved.attempt.id);
+  assert.equal(h.sessions.get(11)?.ghlSyncState, null);
+  const reservedTransaction = h.statements.find((sql) =>
+    sql.some((query) => query.includes("FROM DemoSession")),
+  );
+  assert.ok(reservedTransaction);
+  assert.match(reservedTransaction[0]!, /FROM GolfClient WHERE/);
+  assert.match(reservedTransaction[1]!, /FROM GolfClientSyncState WHERE/);
+  assert.match(reservedTransaction[2]!, /FROM DemoSession WHERE/);
+});
+
+test("staged reservation initializes missing state but legacy claims and worker ownership block it", async () => {
+  const missing = harness({ missingState: true });
+  const result = await reserveStagedContactCreation(missing.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  });
+  assert.equal(result.status, "reserved");
+  assert.equal(missing.stateExists, true);
+  assert.equal(missing.state.desiredVersion, 1);
+  assert.equal(missing.state.creationAttemptStatus, "started");
+
+  const legacy = harness({
+    client: { ghlContactCreationState: { version: 1, status: "creating", sessionId: 10, batchId: 20, attemptedAt: "now" } },
+    missingState: true,
+  });
+  assert.deepEqual(await reserveStagedContactCreation(legacy.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  }), { status: "blocked", reason: "attempt_unresolved" });
+  assert.equal(legacy.stateExists, false);
+
+  for (const leaseExpiresAt of [2000, 999]) {
+    const workerOwned = harness({
+      state: {
+        workStatus: "processing",
+        claimToken: randomUUID(),
+        claimedVersion: 1,
+        leaseExpiresAt,
+      },
+    });
+    assert.deepEqual(await reserveStagedContactCreation(workerOwned.db, {
+      golfClientId: 1,
+      sessionId: 10,
+      batchId: 20,
+    }), { status: "blocked", reason: "work_not_available" });
+  }
+
+  const token = randomUUID();
+  const workerAttempt = harness({
+    state: {
+      workStatus: "processing",
+      claimToken: token,
+      claimedVersion: 1,
+      leaseExpiresAt: 2000,
+    },
+  });
+  const workerReservation = await reserveContactCreation(workerAttempt.db, {
+    golfClientId: 1,
+    expectedVersion: 1,
+    workerClaim: { golfClientId: 1, token, version: 1 },
+  });
+  assert.equal(workerReservation.status, "reserved");
+  assert.deepEqual(await reserveStagedContactCreation(workerAttempt.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  }), { status: "blocked", reason: "attempt_unresolved" });
+});
+
+test("staged acknowledgement atomically links and resolves without losing newer version or opportunity", async () => {
+  const opportunity = {
+    status: "creating",
+    batchId: 20,
+    contactId: "existing-contact",
+    attemptedAt: "now",
+  };
+  const h = harness({
+    sessions: [
+      { id: 10, clientId: 1, ghlSyncState: { version: 1, opportunity }, ghlSyncStatus: null, ghlSyncError: null },
+    ],
+  });
+  const reserved = await reserveStagedContactCreation(h.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  });
+  assert.equal(reserved.status, "reserved");
+  if (reserved.status !== "reserved") return;
+  h.setState({ desiredVersion: 2 });
+  assert.deepEqual(await acknowledgeContactCreation(h.db, reserved.attempt, "contact-staged"), { status: "applied" });
+  assert.equal(h.client.ghlContactId, "contact-staged");
+  assert.equal(h.state.desiredVersion, 2);
+  assert.equal(h.state.syncedVersion, 0);
+  assert.equal(h.state.workStatus, "pending");
+  assert.equal(h.state.creationAttemptId, null);
+  const sessionState = h.sessions.get(10)?.ghlSyncState as {
+    opportunity: typeof opportunity;
+    contact: { status: string; contactId: string; attemptId: string };
+  };
+  assert.deepEqual(sessionState.opportunity, opportunity);
+  assert.equal(sessionState.contact.status, "resolved");
+  assert.equal(sessionState.contact.contactId, "contact-staged");
+  assert.equal(sessionState.contact.attemptId, reserved.attempt.id);
+});
+
+test("staged transitions fence stale owners and keep rejection or uncertainty consistent", async () => {
+  const rejected = harness();
+  const first = await reserveStagedContactCreation(rejected.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  });
+  assert.equal(first.status, "reserved");
+  if (first.status !== "reserved") return;
+  assert.equal((await acknowledgeContactCreation(rejected.db, {
+    ...first.attempt,
+    owner: { kind: "staged", sessionId: 11, batchId: 21 },
+  }, "stale-contact")).status, "lost_attempt");
+  assert.equal((await rejectContactCreation(rejected.db, first.attempt, "rejected", "Rejected")).status, "applied");
+  assert.equal(rejected.state.workStatus, "needs_review");
+  assert.equal(rejected.state.creationAttemptId, null);
+  assert.equal(rejected.client.ghlContactCreationState, null);
+  assert.equal(rejected.sessions.get(10)?.ghlSyncState, null);
+
+  const uncertain = harness();
+  const second = await reserveStagedContactCreation(uncertain.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  });
+  assert.equal(second.status, "reserved");
+  if (second.status !== "reserved") return;
+  assert.equal((await markContactCreationUncertain(uncertain.db, second.attempt, "timeout", "Unknown")).status, "applied");
+  assert.equal(uncertain.state.workStatus, "needs_reconciliation");
+  assert.equal(uncertain.state.creationAttemptStatus, "unknown");
+  assert.ok(uncertain.client.ghlContactCreationState);
+  const sessionState = uncertain.sessions.get(10)?.ghlSyncState as { contact: { attemptId: string } };
+  assert.equal(sessionState.contact.attemptId, second.attempt.id);
+});
+
+test("staged reservation and completion roll back together when either record write fails", async () => {
+  const reserveFailure = harness({ failSessionWrite: true });
+  await assert.rejects(reserveStagedContactCreation(reserveFailure.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  }), /session write failed/);
+  assert.equal(reserveFailure.state.creationAttemptId, null);
+  assert.equal(reserveFailure.client.ghlContactCreationState, null);
+  assert.equal(reserveFailure.sessions.get(10)?.ghlSyncState, null);
+
+  const completionFailure = harness();
+  const reserved = await reserveStagedContactCreation(completionFailure.db, {
+    golfClientId: 1,
+    sessionId: 10,
+    batchId: 20,
+  });
+  assert.equal(reserved.status, "reserved");
+  if (reserved.status !== "reserved") return;
+  completionFailure.failSessionWrite(true);
+  await assert.rejects(
+    acknowledgeContactCreation(completionFailure.db, reserved.attempt, "contact-staged"),
+    /session write failed/,
+  );
+  assert.equal(completionFailure.client.ghlContactId, null);
+  assert.equal(completionFailure.state.creationAttemptId, reserved.attempt.id);
+  assert.ok(completionFailure.client.ghlContactCreationState);
+  assert.equal(
+    (completionFailure.sessions.get(10)?.ghlSyncState as { contact: { status: string } }).contact.status,
+    "creating",
+  );
 });

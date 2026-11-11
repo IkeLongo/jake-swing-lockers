@@ -6,6 +6,7 @@ import {
   markContactCreationUncertain,
   rejectContactCreation,
   reserveContactCreation,
+  reserveStagedContactCreation,
   type ContactCreationAttempt,
 } from "../lib/ghl/customerContactCreationCoordinator";
 import { enqueueCustomerSync } from "../lib/ghl/customerSyncOutbox";
@@ -25,6 +26,7 @@ describe("customer contact creation coordinator MySQL integration", { skip }, ()
   let db: ReturnType<typeof createCustomerSyncTestClient>;
   let verified = false;
   const fixtureIds: number[] = [];
+  const sessionIds: number[] = [];
 
   before(async () => {
     const config = getCustomerSyncTestDatabaseConfig();
@@ -33,6 +35,9 @@ describe("customer contact creation coordinator MySQL integration", { skip }, ()
     verified = true;
   });
   afterEach(async () => {
+    if (verified && sessionIds.length) {
+      await db.demoSession.deleteMany({ where: { id: { in: sessionIds.splice(0) } } });
+    }
     if (verified && fixtureIds.length) {
       await db.golfClient.deleteMany({ where: { id: { in: fixtureIds.splice(0) } } });
     }
@@ -46,6 +51,17 @@ describe("customer contact creation coordinator MySQL integration", { skip }, ()
     fixtureIds.push(client.id);
     await db.$transaction((tx) => enqueueCustomerSync(tx, { golfClientId: client.id, reason: "created" }));
     return client;
+  }
+  async function stagedSession(clientId: number, ghlSyncState?: object) {
+    const session = await db.demoSession.create({
+      data: {
+        clientId,
+        lockerToken: `coordinator-${randomUUID()}`,
+        ...(ghlSyncState ? { ghlSyncState } : {}),
+      },
+    });
+    sessionIds.push(session.id);
+    return session;
   }
   async function reserve(id: number): Promise<ContactCreationAttempt> {
     const result = await reserveContactCreation(db, { golfClientId: id, expectedVersion: 1 });
@@ -151,5 +167,211 @@ describe("customer contact creation coordinator MySQL integration", { skip }, ()
     await db.$executeRaw`UPDATE GolfClientSyncState SET leaseExpiresAt = DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 1 SECOND) WHERE golfClientId = ${expiredCustomer.id}`;
     assert.equal((await acknowledgeContactCreation(db, pending.attempt, `c-${randomUUID()}`)).status, "lost_attempt");
     assert.equal((await db.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: expiredCustomer.id } })).creationAttemptStatus, "started");
+  });
+
+  test("staged reservations for different sessions share one customer-scoped attempt", async () => {
+    const customer = await fixture();
+    const firstSession = await stagedSession(customer.id);
+    const secondSession = await stagedSession(customer.id);
+    const results = await Promise.all([
+      reserveStagedContactCreation(db, {
+        golfClientId: customer.id,
+        sessionId: firstSession.id,
+        batchId: 101,
+      }),
+      reserveStagedContactCreation(db, {
+        golfClientId: customer.id,
+        sessionId: secondSession.id,
+        batchId: 102,
+      }),
+    ]);
+    assert.equal(results.filter((result) => result.status === "reserved").length, 1);
+    assert.equal(results.filter((result) => result.status === "blocked").length, 1);
+    const winner = results.find((result) => result.status === "reserved");
+    assert.ok(winner?.status === "reserved");
+    const persisted = await db.golfClient.findUniqueOrThrow({
+      where: { id: customer.id },
+      include: { syncState: true },
+    });
+    assert.equal(persisted.syncState?.creationAttemptId, winner.attempt.id);
+    assert.equal(persisted.syncState?.creationAttemptStatus, "started");
+    const winnerSessionId = winner.attempt.owner?.sessionId;
+    const winnerSession = await db.demoSession.findUniqueOrThrow({ where: { id: winnerSessionId } });
+    const loserSessionId = winnerSessionId === firstSession.id ? secondSession.id : firstSession.id;
+    const loserSession = await db.demoSession.findUniqueOrThrow({ where: { id: loserSessionId } });
+    assert.equal((winnerSession.ghlSyncState as { contact: { attemptId: string } }).contact.attemptId, winner.attempt.id);
+    assert.equal(loserSession.ghlSyncState, null);
+  });
+
+  test("staged reservation initializes missing sync state and preserves opportunity data on acknowledgement", async () => {
+    const client = await db.golfClient.create({
+      data: { firstName: "Legacy", email: `legacy-${randomUUID()}@example.test` },
+    });
+    fixtureIds.push(client.id);
+    const opportunity = {
+      status: "creating",
+      batchId: 77,
+      contactId: "opportunity-contact",
+      attemptedAt: "preserve",
+    };
+    const session = await stagedSession(client.id, { version: 1, opportunity });
+    const reserved = await reserveStagedContactCreation(db, {
+      golfClientId: client.id,
+      sessionId: session.id,
+      batchId: 77,
+    });
+    assert.equal(reserved.status, "reserved");
+    if (reserved.status !== "reserved") return;
+    const afterReserve = await db.golfClientSyncState.findUniqueOrThrow({
+      where: { golfClientId: client.id },
+    });
+    assert.equal(afterReserve.desiredVersion, 1);
+    assert.equal(afterReserve.creationAttemptId, reserved.attempt.id);
+
+    await db.golfClientSyncState.update({
+      where: { golfClientId: client.id },
+      data: { desiredVersion: 2 },
+    });
+    const contactId = `c-${randomUUID()}`;
+    assert.equal((await acknowledgeContactCreation(db, reserved.attempt, contactId)).status, "applied");
+    const [linked, syncState, resolvedSession] = await Promise.all([
+      db.golfClient.findUniqueOrThrow({ where: { id: client.id } }),
+      db.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: client.id } }),
+      db.demoSession.findUniqueOrThrow({ where: { id: session.id } }),
+    ]);
+    assert.equal(linked.ghlContactId, contactId);
+    assert.equal(syncState.desiredVersion, 2);
+    assert.equal(syncState.syncedVersion, 0);
+    assert.equal(syncState.workStatus, "pending");
+    assert.equal(syncState.creationAttemptId, null);
+    const resolved = resolvedSession.ghlSyncState as {
+      opportunity: typeof opportunity;
+      contact: { status: string; contactId: string; attemptId: string };
+    };
+    assert.deepEqual(resolved.opportunity, opportunity);
+    assert.equal(resolved.contact.status, "resolved");
+    assert.equal(resolved.contact.contactId, contactId);
+    assert.equal(resolved.contact.attemptId, reserved.attempt.id);
+  });
+
+  test("legacy claims, active worker claims, and uncertain staged outcomes remain blocked", async () => {
+    const legacy = await fixture();
+    const legacySession = await stagedSession(legacy.id);
+    await db.golfClient.update({
+      where: { id: legacy.id },
+      data: {
+        ghlContactCreationState: {
+          version: 1,
+          status: "creating",
+          sessionId: legacySession.id,
+          batchId: 1,
+          attemptedAt: new Date().toISOString(),
+        },
+      },
+    });
+    assert.equal((await reserveStagedContactCreation(db, {
+      golfClientId: legacy.id,
+      sessionId: legacySession.id,
+      batchId: 1,
+    })).status, "blocked");
+
+    const worker = await fixture();
+    const workerClaim = await claimCustomerSync(db, worker.id, 60_000);
+    assert.equal(workerClaim.status, "claimed");
+    if (workerClaim.status !== "claimed") return;
+    const workerSession = await stagedSession(worker.id);
+    const workerAttempt = await reserveContactCreation(db, {
+      golfClientId: worker.id,
+      expectedVersion: 1,
+      workerClaim: workerClaim.claim,
+    });
+    assert.equal(workerAttempt.status, "reserved");
+    assert.equal((await reserveStagedContactCreation(db, {
+      golfClientId: worker.id,
+      sessionId: workerSession.id,
+      batchId: 2,
+    })).status, "blocked");
+
+    const uncertain = await fixture();
+    const uncertainSession = await stagedSession(uncertain.id);
+    const rejected = await fixture();
+    const rejectedSession = await stagedSession(rejected.id, {
+      version: 1,
+      opportunity: {
+        status: "creating",
+        batchId: 3,
+        contactId: "keep-opportunity",
+        attemptedAt: "preserve",
+      },
+    });
+    const rejectedAttempt = await reserveStagedContactCreation(db, {
+      golfClientId: rejected.id,
+      sessionId: rejectedSession.id,
+      batchId: 3,
+    });
+    assert.equal(rejectedAttempt.status, "reserved");
+    if (rejectedAttempt.status !== "reserved") return;
+    assert.equal((await rejectContactCreation(db, rejectedAttempt.attempt, "rejected", "Rejected")).status, "applied");
+    const rejectedState = (await db.demoSession.findUniqueOrThrow({
+      where: { id: rejectedSession.id },
+    })).ghlSyncState as { opportunity: { contactId: string }; contact?: unknown };
+    assert.equal(rejectedState.opportunity.contactId, "keep-opportunity");
+    assert.equal(rejectedState.contact, undefined);
+
+    const attempt = await reserveStagedContactCreation(db, {
+      golfClientId: uncertain.id,
+      sessionId: uncertainSession.id,
+      batchId: 3,
+    });
+    assert.equal(attempt.status, "reserved");
+    if (attempt.status !== "reserved") return;
+    assert.equal((await markContactCreationUncertain(db, attempt.attempt, "timeout", "Unknown")).status, "applied");
+    assert.equal((await reserveStagedContactCreation(db, {
+      golfClientId: uncertain.id,
+      sessionId: uncertainSession.id,
+      batchId: 3,
+    })).status, "blocked");
+    const [syncState, staged] = await Promise.all([
+      db.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: uncertain.id } }),
+      db.demoSession.findUniqueOrThrow({ where: { id: uncertainSession.id } }),
+    ]);
+    assert.equal(syncState.creationAttemptStatus, "unknown");
+    assert.equal((staged.ghlSyncState as { contact: { attemptId: string } }).contact.attemptId, attempt.attempt.id);
+  });
+
+  test("staged acknowledgement rolls back customer and session changes on contact ownership conflict", async () => {
+    const customer = await fixture();
+    const session = await stagedSession(customer.id);
+    const reserved = await reserveStagedContactCreation(db, {
+      golfClientId: customer.id,
+      sessionId: session.id,
+      batchId: 9,
+    });
+    assert.equal(reserved.status, "reserved");
+    if (reserved.status !== "reserved") return;
+    assert.equal((await acknowledgeContactCreation(db, {
+      ...reserved.attempt,
+      owner: { kind: "staged", sessionId: session.id + 1, batchId: 10 },
+    }, `c-${randomUUID()}`)).status, "lost_attempt");
+
+    const existingOwner = await fixture();
+    const contactId = `c-${randomUUID()}`;
+    await db.golfClient.update({
+      where: { id: existingOwner.id },
+      data: { ghlContactId: contactId },
+    });
+    assert.equal((await acknowledgeContactCreation(db, reserved.attempt, contactId)).status, "contact_conflict");
+
+    const [persistedCustomer, state, persistedSession] = await Promise.all([
+      db.golfClient.findUniqueOrThrow({ where: { id: customer.id } }),
+      db.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: customer.id } }),
+      db.demoSession.findUniqueOrThrow({ where: { id: session.id } }),
+    ]);
+    assert.equal(persistedCustomer.ghlContactId, null);
+    assert.ok(persistedCustomer.ghlContactCreationState);
+    assert.equal(state.creationAttemptId, reserved.attempt.id);
+    assert.equal(state.creationAttemptStatus, "started");
+    assert.equal((persistedSession.ghlSyncState as { contact: { status: string; attemptId: string } }).contact.status, "creating");
+    assert.equal((persistedSession.ghlSyncState as { contact: { attemptId: string } }).contact.attemptId, reserved.attempt.id);
   });
 });

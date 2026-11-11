@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:purchase-request-v1": "tsx --test tests/purchase-request-v1.test.ts",
+    "test:customer-sync-integration": "node --import tsx --test --test-concurrency=1 tests/customer-contact-creation-coordinator.integration.test.ts tests/customer-sync-outbox.integration.test.ts tests/customer-sync-worker-state.integration.test.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

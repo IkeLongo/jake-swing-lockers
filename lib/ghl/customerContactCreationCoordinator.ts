@@ -5,12 +5,20 @@ import { isValidGhlContactId } from "@/lib/imports/ghl-contact-approval";
 
 type Owner =
   | { kind: "worker"; token: string; version: number }
+  | { kind: "staged"; sessionId: number; batchId: number }
   | { kind: "standalone" };
+
+export interface StagedContactCreationOwner {
+  kind: "staged";
+  sessionId: number;
+  batchId: number;
+}
 
 export interface ContactCreationAttempt {
   golfClientId: number;
   id: string;
   version: number;
+  owner?: StagedContactCreationOwner;
 }
 
 export type ReservationResult =
@@ -32,6 +40,12 @@ interface Marker {
   owner: Owner;
 }
 
+interface StagedSession {
+  id: number;
+  clientId: number;
+  ghlSyncState: PrismaTypes.JsonValue | null;
+}
+
 const OPTIONS = { maxWait: 10_000, timeout: 30_000 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -44,6 +58,11 @@ function assertAttempt(attempt: ContactCreationAttempt): void {
   if (!UUID.test(attempt.id) || !Number.isSafeInteger(attempt.version) || attempt.version < 1) {
     throw new Error("Invalid contact creation attempt.");
   }
+  if (attempt.owner && (
+    attempt.owner.kind !== "staged" ||
+    !Number.isSafeInteger(attempt.owner.sessionId) || attempt.owner.sessionId < 1 ||
+    !Number.isSafeInteger(attempt.owner.batchId) || attempt.owner.batchId < 1
+  )) throw new Error("Invalid staged contact creation owner.");
 }
 
 function markerFor(value: PrismaTypes.JsonValue | null): Marker | null {
@@ -65,7 +84,31 @@ function markerFor(value: PrismaTypes.JsonValue | null): Marker | null {
   ) {
     return { version: 2, status: "creating", attemptId: value.attemptId, attemptVersion: value.attemptVersion, owner: { kind: "worker", token: owner.token, version: owner.version } };
   }
+  if (
+    owner.kind === "staged" &&
+    typeof owner.sessionId === "number" &&
+    Number.isSafeInteger(owner.sessionId) && owner.sessionId > 0 &&
+    typeof owner.batchId === "number" &&
+    Number.isSafeInteger(owner.batchId) && owner.batchId > 0
+  ) {
+    return {
+      version: 2,
+      status: "creating",
+      attemptId: value.attemptId,
+      attemptVersion: value.attemptVersion,
+      owner: { kind: "staged", sessionId: owner.sessionId, batchId: owner.batchId },
+    };
+  }
   return null;
+}
+
+function stagedSessionState(value: PrismaTypes.JsonValue | null): PrismaTypes.InputJsonObject | null {
+  if (value === null) return { version: 1 };
+  if (
+    typeof value !== "object" || Array.isArray(value) ||
+    value.version !== 1
+  ) return null;
+  return value as PrismaTypes.InputJsonObject;
 }
 
 async function lockRows(tx: PrismaTypes.TransactionClient, id: number) {
@@ -83,6 +126,22 @@ async function lockRows(tx: PrismaTypes.TransactionClient, id: number) {
   if (!states.length) return { client, state: null };
   const state = await tx.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: id } });
   return { client, state };
+}
+
+async function lockStagedSession(
+  tx: PrismaTypes.TransactionClient,
+  golfClientId: number,
+  sessionId: number,
+): Promise<StagedSession | null> {
+  const rows = await tx.$queryRaw<Array<{ id: number }>>`
+    SELECT id FROM DemoSession WHERE id = ${sessionId} FOR UPDATE
+  `;
+  if (!rows.length) return null;
+  const session = await tx.demoSession.findUniqueOrThrow({
+    where: { id: sessionId },
+    select: { id: true, clientId: true, ghlSyncState: true },
+  });
+  return session.clientId === golfClientId ? session : null;
 }
 
 function hasAttempt(state: NonNullable<Awaited<ReturnType<typeof lockRows>>>["state"]): boolean {
@@ -155,6 +214,112 @@ export async function reserveContactCreation(
   }, OPTIONS);
 }
 
+/**
+ * Reserves a staged attempt together with its DemoSession marker. The customer,
+ * sync-state, and session locks are acquired in that order; no network work is
+ * performed in this transaction.
+ */
+export async function reserveStagedContactCreation(
+  db: PrismaClient,
+  input: { golfClientId: number; sessionId: number; batchId: number; expectedVersion?: number },
+): Promise<ReservationResult> {
+  const { golfClientId, sessionId, batchId, expectedVersion } = input;
+  assertId(golfClientId);
+  assertId(sessionId);
+  assertId(batchId);
+  if (
+    expectedVersion !== undefined &&
+    (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+  ) throw new RangeError("Invalid expected version.");
+
+  return db.$transaction(async (tx) => {
+    const row = await lockRows(tx, golfClientId);
+    if (!row) return { status: "blocked", reason: "customer_missing" };
+    const { client } = row;
+    if (client.ghlContactCreationState !== null || hasAttempt(row.state)) {
+      return { status: "blocked", reason: "attempt_unresolved" };
+    }
+    if (client.ghlContactId !== null) return { status: "linked", contactId: client.ghlContactId };
+
+    const session = await lockStagedSession(tx, golfClientId, sessionId);
+    if (!session) return { status: "blocked", reason: "session_customer_mismatch" };
+    const sessionState = stagedSessionState(session.ghlSyncState);
+    if (!sessionState || sessionState.contact !== undefined) {
+      return { status: "blocked", reason: "session_state_unresolved" };
+    }
+
+    let state = row.state;
+    if (!state) {
+      state = await tx.golfClientSyncState.create({
+        data: { golfClientId },
+      });
+    }
+    if (
+      state.workStatus !== "pending" ||
+      state.claimToken !== null ||
+      state.claimedVersion !== null ||
+      state.leaseExpiresAt !== null
+    ) return { status: "blocked", reason: "work_not_available" };
+    if (expectedVersion !== undefined && state.desiredVersion !== expectedVersion) {
+      return { status: "blocked", reason: "version_changed" };
+    }
+    if (
+      !Number.isSafeInteger(state.desiredVersion) || state.desiredVersion < 1 ||
+      !Number.isSafeInteger(state.syncedVersion) || state.syncedVersion < 0 ||
+      state.syncedVersion > state.desiredVersion
+    ) {
+      return { status: "blocked", reason: "invalid_sync_version" };
+    }
+
+    const id = randomUUID();
+    const attempt: ContactCreationAttempt = {
+      golfClientId,
+      id,
+      version: state.desiredVersion,
+      owner: { kind: "staged", sessionId, batchId },
+    };
+    const marker: PrismaTypes.InputJsonObject = {
+      version: 2,
+      status: "creating",
+      attemptId: id,
+      attemptVersion: state.desiredVersion,
+      owner: { kind: "staged", sessionId, batchId },
+    };
+    const attemptedAt = new Date().toISOString();
+    const updated = await tx.$executeRaw`
+      UPDATE GolfClientSyncState SET creationAttemptId = ${id},
+        creationAttemptVersion = ${state.desiredVersion}, creationAttemptStatus = 'started',
+        creationAttemptedAt = CURRENT_TIMESTAMP(3), updatedAt = CURRENT_TIMESTAMP(3)
+      WHERE golfClientId = ${golfClientId} AND workStatus = 'pending'
+        AND desiredVersion = ${state.desiredVersion}
+        AND claimToken IS NULL AND claimedVersion IS NULL AND leaseExpiresAt IS NULL
+    `;
+    if (updated !== 1) return { status: "blocked", reason: "work_not_available" };
+    await tx.golfClient.update({
+      where: { id: golfClientId },
+      data: { ghlContactCreationState: marker },
+    });
+    await tx.demoSession.update({
+      where: { id: sessionId },
+      data: {
+        ghlSyncState: {
+          ...sessionState,
+          contact: {
+            status: "creating",
+            batchId,
+            clientId: golfClientId,
+            attemptId: id,
+            attemptedAt,
+          },
+        },
+        ghlSyncStatus: "failed",
+        ghlSyncError: `GHL contact creation attempt ${id} is reserved for batch ${batchId}; reconcile before retrying.`,
+      },
+    });
+    return { status: "reserved", attempt };
+  }, OPTIONS);
+}
+
 class LostAttemptError extends Error {}
 
 type Outcome =
@@ -186,12 +351,39 @@ async function transitionAttempt(
         state.creationAttemptStatus !== "started" || state.creationAttemptedAt === null
       ) return { status: "lost_attempt" };
       if (row.client.ghlContactId !== null) return { status: "contact_conflict" };
+      if (marker.owner.kind === "staged") {
+        if (
+          attempt.owner?.kind !== "staged" ||
+          attempt.owner.sessionId !== marker.owner.sessionId ||
+          attempt.owner.batchId !== marker.owner.batchId
+        ) return { status: "lost_attempt" };
+        const session = await lockStagedSession(tx, attempt.golfClientId, marker.owner.sessionId);
+        const sessionState = session && stagedSessionState(session.ghlSyncState);
+        const sessionContact = sessionState?.contact;
+        if (!session || !sessionState ||
+          typeof sessionContact !== "object" || sessionContact === null ||
+          Array.isArray(sessionContact)) return { status: "lost_attempt" };
+        const contact = sessionContact as PrismaTypes.JsonObject;
+        if (
+          contact.status !== "creating" ||
+          contact.clientId !== attempt.golfClientId ||
+          contact.batchId !== marker.owner.batchId ||
+          contact.attemptId !== attempt.id
+        ) return { status: "lost_attempt" };
+      } else if (attempt.owner) {
+        return { status: "lost_attempt" };
+      }
       if (marker.owner.kind === "standalone" && (
         state.workStatus !== "pending" || state.claimToken !== null ||
         state.claimedVersion !== null || state.leaseExpiresAt !== null
       )) return { status: "lost_attempt" };
+      if (marker.owner.kind === "staged" && (
+        state.workStatus !== "pending" || state.claimToken !== null ||
+        state.claimedVersion !== null || state.leaseExpiresAt !== null
+      )) return { status: "lost_attempt" };
 
-      const profileChanged = outcome.kind === "acknowledged" && state.desiredVersion !== attempt.version;
+      const profileChanged = marker.owner.kind !== "staged" &&
+        outcome.kind === "acknowledged" && state.desiredVersion !== attempt.version;
       const effectiveOutcome: Outcome = profileChanged
         ? { kind: "uncertain", code: "profile_changed", message: "The customer profile changed during contact creation. Reconcile the created contact before linking it." }
         : outcome;
@@ -236,6 +428,49 @@ async function transitionAttempt(
           data: {
             ghlContactCreationState: Prisma.DbNull,
             ...(effectiveOutcome.kind === "acknowledged" ? { ghlContactId: effectiveOutcome.contactId } : {}),
+          },
+        });
+      }
+      if (owner.kind === "staged") {
+        const session = await tx.demoSession.findUniqueOrThrow({
+          where: { id: owner.sessionId },
+          select: { ghlSyncState: true },
+        });
+        const sessionState = stagedSessionState(session.ghlSyncState);
+        if (!sessionState) throw new LostAttemptError();
+        const nextState: PrismaTypes.InputJsonObject = effectiveOutcome.kind === "acknowledged"
+          ? {
+              ...sessionState,
+              contact: {
+                status: "resolved",
+                batchId: owner.batchId,
+                clientId: attempt.golfClientId,
+                contactId: effectiveOutcome.contactId,
+                attemptId: attempt.id,
+              },
+            }
+          : effectiveOutcome.kind === "rejected"
+            ? Object.fromEntries(Object.entries(sessionState).filter(([key]) => key !== "contact"))
+            : sessionState;
+        await tx.demoSession.update({
+          where: { id: owner.sessionId },
+          data: {
+            ghlSyncState: Object.keys(nextState).length === 1
+              ? Prisma.DbNull
+              : nextState,
+            ...(effectiveOutcome.kind === "acknowledged"
+              ? { ghlSyncStatus: "contact_resolved", ghlSyncError: null }
+              : effectiveOutcome.kind === "rejected"
+                ? {
+                    ghlSyncStatus: nextState.opportunity ? "failed" : null,
+                    ghlSyncError: nextState.opportunity
+                      ? effectiveOutcome.message
+                      : null,
+                  }
+                : {
+                    ghlSyncStatus: "failed",
+                    ghlSyncError: effectiveOutcome.message,
+                  }),
           },
         });
       }
