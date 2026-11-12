@@ -35,13 +35,16 @@ not an automatic repost.
 Vercel Hobby runs `/api/cron/customer-contact-sync` once daily at 09:00 UTC
 (Hobby execution can be delayed by up to 59 minutes). Configure a random
 `CRON_SECRET` of at least 16 characters as a Vercel environment variable and
-redeploy; Vercel supplies it as a Bearer token. The protected job processes at
-most two customers per invocation and stops starting work after 20 seconds. It
-rotates fitting-blocked work behind older unattempted candidates; large backlogs
-can take multiple days. Monitor Vercel logs and the customer sync state for
-review, reconciliation, or accumulated backlog. Cron is a recovery path, not a
-guarantee of immediate delivery. Vercel function usage remains subject to Hobby
-limits.
+redeploy; Vercel supplies it as a Bearer token. The protected job attempts at
+most two customers and one finalized fitting per invocation, scanning at most
+ten fitting candidates. It alternates which category runs first each day and
+stops starting work after 22 seconds (customer attempts stop starting after at
+most seven seconds). Blocked candidates rotate behind older work; fitting
+rotation updates the session's `updatedAt` without changing fitting data or
+claims. Large backlogs can take multiple days. Monitor Vercel logs and sync
+state for review, reconciliation, or accumulated backlog. Cron is a recovery
+path, not a guarantee of immediate delivery. Vercel function usage remains
+subject to Hobby limits.
 
 When this flag is disabled, legacy GolfClient sync and legacy demo sync update
 only an already-linked GHL contact; they no longer create one. An unlinked
@@ -87,9 +90,24 @@ opportunities can only be selected once the customer has a saved GHL contact.
 Otherwise staff can choose a new opportunity and finalize the fitting locally.
 CRM sync remains pending without creating a contact or opportunity until the
 customer contact exists. Once customer sync succeeds, staff can retry CRM sync
-on the Confirm page. The customer recovery cron does not retry fittings.
-Matching an existing remote contact to an unlinked customer requires review;
-it is never linked automatically.
+on the Confirm page; the daily recovery cron also resumes eligible fittings
+automatically. Recovery requires the customer sync state to be current and
+verified for the configured location. It rechecks the saved contact in GHL,
+reuses the recorded opportunity decision, and uses the same fitting claim and
+creation markers as staff sync. Action-required errors, unresolved claims and
+uncertain writes remain blocked for staff review. Fittings with multiple
+finalized import batches are skipped and logged for review rather than choosing
+an opportunity decision arbitrarily. Existing customers without verified sync
+state are not automatically recovered; staff can use the existing fitting sync
+and customer reconciliation procedures. Matching an existing remote contact to
+an unlinked customer requires review; it is never linked automatically.
+
+The finalization screen already attempts CRM sync after the immediate customer
+attempt. Other customer requests do not start an additional fitting sync: doing
+so could exceed their request budget. The cron starts GHL fitting requests with
+five-second timeouts, but a slow database call or Vercel's hard function deadline
+can still interrupt a run. An interrupted claim must be reconciled, not cleared
+or retried blindly.
 
 Previous fitting contact approvals no longer select the contact for normal sync.
 Unresolved claims, creation attempts, or conflicting resolved contact markers

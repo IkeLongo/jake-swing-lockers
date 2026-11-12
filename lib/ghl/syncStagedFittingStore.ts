@@ -7,7 +7,7 @@ import {
   usableEmail,
   usablePhone,
 } from "./resolveStagedContact";
-import { stagedContactApi } from "./stagedContactApi";
+import { createStagedContactApi, stagedContactApi } from "./stagedContactApi";
 import {
   associateApprovedContactInTransaction,
   acknowledgeContactCreation,
@@ -232,15 +232,16 @@ async function verifyApprovedContact(
   db: SyncStoreDb,
   ghlContactId: string,
   clientId: number,
+  api = stagedContactApi,
 ): Promise<void> {
-  const contact = await stagedContactApi.getContact(ghlContactId);
+  const contact = await api.getContact(ghlContactId);
   if (!contact) {
     throw new ContactNeedsReviewError(
       "identity_conflict",
       "The customer's saved GHL contact no longer exists. Staff review is required before syncing.",
     );
   }
-  if (contact.locationId !== stagedContactApi.locationId()) {
+  if (contact.locationId !== api.locationId()) {
     throw new ContactNeedsReviewError(
       "wrong_location",
       "The customer's saved GHL contact does not belong to the configured GHL location.",
@@ -249,7 +250,12 @@ async function verifyApprovedContact(
   await assertContactAvailableToClient(db, clientId, ghlContactId);
 }
 
-export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
+export function createPrismaStagedSyncDeps(
+  db: PrismaClient,
+  options?: { requestTimeoutMs: number },
+): StagedSyncDeps {
+  const requestSignal = options ? () => AbortSignal.timeout(options.requestTimeoutMs) : undefined;
+  const contactApi = options ? createStagedContactApi(requestSignal) : stagedContactApi;
   const coordinatorEnabled = () =>
     process.env.GHL_STAGED_CONTACT_COORDINATOR_ENABLED === "true" ||
     process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED === "true";
@@ -536,6 +542,8 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
               currentClub: true,
               ghlOpportunityId: true,
               ghlSyncStatus: true,
+              ghlSyncError: true,
+              needsRefinalization: true,
               ghlSyncState: true,
               ghlLockerReadyTagAddedAt: true,
               clubTests: {
@@ -561,7 +569,10 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
                   syncState: {
                     select: {
                       desiredVersion: true,
+                      syncedVersion: true,
                       workStatus: true,
+                      contactVerificationStatus: true,
+                      verifiedGhlLocationId: true,
                       creationAttemptId: true,
                       creationAttemptVersion: true,
                       creationAttemptStatus: true,
@@ -576,7 +587,7 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
       }),
 
     verifyApprovedContact: (ghlContactId, clientId) =>
-      verifyApprovedContact(db, ghlContactId, clientId),
+      verifyApprovedContact(db, ghlContactId, clientId, contactApi),
 
     async resolveNewContact(input, {
       sessionId,
@@ -813,8 +824,9 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
       });
     },
 
-    validateOpportunity: validateOpportunitySelection,
-    createOpportunity: createGolfDemoOpportunity,
+    validateOpportunity: (id, contactId) =>
+      validateOpportunitySelection(id, contactId, requestSignal?.()),
+    createOpportunity: (input) => createGolfDemoOpportunity(input, requestSignal?.()),
 
     async ensureOpportunityId(sessionId, batchId, contactId, create) {
       const claimed = await db.$transaction(async (tx) => {
@@ -899,8 +911,9 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
       }
     },
 
-    updateContactCustomFields,
-    addTags: addTagsToContact,
+    updateContactCustomFields: (id, fields) =>
+      updateContactCustomFields(id, fields, requestSignal?.()),
+    addTags: (id, tags) => addTagsToContact(id, tags, requestSignal?.()),
 
     async markTagsAdded(sessionId, lockerUrl) {
       await db.demoSession.update({

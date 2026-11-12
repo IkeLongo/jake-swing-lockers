@@ -338,9 +338,11 @@ interface CustomFieldValue {
 export async function updateContactCustomFields(
   ghlContactId: string,
   fields: CustomFieldValue[],
+  signal?: AbortSignal,
 ): Promise<void> {
   await ghlFetch<unknown>(`/contacts/${encodeURIComponent(ghlContactId)}`, {
     method: "PUT",
     body: JSON.stringify({ customFields: fields }),
+    signal,
   });
 }

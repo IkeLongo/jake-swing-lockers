@@ -119,9 +119,11 @@ export type OpportunitySelectionValidation =
 export async function validateOpportunitySelection(
   opportunityId: string,
   ghlContactId: string,
+  signal?: AbortSignal,
 ): Promise<OpportunitySelectionValidation> {
   const res = await ghlFetch<{ opportunity?: GhlOpportunity | null }>(
     `/opportunities/${encodeURIComponent(opportunityId)}`,
+    { signal },
   ).catch((error: unknown) => {
     if (
       error instanceof Error &&
@@ -172,10 +174,12 @@ export interface OpportunityInput {
 }
 
 export async function createGolfDemoOpportunity(
-  input: OpportunityInput
+  input: OpportunityInput,
+  signal?: AbortSignal,
 ): Promise<string> {
   const res = await ghlFetch<OpportunityCreateResponse>("/opportunities/", {
     method: "POST",
+    signal,
     body: JSON.stringify({
       pipelineId: PIPELINE_ID(),
       locationId: LOCATION_ID(),

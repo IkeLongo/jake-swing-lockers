@@ -16,9 +16,15 @@ after(() => {
 
 test("cron requires its bearer secret and respects the disabled flag", async () => {
   let selections = 0;
+  let fittingSelections = 0;
+  let slowSelection = false;
+  let clock = 0;
   Object.defineProperty(globalThis, "prisma", {
     configurable: true, writable: true,
-    value: { async $queryRaw() { selections++; return []; } },
+    value: {
+      async $queryRaw() { selections++; if (slowSelection) clock += 23_000; return []; },
+      demoSession: { async findMany() { fittingSelections++; if (slowSelection) clock += 23_000; return []; } },
+    },
   });
   const { GET } = await import("../app/api/cron/customer-contact-sync/route");
   const request = (authorization?: string) =>
@@ -44,4 +50,21 @@ test("cron requires its bearer secret and respects the disabled flag", async () 
   assert.equal(enabled.status, 200);
   assert.equal((await enabled.json()).status, "completed");
   assert.equal(selections, 1);
+  assert.equal(fittingSelections, 1);
+
+  const originalNow = Date.now;
+  slowSelection = true;
+  try {
+    Date.now = () => clock;
+    clock = 2 * 86_400_000;
+    const customerFirst = await (await GET(request("Bearer test-cron-secret"))).json();
+    assert.ok(customerFirst.summary);
+    assert.equal(customerFirst.fittings, undefined);
+    clock = 3 * 86_400_000;
+    const fittingFirst = await (await GET(request("Bearer test-cron-secret"))).json();
+    assert.ok(fittingFirst.fittings);
+    assert.equal(fittingFirst.summary, undefined);
+  } finally {
+    Date.now = originalNow;
+  }
 });

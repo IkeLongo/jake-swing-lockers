@@ -41,11 +41,13 @@ interface TagsUpdateResponse {
  */
 export async function addTagsToContact(
   ghlContactId: string,
-  tags: string[]
+  tags: string[],
+  signal?: AbortSignal,
 ): Promise<void> {
   await ghlFetch<TagsUpdateResponse>(`/contacts/${ghlContactId}/tags`, {
     method: "POST",
     body: JSON.stringify({ tags }),
+    signal,
   });
 }
 

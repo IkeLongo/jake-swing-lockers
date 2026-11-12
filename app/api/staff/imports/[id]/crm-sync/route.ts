@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { syncStagedFittingToGHL } from "@/lib/ghl/syncStagedFitting";
-import { createPrismaStagedSyncDeps } from "@/lib/ghl/syncStagedFittingStore";
-import { claimFittingSyncResult, releaseFittingSync } from "@/lib/ghl/fittingSyncClaim";
+import { runClaimedStagedFittingSync } from "@/lib/ghl/runClaimedStagedFittingSync";
 import { FITTING_RECONCILIATION_MESSAGE } from "@/lib/ghl/syncErrorMarker";
 
 // POST /api/staff/imports/[id]/crm-sync
@@ -34,35 +32,20 @@ export async function POST(
       return NextResponse.json({ error: "Finalize the fitting before syncing." }, { status: 409 });
     }
     const sessionId = batch.demoSessionId;
-    const claimResult = await claimFittingSyncResult(db, sessionId);
+    const claimResult = await runClaimedStagedFittingSync(db, Number(id), sessionId);
     if (claimResult.status === "customer_busy") {
       return NextResponse.json(
         { success: false, status: "failed", code: "customer-sync-pending", error: "Customer contact synchronization is in progress. Retry CRM sync after it completes.", retryable: true },
         { status: 409 },
       );
     }
-    if (claimResult.status !== "claimed") {
+    if (claimResult.status !== "result") {
       return NextResponse.json(
         { success: false, status: "failed", code: "sync-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE, retryable: false },
         { status: 409 },
       );
     }
-    const claim = claimResult.token;
-    const deps = createPrismaStagedSyncDeps(db);
-    const loadBatch = deps.loadBatch;
-    deps.loadBatch = async (batchId) => {
-      const current = await loadBatch(batchId);
-      return current?.demoSession?.id === sessionId ? current : null;
-    };
-    const result = await syncStagedFittingToGHL(deps, Number(id));
-    const uncertain = !result.ok && result.status === "failed" &&
-      (result.code === "creation-needs-reconciliation" || result.code === "sync-needs-reconciliation");
-    if (!uncertain && !await releaseFittingSync(db, sessionId, claim)) {
-      return NextResponse.json(
-        { success: false, status: "failed", code: "sync-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE, retryable: false },
-        { status: 409 },
-      );
-    }
+    const result = claimResult.result;
 
     if (result.ok) {
       return NextResponse.json({

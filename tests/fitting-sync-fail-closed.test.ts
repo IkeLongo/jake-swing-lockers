@@ -51,7 +51,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     id: 1, parserMode: "trackman-result", status: "finalized", demoSessionId: 7,
     customerResolution: "existing", selectedGolfClientId: 3,
     proposedFirstName: null, proposedLastName: null, proposedEmail: null, proposedPhone: null,
-    opportunityResolution: "existing", selectedGhlOpportunityId: "opp",
+    opportunityResolution: "existing", selectedGhlOpportunityId: "opp" as string | null,
     ghlContactDecision: "existing" as const, approvedGhlContactId: "contact",
     ghlContactApprovalSignature: "", ghlContactReviewSnapshot: snapshot,
     demoSession: session,
@@ -111,7 +111,9 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     ghlSyncEvent: { async create() {} },
   };
   Object.defineProperty(globalThis, "prisma", { configurable: true, writable: true, value: fake });
-  let mode: "success" | "opportunity-timeout" | "opportunity-rejected" | "tag-timeout" = "success";
+  let mode: "success" | "opportunity-timeout" | "opportunity-abort" | "opportunity-rejected" | "tag-timeout" | "contact-unavailable" = "success";
+  let contactGate: Promise<void> | null = null;
+  let contactStarted: (() => void) | null = null;
   const calls: string[] = [];
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -119,13 +121,28 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     calls.push(`${method} ${url.pathname}`);
     const contact = { id: "contact", locationId: "location", firstName: "Ann", lastName: "Lee", email: "ann@example.test" };
     if (url.pathname === "/contacts/lookup") return Response.json({ contacts: [contact] });
-    if (url.pathname === "/contacts/contact" && method === "GET") return Response.json({ contact });
+    if (url.pathname === "/contacts/contact" && method === "GET") {
+      if (mode === "contact-unavailable") return Response.json({ error: "unavailable" }, { status: 503 });
+      contactStarted?.();
+      if (contactGate) await contactGate;
+      return Response.json({ contact });
+    }
     if (url.pathname === "/contacts/contact" && method === "PUT") return Response.json({ contact });
     if (url.pathname === "/opportunities/opp" && method === "GET") {
       return Response.json({ opportunity: { id: "opp", contactId: "contact", locationId: "location", pipelineId: "pipeline", status: "open" } });
     }
     if (url.pathname === "/opportunities/" && method === "POST") {
       if (mode === "opportunity-timeout") throw new Error("response timed out");
+      if (mode === "opportunity-abort") {
+        assert.ok(init?.signal);
+        await new Promise<void>((_resolve, reject) => {
+          const keepAlive = setTimeout(() => reject(new Error("abort signal did not fire")), 1000);
+          init.signal!.addEventListener("abort", () => {
+            clearTimeout(keepAlive);
+            reject(new Error("request timed out"));
+          }, { once: true });
+        });
+      }
       if (mode === "opportunity-rejected") return Response.json({ error: "rejected" }, { status: 400 });
       return Response.json({ opportunity: { id: "opp" } });
     }
@@ -146,6 +163,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   const reset = () => {
     session.ghlSyncState = null;
     session.ghlSyncStatus = null;
+    session.ghlSyncError = null;
     session.ghlOpportunityId = null;
     session.ghlLockerReadyTagAddedAt = null;
     calls.length = 0;
@@ -275,4 +293,78 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   Object.assign(client, { syncState: workerState });
   assert.equal((await syncGolfDemoToGHL(7)).success, true);
   assert.equal(session.ghlSyncState, null);
+
+  const { db } = await import("../lib/db");
+  const { runClaimedStagedFittingSync } = await import("../lib/ghl/runClaimedStagedFittingSync");
+  const { runPendingFittingSyncBatch } = await import("../lib/ghl/runPendingFittingSyncBatch");
+  const recover = () => runClaimedStagedFittingSync(db, 1, 7, { recovery: true, requestTimeoutMs: 5_000 });
+  Object.assign(workerState, {
+    contactVerificationStatus: "verified", verifiedGhlLocationId: "location",
+  });
+
+  reset();
+  Object.assign(client, { ghlContactId: null });
+  assert.equal((await recover()).status, "skipped");
+  assert.equal(calls.length, 0);
+  assert.equal(session.ghlSyncState, null);
+  Object.assign(client, { ghlContactId: "contact" });
+  session.ghlOpportunityId = "opp";
+  const existing = await runPendingFittingSyncBatch({ stopStartingAfterMs: 1000 }, {
+    async listCandidates() { return [{ id: 7, updatedAt: new Date(), importBatches: [{ id: 1 }] }]; },
+    async rotate() { return true; },
+    async sync() { return recover(); },
+  });
+  assert.equal(existing.succeeded, 1);
+  assert.equal(calls.filter((call) => call === "GET /opportunities/opp").length, 1);
+  assert.equal(calls.filter((call) => call === "POST /opportunities/").length, 0);
+
+  reset();
+  batch.opportunityResolution = "new";
+  batch.selectedGhlOpportunityId = null;
+  const created = await recover();
+  assert.ok(created.status === "result" && created.result.ok);
+  assert.equal(session.ghlOpportunityId, "opp");
+  assert.equal((await recover()).status, "skipped");
+  assert.equal(calls.filter((call) => call === "POST /opportunities/").length, 1);
+
+  reset();
+  mode = "opportunity-timeout";
+  const uncertain = await recover();
+  assert.ok(uncertain.status === "result" && !uncertain.result.ok &&
+    uncertain.result.status === "failed" && !uncertain.result.retryable);
+  assert.equal((await recover()).status, "blocked");
+  assert.equal(calls.filter((call) => call === "POST /opportunities/").length, 1);
+
+  reset();
+  mode = "opportunity-abort";
+  const aborted = await runClaimedStagedFittingSync(db, 1, 7, { recovery: true, requestTimeoutMs: 20 });
+  assert.ok(aborted.status === "result" && !aborted.result.ok &&
+    aborted.result.status === "failed" && !aborted.result.retryable);
+  assert.equal((await recover()).status, "blocked");
+  assert.equal(calls.filter((call) => call === "POST /opportunities/").length, 1);
+
+  reset();
+  mode = "contact-unavailable";
+  const temporary = await recover();
+  assert.ok(temporary.status === "result" && !temporary.result.ok &&
+    temporary.result.status === "failed" && temporary.result.retryable);
+  assert.equal(session.ghlSyncState, null);
+  mode = "success";
+  assert.ok((await recover()).status === "result");
+  assert.equal(calls.filter((call) => call === "POST /opportunities/").length, 1);
+
+  reset();
+  let releaseContact!: () => void;
+  let signalStarted!: () => void;
+  contactGate = new Promise<void>((resolve) => { releaseContact = resolve; });
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  contactStarted = signalStarted;
+  const firstRecovery = recover();
+  await started;
+  assert.equal((await recover()).status, "blocked");
+  releaseContact();
+  assert.ok((await firstRecovery).status === "result");
+  contactGate = null;
+  contactStarted = null;
+  assert.equal(calls.filter((call) => call === "POST /opportunities/").length, 1);
 });

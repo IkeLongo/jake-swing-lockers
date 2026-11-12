@@ -26,7 +26,10 @@ export interface StagedSyncClient {
   ghlContactCreationState?: unknown;
   syncState?: {
     desiredVersion: number;
+    syncedVersion?: number;
     workStatus?: string;
+    contactVerificationStatus?: string;
+    verifiedGhlLocationId?: string | null;
     creationAttemptId?: string | null;
     creationAttemptVersion?: number | null;
     creationAttemptStatus?: string | null;
@@ -43,6 +46,8 @@ export interface StagedSyncSession {
   currentClub: string | null;
   ghlOpportunityId: string | null;
   ghlSyncStatus: string | null;
+  ghlSyncError?: string | null;
+  needsRefinalization?: boolean;
   ghlSyncState: unknown;
   ghlLockerReadyTagAddedAt: Date | null;
   clubTests: SyncClubTest[];
