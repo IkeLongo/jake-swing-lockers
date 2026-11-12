@@ -36,6 +36,7 @@ const contact = (
 });
 
 interface MockOptions {
+  saved?: GhlContactLite | null;
   byEmail?: { contacts: GhlContactLite[]; hasMore?: boolean };
   byPhone?: { contacts: GhlContactLite[]; hasMore?: boolean };
   linked?: LinkedClientRow[];
@@ -49,7 +50,7 @@ function mock(options: MockOptions = {}) {
     async getContact(id) {
       calls.push(`get:${id}`);
       if (options.fail === "get") throw new Error("GHL API error: 500");
-      return null;
+      return options.saved ?? null;
     },
     async lookupByEmail(email) {
       calls.push(`email:${email}`);
@@ -172,4 +173,110 @@ test("unverified location and unsupported international phone do not match", asy
   });
   assert.equal(phoneResult.status, "needs_review");
   assert.deepEqual(international.calls, []);
+});
+
+test("linked profile changes permit only discrepancies on the verified saved contact", async () => {
+  const saved = contact("saved");
+  for (const change of [
+    { firstName: "Anne" },
+    { email: "new@example.com" },
+    { phone: "(210) 555-0199" },
+  ]) {
+    const identity = { ...INPUT.identity, ...change };
+    const { deps, calls } = mock({
+      saved,
+      byEmail: { contacts: change.email ? [] : [saved] },
+      byPhone: { contacts: change.phone ? [] : [saved] },
+    });
+    const input = { identity, savedContactId: saved.id, ownClientId: 7 };
+    const result = await matchGhlContact(deps, input, {
+      allowLinkedProfileDifferences: true,
+    });
+    assert.equal(result.status, "matched");
+    if (result.status === "matched") {
+      assert.equal(result.contact.id, saved.id);
+      assert.equal(result.discovery.flags.identityConflict, true);
+    }
+    assert.equal(calls[0], "get:saved");
+    assert.equal((await matchGhlContact(deps, input)).status, "needs_review");
+  }
+});
+
+test("linked profile verification retains the saved location when lookup results omit it", async () => {
+  const saved = contact("saved");
+  const lookup = contact("saved", { locationId: undefined });
+  const result = await matchGhlContact(
+    mock({ saved, byEmail: { contacts: [lookup] }, byPhone: { contacts: [lookup] } }).deps,
+    {
+      ...INPUT,
+      identity: { ...INPUT.identity, firstName: "Anne" },
+      savedContactId: saved.id,
+      ownClientId: 7,
+    },
+    { allowLinkedProfileDifferences: true },
+  );
+  assert.equal(result.status, "matched");
+});
+
+test("linked profile verification rejects missing, wrong, or unowned saved contacts", async () => {
+  const input = {
+    ...INPUT,
+    identity: { ...INPUT.identity, firstName: "Anne" },
+    savedContactId: "saved",
+    ownClientId: 7,
+  };
+  const saved = contact("saved");
+  const cases: MockOptions[] = [
+    { byEmail: { contacts: [saved] } },
+    { saved: contact("other") },
+    { saved: contact("saved", { locationId: "other-location" }) },
+    { saved: contact("saved", { locationId: null }) },
+    { saved, linked: [{ id: 8, firstName: "Other", lastName: null, ghlContactId: "saved" }] },
+  ];
+  for (const options of cases) {
+    const result = await matchGhlContact(mock(options).deps, input, {
+      allowLinkedProfileDifferences: true,
+    });
+    assert.equal(result.status, "needs_review");
+  }
+  const noOwner = await matchGhlContact(mock({ saved }).deps, {
+    ...input, ownClientId: null,
+  }, { allowLinkedProfileDifferences: true });
+  assert.equal(noOwner.status, "needs_review");
+});
+
+test("linked profile verification never accepts competing or incomplete identifier results", async () => {
+  const saved = contact("saved");
+  const input = {
+    ...INPUT,
+    identity: { ...INPUT.identity, email: "new@example.com" },
+    savedContactId: saved.id,
+    ownClientId: 7,
+  };
+  for (const options of [
+    { saved, byEmail: { contacts: [contact("other")] } },
+    { saved, byPhone: { contacts: [contact("other")] } },
+    { saved, byEmail: { contacts: [saved], hasMore: true } },
+    { saved, byEmail: { contacts: [saved, contact("other")] } },
+  ]) {
+    const result = await matchGhlContact(mock(options).deps, input, {
+      allowLinkedProfileDifferences: true,
+    });
+    assert.equal(result.status, "needs_review");
+  }
+  await assert.rejects(
+    matchGhlContact(mock({ saved, fail: "phone" }).deps, input, {
+      allowLinkedProfileDifferences: true,
+    }),
+    ContactDiscoveryUnavailableError,
+  );
+});
+
+test("unlinked discovery still rejects differing profile details", async () => {
+  const result = await matchGhlContact(
+    mock({ byEmail: { contacts: [contact("other", { firstName: "Other" })] } }).deps,
+    INPUT,
+    { allowLinkedProfileDifferences: true },
+  );
+  assert.equal(result.status, "needs_review");
 });

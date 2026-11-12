@@ -9,12 +9,13 @@ import {
 import {
   ContactDiscoveryUnavailableError,
   type ContactDiscovery,
+  type DiscoveryApi,
   type DiscoveredContact,
 } from "../lib/ghl/discoverStagedContacts";
-import type { GhlContactMatchResult } from "../lib/ghl/matchGhlContact";
+import { matchGhlContact, type GhlContactMatchResult } from "../lib/ghl/matchGhlContact";
 import type { ContactCreationAttempt } from "../lib/ghl/customerContactCreationCoordinator";
 import type { CustomerSyncClaim } from "../lib/ghl/customerSyncWorkerState";
-import type { GhlContactLite } from "../lib/ghl/resolveStagedContact";
+import { sameEmail, samePhone, type GhlContactLite } from "../lib/ghl/resolveStagedContact";
 
 const originalFlag = process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
 const LOCATION = "loc-1";
@@ -107,6 +108,7 @@ interface HarnessOptions {
   match?: (
     customer: CustomerContactRecord,
     savedContactId: string | null,
+    options?: { allowLinkedProfileDifferences?: boolean },
   ) => Promise<GhlContactMatchResult> | GhlContactMatchResult;
   createError?: Error;
   updateError?: Error;
@@ -168,8 +170,8 @@ function harness(options: HarnessOptions = {}) {
         syncState: customer.syncState ? { ...customer.syncState } : null,
       };
     },
-    async match(profile, savedContactId) {
-      if (options.match) return options.match(profile, savedContactId);
+    async match(profile, savedContactId, matchOptions) {
+      if (options.match) return options.match(profile, savedContactId, matchOptions);
       if (savedContactId) return matched(savedContactId);
       return noMatch();
     },
@@ -253,6 +255,36 @@ function harness(options: HarnessOptions = {}) {
   };
 }
 
+function configureRealMatching(
+  h: ReturnType<typeof harness>,
+  contacts: GhlContactLite[],
+) {
+  const api: DiscoveryApi = {
+    locationId: () => LOCATION,
+    async getContact(id) {
+      return contacts.find((item) => item.id === id) ?? null;
+    },
+    async lookupByEmail(email) {
+      return {
+        contacts: contacts.filter((item) => item.email && sameEmail(item.email, email)),
+        hasMore: false,
+      };
+    },
+    async lookupByPhone(phone) {
+      return {
+        contacts: contacts.filter((item) => item.phone && samePhone(item.phone, phone)),
+        hasMore: false,
+      };
+    },
+  };
+  h.services.match = (customer, savedContactId, options) =>
+    matchGhlContact(
+      { api, findLinkedClients: async () => [] },
+      { identity: customer, savedContactId, ownClientId: customer.id },
+      options,
+    );
+}
+
 test("disabled by default and does not claim customer work", async () => {
   delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
   const h = harness();
@@ -280,6 +312,52 @@ test("updates an existing verified linked contact without creating another", asy
   assert.deepEqual(h.calls.update, ["saved"]);
   assert.equal(h.calls.create.length, 0);
   assert.equal(h.calls.complete, 1);
+});
+
+test("linked name, email, and US phone changes reach the saved contact update", async () => {
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  for (const change of [
+    { firstName: "Anne" },
+    { email: "new@example.com" },
+    { phone: "(210) 555-0199" },
+  ]) {
+    const h = harness({ customer: { ghlContactId: "saved", ...change } });
+    configureRealMatching(h, [contact("saved")]);
+    let updatedProfile: CustomerContactRecord | undefined;
+    const update = h.services.updateContact;
+    h.services.updateContact = async (id, identity) => {
+      updatedProfile = { ...h.customer, ...identity };
+      return update(id, identity);
+    };
+
+    assert.deepEqual(await processCustomerContactSync(7, h.services), {
+      status: "synced", contactId: "saved",
+    });
+    assert.deepEqual(h.calls.link, ["saved"]);
+    assert.deepEqual(h.calls.update, ["saved"]);
+    assert.equal(h.calls.create.length, 0);
+    assert.ok(updatedProfile);
+    for (const [field, value] of Object.entries(change)) {
+      assert.equal(updatedProfile[field as keyof CustomerContactRecord], value);
+    }
+  }
+});
+
+test("a missing or competing saved contact stops the processor without writing", async () => {
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  for (const contacts of [
+    [],
+    [contact("saved"), { ...contact("other"), email: "new@example.com" }],
+  ]) {
+    const h = harness({
+      customer: { ghlContactId: "saved", email: "new@example.com" },
+    });
+    configureRealMatching(h, contacts);
+    assert.equal((await processCustomerContactSync(7, h.services)).status, "needs_review");
+    assert.equal(h.calls.create.length, 0);
+    assert.equal(h.calls.link.length, 0);
+    assert.equal(h.calls.update.length, 0);
+  }
 });
 
 test("links a unique existing contact before updating it", async () => {
@@ -474,6 +552,17 @@ test("idempotent contact update failures are retried on the next claim", async (
   });
 });
 
+test("a duplicate rejection during a profile update requires review", async () => {
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  const h = harness({
+    customer: { ghlContactId: "saved" },
+    updateError: new GhlDuplicateContactError("other", "email"),
+  });
+  assert.equal((await processCustomerContactSync(7, h.services)).status, "needs_review");
+  assert.equal(h.calls.failures[0]?.kind, "review");
+  assert.equal(h.calls.complete, 0);
+});
+
 test("concurrent worker and enabled legacy writer share one contact claim", async () => {
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
   let releaseMatch!: () => void;
@@ -532,4 +621,24 @@ test("profile changes during matching preserve the newer version without a stale
   assert.equal(h.calls.update.length, 0);
   assert.equal(h.customer.syncState?.workStatus, "pending");
   assert.equal(h.customer.syncState?.desiredVersion, 2);
+});
+
+test("a profile changed during the contact update remains pending", async () => {
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  const h = harness({ customer: { ghlContactId: "saved", firstName: "Anne" } });
+  configureRealMatching(h, [contact("saved")]);
+  const update = h.services.updateContact;
+  h.services.updateContact = async (id, identity) => {
+    h.customer = {
+      ...h.customer,
+      firstName: "Anna",
+      syncState: { workStatus: "processing", desiredVersion: 2, syncedVersion: 0 },
+    };
+    return update(id, identity);
+  };
+
+  assert.equal((await processCustomerContactSync(7, h.services)).status, "synced");
+  assert.equal(h.customer.syncState?.workStatus, "pending");
+  assert.equal(h.customer.syncState?.desiredVersion, 2);
+  assert.equal(h.customer.syncState?.syncedVersion, 1);
 });

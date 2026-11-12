@@ -43,6 +43,7 @@ export type GhlContactMatchingDeps = Pick<
 export async function matchGhlContact(
   deps: GhlContactMatchingDeps,
   input: DiscoveryInput,
+  options?: { allowLinkedProfileDifferences?: boolean },
 ): Promise<GhlContactMatchResult> {
   const email = parseEmailStrict(input.identity.email);
   if (!email.ok) return { status: "needs_review", reason: "invalid_email" };
@@ -74,7 +75,22 @@ export async function matchGhlContact(
   if (discovery.status === "no_match") {
     return { status: "no_match", discovery };
   }
-  if (discovery.status !== "single_match") {
+  const contact = discovery.candidates[0];
+  const { identityConflict, ...otherFlags } = discovery.flags;
+  const verifiedLinkedProfile =
+    options?.allowLinkedProfileDifferences === true &&
+    input.savedContactId !== null &&
+    input.ownClientId !== null &&
+    discovery.savedLink.status === "verified" &&
+    discovery.candidates.length === 1 &&
+    contact?.id === input.savedContactId &&
+    contact.locationVerified &&
+    discovery.unsearchable.length === 0 &&
+    Object.values(otherFlags).every((flag) => !flag);
+  if (
+    discovery.status !== "single_match" &&
+    !(identityConflict && verifiedLinkedProfile)
+  ) {
     return {
       status: "needs_review",
       reason: "discovery_requires_review",
@@ -82,7 +98,6 @@ export async function matchGhlContact(
     };
   }
 
-  const contact = discovery.candidates[0];
   if (!contact || !contact.locationVerified) {
     return {
       status: "needs_review",

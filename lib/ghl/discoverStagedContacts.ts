@@ -163,7 +163,11 @@ export async function discoverStagedContacts(
   const contacts = new Map<string, GhlContactLite>();
   const reasons = new Map<string, Set<DiscoveryMatchReason>>();
   const addReason = (contact: GhlContactLite, reason: DiscoveryMatchReason) => {
-    contacts.set(contact.id, contact);
+    const previous = contacts.get(contact.id);
+    contacts.set(contact.id, {
+      ...contact,
+      locationId: contact.locationId ?? previous?.locationId,
+    });
     const set = reasons.get(contact.id) ?? new Set<DiscoveryMatchReason>();
     set.add(reason);
     reasons.set(contact.id, set);

@@ -62,6 +62,7 @@ export interface CustomerContactSyncServices {
   match(
     customer: CustomerContactRecord,
     savedContactId: string | null,
+    options?: { allowLinkedProfileDifferences?: boolean },
   ): Promise<GhlContactMatchResult>;
   link(input: {
     claim: CustomerSyncClaim;
@@ -135,7 +136,7 @@ function createServices(
           },
         },
       }),
-    match: (customer, savedContactId) =>
+    match: (customer, savedContactId, options) =>
       matchGhlContact(
         {
           api: stagedContactApi,
@@ -158,6 +159,7 @@ function createServices(
           savedContactId,
           ownClientId: customer.id,
         },
+        options,
       ),
     link: (input) => linkVerifiedCustomerContact(database, input),
     reserve: (input) => reserveContactCreation(database, input),
@@ -323,7 +325,9 @@ async function syncClaimedCustomer(
 ): Promise<CustomerContactSyncResult> {
   let match: GhlContactMatchResult;
   try {
-    match = await services.match(customer, customer.ghlContactId);
+    match = await services.match(customer, customer.ghlContactId, {
+      allowLinkedProfileDifferences: customer.ghlContactId !== null,
+    });
   } catch (error) {
     if (error instanceof ContactDiscoveryUnavailableError) {
       return failClaim(services, claim, {
@@ -565,8 +569,9 @@ async function syncClaimedCustomer(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (
-      error instanceof GhlApiError &&
-      [400, 401, 403, 404, 422].includes(error.status)
+      error instanceof GhlDuplicateContactError ||
+      (error instanceof GhlApiError &&
+        [400, 401, 403, 404, 422].includes(error.status))
     ) {
       return failClaim(services, claim, {
         kind: "review",
