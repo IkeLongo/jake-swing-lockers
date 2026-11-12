@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
 import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
+import { after } from "next/server";
+import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
+
+export const maxDuration = 60;
 
 // ── GET /api/staff/clients ────────────────────────────────────────────────────
 // Returns all GolfClient records with demo session counts and last demo date.
@@ -141,9 +144,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     createdAt: result.client.createdAt,
   };
 
-  void syncGolfClientContact(client.id).catch((err) => {
-    console.error("[GolfClient Sync] POST failed:", err);
+  after(async () => {
+    try {
+      await syncGolfClientContact(client.id);
+    } catch (error) {
+      console.error("[GolfClient Sync] POST failed:", error);
+    }
   });
 
-  return NextResponse.json({ success: true, client }, { status: 201 });
+  return NextResponse.json({ success: true, client, customerSync: result.customerSync }, { status: 201 });
 }

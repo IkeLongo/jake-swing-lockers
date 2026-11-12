@@ -17,11 +17,11 @@ function locationId(): string {
 // GET /contacts/lookup only accepts `Version: v3`; the default 2021-07-28
 // header makes GHL route it as GET /contacts/{id} ("Contact with id lookup not
 // found"). Verified read-only against the live location.
-async function lookup(param: "email" | "phone", value: string): Promise<ContactLookupPage> {
+async function lookup(param: "email" | "phone", value: string, signal?: AbortSignal): Promise<ContactLookupPage> {
   const qs = new URLSearchParams({ locationId: locationId(), [param]: value, limit: "2" });
   const res = await ghlFetch<{ contacts?: GhlContactLite[]; nextCursor?: string | null }>(
     `/contacts/lookup?${qs.toString()}`,
-    { headers: { Version: "v3" } },
+    { headers: { Version: "v3" }, signal },
   );
   if (
     !Array.isArray(res?.contacts) ||
@@ -46,29 +46,35 @@ async function lookup(param: "email" | "phone", value: string): Promise<ContactL
   return { contacts: res.contacts, hasMore: Boolean(res.nextCursor) };
 }
 
-export const stagedContactApi: StagedContactApi = {
-  async getContact(id) {
-    try {
-      const res = await ghlFetch<{ contact?: GhlContactLite }>(
-        `/contacts/${encodeURIComponent(id)}`,
-      );
-      return res.contact?.id ? res.contact : null;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // GHL reports a missing contact as 400 "Contact with id … not found" (404
-      // is accepted too); every other failure stays a retryable error.
-      if (/GHL API error: (400|404)\b/.test(msg) && /not found/i.test(msg)) return null;
-      throw err;
-    }
-  },
-  lookupByEmail: (email) => lookup("email", email),
-  lookupByPhone: (phone) => lookup("phone", phone),
-  async createContact(input) {
-    const res = await ghlFetch<{ contact: { id: string } }>("/contacts", {
-      method: "POST",
-      body: JSON.stringify({ locationId: locationId(), ...input }),
-    });
-    return { id: res.contact.id };
-  },
-  locationId,
-};
+export function createStagedContactApi(requestSignal?: () => AbortSignal): StagedContactApi {
+  return {
+    async getContact(id) {
+      try {
+        const res = await ghlFetch<{ contact?: GhlContactLite }>(
+          `/contacts/${encodeURIComponent(id)}`,
+          { signal: requestSignal?.() },
+        );
+        return res.contact?.id ? res.contact : null;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // GHL reports a missing contact as 400 "Contact with id … not found" (404
+        // is accepted too); every other failure stays a retryable error.
+        if (/GHL API error: (400|404)\b/.test(msg) && /not found/i.test(msg)) return null;
+        throw err;
+      }
+    },
+    lookupByEmail: (email) => lookup("email", email, requestSignal?.()),
+    lookupByPhone: (phone) => lookup("phone", phone, requestSignal?.()),
+    async createContact(input) {
+      const res = await ghlFetch<{ contact: { id: string } }>("/contacts", {
+        method: "POST",
+        body: JSON.stringify({ locationId: locationId(), ...input }),
+        signal: requestSignal?.(),
+      });
+      return { id: res.contact.id };
+    },
+    locationId,
+  };
+}
+
+export const stagedContactApi = createStagedContactApi();

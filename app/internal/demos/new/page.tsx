@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DemoForm } from "./_components/DemoForm";
 
+export const maxDuration = 60;
 export const metadata: Metadata = {
   title: "New Demo Session | Internal",
 };

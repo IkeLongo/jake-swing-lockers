@@ -3,13 +3,15 @@ import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { finalizeStagedImport } from "@/lib/imports/staged-finalization";
 import { createPrismaStagedFinalizeDeps } from "@/lib/imports/staged-finalization-store";
+import { attemptCustomerSync } from "@/lib/ghl/attemptCustomerSync";
 
+export const maxDuration = 60;
 // POST /api/staff/imports/[id]/finalize
 //
 // Locally finalizes a staged TrackMan import from the state already stored on
 // the ImportBatch (customer, opportunity, club summaries). The request body is
 // intentionally ignored: nothing the client sends can change the outcome.
-// CRM (GHL) sync is not performed here.
+// The customer contact attempt runs only after the finalization transaction.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -43,6 +45,7 @@ export async function POST(
       );
     }
 
+    const customerSync = await attemptCustomerSync(result.golfClientId);
     return NextResponse.json({
       success: true,
       alreadyFinalized: result.alreadyFinalized,
@@ -51,6 +54,7 @@ export async function POST(
       opportunityResolution: result.opportunityResolution,
       ghlOpportunityId: result.ghlOpportunityId,
       clubCount: result.clubCount,
+      customerSync,
     });
   } catch (error) {
     console.error("[POST /api/staff/imports/[id]/finalize]", error);

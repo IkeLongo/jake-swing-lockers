@@ -6,6 +6,7 @@ import {
   updateGolfClientIfUnique,
 } from "../lib/imports/new-customer-review-store";
 import type { PrismaClient } from "../app/generated/prisma/client";
+import { attemptCustomerSync } from "../lib/ghl/attemptCustomerSync";
 
 interface FakeGolfClient extends ClientIdentity {
   ghlContactId: string | null;
@@ -51,6 +52,7 @@ function fakeDatabase(options: {
   let clientUpdateCount = 0;
   let syncStateCreateCount = 0;
   let syncStateUpdateCount = 0;
+  let transactionActive = false;
 
   const tx = {
     async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
@@ -145,6 +147,7 @@ function fakeDatabase(options: {
 
   const db = {
     async $transaction<T>(callback: (transaction: typeof tx) => Promise<T>) {
+      transactionActive = true;
       const previousClients = new Map(
         [...clients.entries()].map(([id, row]) => [id, { ...row }]),
       );
@@ -159,12 +162,15 @@ function fakeDatabase(options: {
         syncStates = previousSyncStates;
         nextId = previousNextId;
         throw error;
+      } finally {
+        transactionActive = false;
       }
     },
   } as unknown as PrismaClient;
 
   return {
     db,
+    get transactionActive() { return transactionActive; },
     get clients() {
       return [...clients.values()];
     },
@@ -245,6 +251,67 @@ test("creation and initial enqueue share one transaction", async () => {
   assert.equal(h.syncStates[0]?.syncedVersion, 0);
   assert.equal(h.syncStates[0]?.workStatus, "pending");
   assert.equal(h.syncStateCreateCount, 1);
+});
+
+test("customer creation and profile updates await processing after commit", async () => {
+  const h = fakeDatabase();
+  const seen: number[] = [];
+  const attempt = async (id: number) => {
+    assert.equal(h.transactionActive, false);
+    assert.ok(h.syncStates.find((state) => state.golfClientId === id));
+    seen.push(id);
+    return "synced" as const;
+  };
+  const created = await createGolfClientIfUnique(h.db, newCustomer, attempt);
+  assert.equal(created.status === "created" && created.customerSync, "synced");
+  assert.deepEqual(seen, [1]);
+  const updated = await updateGolfClientIfUnique(h.db, 1, { firstName: "Anne" }, attempt);
+  assert.equal(updated.status === "updated" && updated.customerSync, "synced");
+  assert.deepEqual(seen, [1, 1]);
+});
+
+test("the create response waits for the post-commit sync attempt", async () => {
+  const h = fakeDatabase();
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  let completed = false;
+  const resultPromise = createGolfClientIfUnique(h.db, newCustomer, async () => {
+    assert.equal(h.transactionActive, false);
+    started();
+    await gate;
+    return "pending";
+  }).then((result) => {
+    completed = true;
+    return result;
+  });
+  await entered;
+  assert.equal(completed, false);
+  assert.equal(h.syncStates[0]?.workStatus, "pending");
+  release();
+  const result = await resultPromise;
+  assert.equal(result.status === "created" && result.customerSync, "pending");
+});
+
+test("failed immediate processing leaves the committed customer and queued work intact", async () => {
+  const h = fakeDatabase();
+  const result = await createGolfClientIfUnique(h.db, newCustomer, (id) =>
+    attemptCustomerSync(id, async () => ({ status: "retry_scheduled", message: "retry later" })),
+  );
+  assert.equal(result.status === "created" && result.customerSync, "pending");
+  assert.equal(h.clients.length, 1);
+  assert.equal(h.syncStates[0]?.workStatus, "pending");
+});
+
+test("unexpected immediate processor errors do not undo a committed customer", async () => {
+  const h = fakeDatabase();
+  const result = await createGolfClientIfUnique(h.db, newCustomer, (id) =>
+    attemptCustomerSync(id, async () => { throw new Error("processor failed"); }),
+  );
+  assert.equal(result.status === "created" && result.customerSync, "needs_reconciliation");
+  assert.equal(h.clients.length, 1);
+  assert.equal(h.syncStates[0]?.workStatus, "pending");
 });
 
 test("relevant profile changes enqueue only when normalized identity changes", async () => {

@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
+import type { CustomerSyncAttempt } from "@/lib/ghl/attemptCustomerSync";
 
+export const maxDuration = 60;
 // ── DELETE /api/staff/demo-sessions/[id] ─────────────────────────────────────
 //
 // Permanently deletes a DemoSession and all session-specific staged data.
@@ -204,6 +206,7 @@ export async function PATCH(
 
   // ── Resolve new clientId ─────────────────────────────────────────────────────
   let resolvedClientId: number = existing.clientId;
+  let customerSync: CustomerSyncAttempt | null = null;
 
   if (
     body.existingGolfClientId !== undefined &&
@@ -282,6 +285,7 @@ export async function PATCH(
       );
     }
     resolvedClientId = result.client.id;
+    customerSync = result.customerSync;
   }
 
   // ── Update DemoSession ───────────────────────────────────────────────────────
@@ -306,6 +310,7 @@ export async function PATCH(
 
   return NextResponse.json({
     success: true,
+    customerSync,
     firstName: client?.firstName ?? "",
     lastName: client?.lastName ?? "",
     email: client?.email ?? "",

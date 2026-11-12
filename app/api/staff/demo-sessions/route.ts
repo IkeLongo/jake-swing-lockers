@@ -3,7 +3,9 @@ import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
+import type { CustomerSyncAttempt } from "@/lib/ghl/attemptCustomerSync";
 
+export const maxDuration = 60;
 // ── Request body ──────────────────────────────────────────────────────────────
 
 interface CreateSessionBody {
@@ -55,6 +57,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Resolve GolfClient ───────────────────────────────────────────────────────
   let client: { id: number; firstName: string | null; lastName: string | null };
+  let customerSync: CustomerSyncAttempt | null = null;
 
   if (body.existingGolfClientId !== undefined && body.existingGolfClientId !== null) {
     const existingId =
@@ -122,6 +125,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
     client = result.client;
+    customerSync = result.customerSync;
   }
 
   // ── Sales rep name ──────────────────────────────────────────────────────────
@@ -154,6 +158,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     success: true,
     demoSessionId: demoSession.id,
     golfClientId: client.id,
+    customerSync,
     clientName:
       [client.firstName, client.lastName].filter(Boolean).join(" ") || null,
   });

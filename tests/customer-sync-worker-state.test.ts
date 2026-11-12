@@ -9,6 +9,7 @@ import {
 } from "../lib/ghl/customerSyncWorkerState";
 import { claimFittingSync, claimFittingSyncResult, releaseFittingSync } from "../lib/ghl/fittingSyncClaim";
 import { Prisma } from "../app/generated/prisma/client";
+import { runCustomerContactSyncBatch } from "../lib/ghl/runCustomerContactSyncBatch";
 
 interface Row {
   golfClientId: number;
@@ -72,7 +73,10 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
           (r.workStatus === "retryable_failed" && r.nextAttemptAt !== null && r.nextAttemptAt <= now) ||
           (r.workStatus === "processing" && (r.leaseExpiresAt === null || r.leaseExpiresAt <= now)),
         )
-        .sort((a, b) => a.golfClientId - b.golfClientId)
+        .sort((a, b) =>
+          (a.lastAttemptAt ?? 0) - (b.lastAttemptAt ?? 0) ||
+          a.golfClientId - b.golfClientId,
+        )
         .slice(0, limit)
         .map((r) => ({ golfClientId: r.golfClientId }));
     },
@@ -152,6 +156,10 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
           const query = strings.join("?");
           sql.push(query);
           assert.ok(local);
+          if (query.includes("SET lastAttemptAt = CURRENT_TIMESTAMP")) {
+            local.lastAttemptAt = now;
+            return 1;
+          }
           if (failWrite) {
             local.workStatus = "processing";
             local.attemptCount++;
@@ -278,6 +286,46 @@ test("fitting distinguishes a live customer worker from an interrupted one", asy
   h.advance(1000);
   assert.deepEqual(await claimFittingSyncResult(h.db, 10), { status: "blocked" });
   assert.equal(h.sessions.get(10)!.ghlSyncState, null);
+});
+
+test("fitting-blocked candidates rotate behind unattempted customers", async () => {
+  const h = harness([row(1), row(2), row(3)]);
+  h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: { version: 1, fittingClaim: { token: "interrupted" } } });
+  assert.deepEqual(await listCustomerSyncCandidates(h.db, 1), [1]);
+  assert.equal((await claimCustomerSync(h.db, 1, 1000)).status, "fitting_blocked");
+  assert.deepEqual(await listCustomerSyncCandidates(h.db, 1), [2]);
+  assert.equal((await claimCustomerSync(h.db, 2, 1000)).status, "claimed");
+  assert.deepEqual(await listCustomerSyncCandidates(h.db, 1), [3]);
+  assert.equal(h.rows.get(1)?.workStatus, "pending");
+});
+
+test("successive recovery batches reach customers behind an interrupted fitting", async () => {
+  const flag = process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  try {
+    const h = harness([row(1), row(2), row(3)]);
+    h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: { version: 1, fittingClaim: { token: "interrupted" } } });
+    const attempted: number[] = [];
+    const deps = {
+      listCandidates: (limit: number) => listCustomerSyncCandidates(h.db, limit),
+      async processCustomer(id: number) {
+        attempted.push(id);
+        const result = await claimCustomerSync(h.db, id, 1000);
+        if (result.status !== "claimed") return { status: "unavailable" as const };
+        await completeCustomerSync(h.db, result.claim);
+        return { status: "synced" as const, contactId: "contact" };
+      },
+    };
+    for (let i = 0; i < 3; i++) {
+      await runCustomerContactSyncBatch(1, deps);
+      h.advance(1000);
+    }
+    assert.deepEqual(attempted, [1, 2, 3]);
+    assert.equal(h.rows.get(1)?.workStatus, "pending");
+  } finally {
+    if (flag === undefined) delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
+    else process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = flag;
+  }
 });
 
 test("interrupted or unresolved sibling fitting states remain blocking", async () => {

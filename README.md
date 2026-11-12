@@ -20,12 +20,28 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Manual customer contact synchronization
+## Customer contact synchronization
 
-The contact-only batch endpoint is disabled unless
-`GHL_CUSTOMER_CONTACT_SYNC_ENABLED=true`. Do not enable it until the existing
-customer contact sync safeguards and GHL configuration have been validated;
-the flag also affects existing contact-writing workflows. There is no scheduler.
+The customer worker is disabled unless `GHL_CUSTOMER_CONTACT_SYNC_ENABLED=true`.
+Before enabling it, validate the GHL configuration and existing sync safeguards;
+the flag also affects legacy contact-writing workflows. Customer creation and
+profile changes enqueue work in the same transaction, then await one immediate
+processor attempt after commit. Staged finalization does the same after saving the
+fitting. A sync failure does not roll back the customer or fitting; the response
+reports pending or review status. GHL requests in this processor have a five-second
+timeout each. An interrupted or uncertain contact creation requires reconciliation,
+not an automatic repost.
+
+Vercel Hobby runs `/api/cron/customer-contact-sync` once daily at 09:00 UTC
+(Hobby execution can be delayed by up to 59 minutes). Configure a random
+`CRON_SECRET` of at least 16 characters as a Vercel environment variable and
+redeploy; Vercel supplies it as a Bearer token. The protected job processes at
+most two customers per invocation and stops starting work after 20 seconds. It
+rotates fitting-blocked work behind older unattempted candidates; large backlogs
+can take multiple days. Monitor Vercel logs and the customer sync state for
+review, reconciliation, or accumulated backlog. Cron is a recovery path, not a
+guarantee of immediate delivery. Vercel function usage remains subject to Hobby
+limits.
 
 When this flag is disabled, legacy GolfClient sync and legacy demo sync update
 only an already-linked GHL contact; they no longer create one. An unlinked
@@ -71,7 +87,7 @@ opportunities can only be selected once the customer has a saved GHL contact.
 Otherwise staff can choose a new opportunity and finalize the fitting locally.
 CRM sync remains pending without creating a contact or opportunity until the
 customer contact exists. Once customer sync succeeds, staff can retry CRM sync
-on the Confirm page. There is currently no scheduler or automatic fitting retry.
+on the Confirm page. The customer recovery cron does not retry fittings.
 Matching an existing remote contact to an unlinked customer requires review;
 it is never linked automatically.
 

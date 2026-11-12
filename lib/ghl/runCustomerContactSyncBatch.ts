@@ -30,6 +30,7 @@ interface BatchDependencies {
 export async function runCustomerContactSyncBatch(
   limit = DEFAULT_CUSTOMER_SYNC_BATCH_SIZE,
   dependencies?: BatchDependencies,
+  options?: { stopStartingAfterMs: number },
 ): Promise<CustomerContactSyncBatchResult> {
   if (
     !Number.isSafeInteger(limit) ||
@@ -39,6 +40,9 @@ export async function runCustomerContactSyncBatch(
     throw new RangeError(
       `Batch size must be an integer between 1 and ${MAX_CUSTOMER_SYNC_BATCH_SIZE}.`,
     );
+  }
+  if (options && (!Number.isSafeInteger(options.stopStartingAfterMs) || options.stopStartingAfterMs < 1)) {
+    throw new RangeError("stopStartingAfterMs must be a positive integer.");
   }
 
   const summary: CustomerContactSyncBatchSummary = {
@@ -57,9 +61,11 @@ export async function runCustomerContactSyncBatch(
       listCustomerSyncCandidates((await import("@/lib/db")).db, count),
     processCustomer: processCustomerContactSync,
   };
+  const startedAt = Date.now();
   const candidates = await deps.listCandidates(limit);
   for (const id of candidates) {
     if (!isCustomerContactSyncEnabled()) return { status: "disabled", summary };
+    if (options && Date.now() - startedAt >= options.stopStartingAfterMs) break;
     summary.processed++;
     try {
       const result = await deps.processCustomer(id);

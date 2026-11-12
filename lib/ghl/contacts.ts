@@ -179,6 +179,7 @@ export function normalizeContactProfile(input: ContactUpsertInput) {
 async function updateContact(
   contactId: string,
   input: ReturnType<typeof normalizedIdentity>,
+  signal?: AbortSignal,
 ): Promise<string> {
   const updatePayload: Record<string, string> = {};
   if (input.firstName) updatePayload.firstName = input.firstName;
@@ -188,7 +189,7 @@ async function updateContact(
 
   const response = await ghlFetch<ContactUpdateResponse>(
     `/contacts/${encodeURIComponent(contactId)}`,
-    { method: "PUT", body: JSON.stringify(updatePayload) },
+    { method: "PUT", body: JSON.stringify(updatePayload), signal },
   );
   if (
     typeof response?.contact?.id !== "string" ||
@@ -203,12 +204,13 @@ async function updateContact(
 export async function updateContactProfile(
   contactId: string,
   input: ContactUpsertInput,
+  signal?: AbortSignal,
 ): Promise<ContactResolution> {
   const savedContactId = contactId.trim();
   if (!savedContactId) {
     throw new Error("A verified GHL contact ID is required for profile updates.");
   }
-  return { id: await updateContact(savedContactId, normalizedIdentity(input)) };
+  return { id: await updateContact(savedContactId, normalizedIdentity(input), signal) };
 }
 
 /**

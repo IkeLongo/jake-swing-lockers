@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { stagedContactApi } from "../lib/ghl/stagedContactApi";
+import { createStagedContactApi, stagedContactApi } from "../lib/ghl/stagedContactApi";
 
 process.env.GHL_SWINGLOCKER_LOCATION_ID = "loc-1";
 process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN = "test-token";
@@ -49,6 +49,17 @@ test("phone lookup sends only phone; nextCursor means more results", async () =>
   assert.equal(seen[0].url.searchParams.has("email"), false);
   assert.equal(page.hasMore, true);
   assert.equal(page.contacts.length, 2);
+});
+
+test("customer processor requests carry their supplied deadline signal", async () => {
+  const controller = new AbortController();
+  const seen: (AbortSignal | null | undefined)[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    seen.push(init?.signal);
+    return new Response(JSON.stringify({ contacts: [] }), { status: 200 });
+  }) as typeof fetch;
+  await createStagedContactApi(() => controller.signal).lookupByEmail("a@b.co");
+  assert.deepEqual(seen, [controller.signal]);
 });
 
 test("lookup errors and malformed responses throw instead of meaning no match", async () => {

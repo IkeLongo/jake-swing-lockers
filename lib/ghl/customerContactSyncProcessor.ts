@@ -25,7 +25,7 @@ import {
   type DiscoveredContact,
 } from "./discoverStagedContacts";
 import { matchGhlContact, type GhlContactMatchResult } from "./matchGhlContact";
-import { stagedContactApi } from "./stagedContactApi";
+import { createStagedContactApi } from "./stagedContactApi";
 import {
   normalizeContactProfile,
   updateContactProfile,
@@ -33,6 +33,7 @@ import {
 
 const CUSTOMER_SYNC_LEASE_MS = 5 * 60_000;
 const RETRY_DELAY_MS = 60_000;
+const CUSTOMER_SYNC_GHL_TIMEOUT_MS = 5_000;
 const REVIEW_MESSAGE =
   "Customer contact synchronization requires staff review.";
 
@@ -116,6 +117,8 @@ function createServices(
   database: PrismaClient,
   fittingOwner?: FittingSyncOwner,
 ): CustomerContactSyncServices {
+  const requestSignal = () => AbortSignal.timeout(CUSTOMER_SYNC_GHL_TIMEOUT_MS);
+  const stagedContactApi = createStagedContactApi(requestSignal);
   return {
     claim: (golfClientId) =>
       claimCustomerSync(database, golfClientId, CUSTOMER_SYNC_LEASE_MS, fittingOwner),
@@ -174,7 +177,7 @@ function createServices(
     markUncertain: (attempt, code, message) =>
       markContactCreationUncertain(database, attempt, code, message),
     updateContact: (contactId, identity) =>
-      updateContactProfile(contactId, identity),
+      updateContactProfile(contactId, identity, requestSignal()),
     complete: (claim) => completeCustomerSync(database, claim),
     fail: (claim, failure) => failCustomerSync(database, claim, failure),
   };

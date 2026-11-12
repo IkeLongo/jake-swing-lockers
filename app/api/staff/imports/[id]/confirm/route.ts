@@ -4,7 +4,9 @@ import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { getLegacyConfirmBlock } from "@/lib/imports/legacy-confirm-guard";
 import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
+import type { CustomerSyncAttempt } from "@/lib/ghl/attemptCustomerSync";
 
+export const maxDuration = 60;
 // ── Request body types ────────────────────────────────────────────────────────
 
 interface ConfirmBodyBase {
@@ -102,6 +104,7 @@ export async function POST(
 
   // ── Resolve GolfClient ───────────────────────────────────────────────────────
   let client: { id: number; firstName: string | null; lastName: string | null };
+  let customerSync: CustomerSyncAttempt | null = null;
 
   if (body.existingGolfClientId !== undefined) {
     // Use an existing client
@@ -171,6 +174,7 @@ export async function POST(
       );
     }
     client = result.client;
+    customerSync = result.customerSync;
   }
 
   // ── Determine sales rep name for the session ─────────────────────────────────
@@ -217,6 +221,7 @@ export async function POST(
     success: true,
     demoSessionId: demoSession.id,
     golfClientId: client.id,
+    customerSync,
     clientName: [client.firstName, client.lastName].filter(Boolean).join(" ") || null,
     lockerToken: demoSession.lockerToken,
   });

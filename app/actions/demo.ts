@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { cookies } from "next/headers";
+import { after } from "next/server";
 import { db } from "@/lib/db";
 import { STAFF_SESSION_COOKIE, verifyStaffSessionToken } from "@/lib/auth/session";
 import { demoFormSchema, type ActionResult, type ClubTabValues } from "@/lib/validations/demo";
@@ -153,8 +154,12 @@ export async function createDemoSession(
     // Apply golf-demo:client tag and persist ghlContactId on the GolfClient record.
     // syncGolfDemoToGHL already upserts the contact; this adds the identity tag.
     if (!ghlSync.requiresReconciliation) {
-      void syncGolfClientContact(client.id).catch((err) => {
-        console.error("[GolfClient Sync] createDemoSession failed:", err);
+      after(async () => {
+        try {
+          await syncGolfClientContact(client.id);
+        } catch (error) {
+          console.error("[GolfClient Sync] createDemoSession failed:", error);
+        }
       });
     }
 
@@ -162,6 +167,7 @@ export async function createDemoSession(
       success: true,
       lockerToken,
       demoSessionId: demoSession.id,
+      customerSync: clientResult.customerSync,
       ghlSync,
     };
   } catch (err) {

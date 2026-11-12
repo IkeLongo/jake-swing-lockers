@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
 import { updateGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
+import { after } from "next/server";
+import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
+
+export const maxDuration = 60;
 
 // ── PATCH /api/staff/clients/[id] ─────────────────────────────────────────────
 // Update a GolfClient's profile fields.
@@ -81,11 +84,15 @@ export async function PATCH(
   }
   const updated = result.client;
 
-  void syncGolfClientContact(id).catch((err) => {
-    console.error("[GolfClient Sync] PATCH failed:", err);
+  after(async () => {
+    try {
+      await syncGolfClientContact(id);
+    } catch (error) {
+      console.error("[GolfClient Sync] PATCH failed:", error);
+    }
   });
 
-  return NextResponse.json({ success: true, client: updated });
+  return NextResponse.json({ success: true, client: updated, customerSync: result.customerSync });
 }
 
 // ── DELETE /api/staff/clients/[id] ────────────────────────────────────────────

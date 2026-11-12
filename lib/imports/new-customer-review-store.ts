@@ -11,6 +11,7 @@ import {
 } from "./customer-identifiers";
 import type { ClientIdentity } from "./new-customer-review";
 import { enqueueCustomerSync } from "@/lib/ghl/customerSyncOutbox";
+import { attemptCustomerSync, type CustomerSyncAttempt } from "@/lib/ghl/attemptCustomerSync";
 
 type GolfClientReader = Pick<Prisma.TransactionClient, "golfClient">;
 
@@ -27,7 +28,7 @@ export function loadClientsForDuplicateCheck(
 }
 
 export type CreateGolfClientResult =
-  | { status: "created"; client: GolfClient }
+  | { status: "created"; client: GolfClient; customerSync: CustomerSyncAttempt }
   | { status: "duplicate"; candidates: DuplicateCandidate[] }
   | { status: "invalid"; error: string };
 
@@ -39,6 +40,7 @@ export async function createGolfClientIfUnique(
     email: string | null;
     phone: string | null;
   },
+  attemptSync: (id: number) => Promise<CustomerSyncAttempt> = attemptCustomerSync,
 ): Promise<CreateGolfClientResult> {
   const email = parseEmailStrict(input.email);
   if (!email.ok) return { status: "invalid", error: email.error };
@@ -51,7 +53,9 @@ export async function createGolfClientIfUnique(
     };
   }
 
-  return db.$transaction(
+  const result = await db.$transaction<
+    { status: "created"; client: GolfClient } | { status: "duplicate"; candidates: DuplicateCandidate[] }
+  >(
     async (tx) => {
       await tx.$queryRaw`SELECT id FROM StagedCustomerCreationMutex WHERE id = 1 FOR UPDATE`;
       const candidates = findDuplicateCandidates(
@@ -77,10 +81,12 @@ export async function createGolfClientIfUnique(
     },
     { maxWait: 10_000, timeout: 30_000 },
   );
+  if (result.status !== "created") return result;
+  return { ...result, customerSync: await attemptSync(result.client.id) };
 }
 
 export type UpdateGolfClientResult =
-  | { status: "updated"; client: GolfClient }
+  | { status: "updated"; client: GolfClient; customerSync: CustomerSyncAttempt | null }
   | { status: "duplicate"; candidates: DuplicateCandidate[] }
   | { status: "invalid"; error: string }
   | { status: "missing" };
@@ -94,6 +100,7 @@ export async function updateGolfClientIfUnique(
     email?: string | null;
     phone?: string | null;
   },
+  attemptSync: (id: number) => Promise<CustomerSyncAttempt> = attemptCustomerSync,
 ): Promise<UpdateGolfClientResult> {
   const parsedEmail =
     patch.email === undefined ? null : parseEmailStrict(patch.email);
@@ -106,7 +113,12 @@ export async function updateGolfClientIfUnique(
     return { status: "invalid", error: parsedPhone.error };
   }
 
-  return db.$transaction(
+  const result = await db.$transaction<
+    | { status: "updated"; client: GolfClient; syncProfileChanged: boolean }
+    | { status: "missing" }
+    | { status: "invalid"; error: string }
+    | { status: "duplicate"; candidates: DuplicateCandidate[] }
+  >(
     async (tx) => {
       await tx.$queryRaw`SELECT id FROM StagedCustomerCreationMutex WHERE id = 1 FOR UPDATE`;
       const current = await tx.golfClient.findUnique({
@@ -183,8 +195,14 @@ export async function updateGolfClientIfUnique(
           reason: "profile_changed",
         });
       }
-      return { status: "updated", client };
+      return { status: "updated", client, syncProfileChanged };
     },
     { maxWait: 10_000, timeout: 30_000 },
   );
+  if (result.status !== "updated") return result;
+  return {
+    status: "updated",
+    client: result.client,
+    customerSync: result.syncProfileChanged ? await attemptSync(id) : null,
+  };
 }

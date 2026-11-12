@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { CustomerSyncAttempt } from "@/lib/ghl/attemptCustomerSync";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ function fmtDate(iso: string | null, timeZone = "UTC") {
 
 interface AddModalProps {
   onClose: () => void;
-  onCreated: (client: ClientRow) => void;
+  onCreated: (client: ClientRow, sync: CustomerSyncAttempt) => void;
 }
 
 function AddClientModal({ onClose, onCreated }: AddModalProps) {
@@ -86,7 +87,7 @@ function AddClientModal({ onClose, onCreated }: AddModalProps) {
         body: JSON.stringify({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phone: phone.trim() }),
       });
       const data = (await res.json()) as
-        | { success: true; client: ClientRow }
+        | { success: true; client: ClientRow; customerSync: CustomerSyncAttempt }
         | { error: string };
 
       if (!res.ok || !("success" in data)) {
@@ -100,7 +101,7 @@ function AddClientModal({ onClose, onCreated }: AddModalProps) {
         createdAt: typeof data.client.createdAt === "string"
           ? data.client.createdAt
           : new Date((data.client.createdAt as unknown as Date)).toISOString(),
-      });
+      }, data.customerSync);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -133,7 +134,7 @@ function AddClientModal({ onClose, onCreated }: AddModalProps) {
 interface EditModalProps {
   client: ClientRow;
   onClose: () => void;
-  onUpdated: (client: ClientRow) => void;
+  onUpdated: (client: ClientRow, sync: CustomerSyncAttempt | null) => void;
 }
 
 function EditClientModal({ client, onClose, onUpdated }: EditModalProps) {
@@ -159,14 +160,14 @@ function EditClientModal({ client, onClose, onUpdated }: EditModalProps) {
         body: JSON.stringify({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phone: phone.trim() }),
       });
       const data = (await res.json()) as
-        | { success: true; client: Pick<ClientRow, "id" | "firstName" | "lastName" | "email" | "phone"> }
+        | { success: true; client: Pick<ClientRow, "id" | "firstName" | "lastName" | "email" | "phone">; customerSync: CustomerSyncAttempt | null }
         | { error: string };
 
       if (!res.ok || !("success" in data)) {
         setError("error" in data ? data.error : "Unexpected error.");
         return;
       }
-      onUpdated({ ...client, ...data.client });
+      onUpdated({ ...client, ...data.client }, data.customerSync);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -450,6 +451,14 @@ export function ClientsTable({ initialClients }: Props) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingClient, setEditingClient] = useState<ClientRow | null>(null);
   const [deletingClient, setDeletingClient] = useState<ClientRow | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+
+  const noticeFor = (sync: CustomerSyncAttempt | null): string | null => {
+    if (sync === "pending") return "Customer saved. CRM synchronization is pending and will be retried when safe.";
+    if (sync === "needs_review" || sync === "needs_reconciliation") return "Customer saved. CRM synchronization requires staff review.";
+    if (sync === "disabled") return "Customer saved. CRM synchronization is currently disabled.";
+    return null;
+  };
 
   // Client-side filtering
   const filtered = useMemo(() => {
@@ -464,14 +473,16 @@ export function ClientsTable({ initialClients }: Props) {
     );
   }, [clients, search]);
 
-  const handleCreated = (client: ClientRow) => {
+  const handleCreated = (client: ClientRow, sync: CustomerSyncAttempt) => {
     setClients((prev) => [client, ...prev]);
+    setSyncNotice(noticeFor(sync));
     setShowAddModal(false);
     router.refresh();
   };
 
-  const handleUpdated = (updated: ClientRow) => {
+  const handleUpdated = (updated: ClientRow, sync: CustomerSyncAttempt | null) => {
     setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    setSyncNotice(noticeFor(sync));
     setEditingClient(null);
   };
 
@@ -482,6 +493,11 @@ export function ClientsTable({ initialClients }: Props) {
 
   return (
     <>
+      {syncNotice && (
+        <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {syncNotice}
+        </p>
+      )}
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <input

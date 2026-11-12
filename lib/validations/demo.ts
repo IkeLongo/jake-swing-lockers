@@ -182,6 +182,7 @@ export type ActionResult =
       success: true;
       lockerToken: string;
       demoSessionId: number;
+      customerSync?: import("@/lib/ghl/attemptCustomerSync").CustomerSyncAttempt;
       ghlSync?: { success: boolean; error?: string };
     }
   | { success: false; message: string; errors?: Record<string, string[]> };

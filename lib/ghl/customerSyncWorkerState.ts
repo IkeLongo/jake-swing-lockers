@@ -177,7 +177,7 @@ export async function listCustomerSyncCandidates(
        OR (workStatus = 'retryable_failed' AND nextAttemptAt <= CURRENT_TIMESTAMP(3))
        OR (workStatus = 'processing' AND
            (leaseExpiresAt IS NULL OR leaseExpiresAt <= CURRENT_TIMESTAMP(3)))
-    ORDER BY golfClientId ASC LIMIT ${limit}
+    ORDER BY COALESCE(lastAttemptAt, createdAt) ASC, golfClientId ASC LIMIT ${limit}
   `;
   return rows.map((row) => row.golfClientId);
 }
@@ -194,6 +194,14 @@ export async function claimCustomerSync(
     const row = await lockCustomerAndState(tx, golfClientId);
     if (!row) return { status: "unavailable" };
     if (await fittingSyncBlocksCustomer(tx, golfClientId, fittingOwner)) {
+      if (row.state.workStatus === "pending" ||
+          row.state.workStatus === "retryable_failed" ||
+          (row.state.workStatus === "processing" && Number(row.state.leaseValid) !== 1)) {
+        await tx.$executeRaw`
+          UPDATE GolfClientSyncState SET lastAttemptAt = CURRENT_TIMESTAMP(3)
+          WHERE golfClientId = ${golfClientId}
+        `;
+      }
       return { status: "fitting_blocked" };
     }
     const { state } = row;

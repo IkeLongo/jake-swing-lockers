@@ -16,6 +16,8 @@ import { matchGhlContact, type GhlContactMatchResult } from "../lib/ghl/matchGhl
 import type { ContactCreationAttempt } from "../lib/ghl/customerContactCreationCoordinator";
 import type { CustomerSyncClaim } from "../lib/ghl/customerSyncWorkerState";
 import { sameEmail, samePhone, type GhlContactLite } from "../lib/ghl/resolveStagedContact";
+import { attemptCustomerSync } from "../lib/ghl/attemptCustomerSync";
+import { runCustomerContactSyncBatch } from "../lib/ghl/runCustomerContactSyncBatch";
 
 const originalFlag = process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
 const LOCATION = "loc-1";
@@ -149,6 +151,7 @@ function harness(options: HarnessOptions = {}) {
       if (customer.syncState?.workStatus === "needs_reconciliation") {
         return { status: "needs_reconciliation" };
       }
+
       if (
         options.claimUnavailable ||
         (claimed && customer.syncState?.workStatus !== "retryable_failed")
@@ -284,6 +287,32 @@ function configureRealMatching(
       options,
     );
 }
+
+test("immediate processing and a recovery batch cannot create the same contact twice", async () => {
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  const h = harness();
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  const create = h.services.createContact;
+  h.services.createContact = async (input) => {
+    started();
+    await gate;
+    return create(input);
+  };
+  const run = (id: number) => processCustomerContactSync(id, h.services);
+  const immediate = attemptCustomerSync(7, run);
+  await entered;
+  const batch = await runCustomerContactSyncBatch(1, {
+    async listCandidates() { return [7]; },
+    processCustomer: run,
+  });
+  assert.equal(batch.summary.skipped, 1);
+  release();
+  assert.equal(await immediate, "synced");
+  assert.equal(h.calls.create.length, 1);
+});
 
 test("disabled by default and does not claim customer work", async () => {
   delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
@@ -450,7 +479,7 @@ test("lookup failures use safe retry state and never create", async () => {
 
 test("uncertain contact creation remains for reconciliation and is not repeated", async () => {
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
-  const h = harness({ createError: new Error("network timeout") });
+  const h = harness({ createError: new DOMException("request timed out", "TimeoutError") });
 
   assert.equal(
     (await processCustomerContactSync(7, h.services)).status,

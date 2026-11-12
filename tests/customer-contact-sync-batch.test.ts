@@ -107,7 +107,30 @@ test("batch stops when processing is disabled mid-run", async () => {
       return { status: "synced", contactId: "private" };
     },
   });
+
   assert.equal(result.status, "disabled");
   assert.equal(result.summary.processed, 1);
   assert.equal(result.summary.succeeded, 1);
+});
+
+test("batch stops starting work when its recovery time budget is exhausted", async () => {
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  const now = Date.now;
+  let time = 1000;
+  Date.now = () => time;
+  try {
+    const calls: number[] = [];
+    const result = await runCustomerContactSyncBatch(2, {
+      async listCandidates() { return [1, 2]; },
+      async processCustomer(id) {
+        calls.push(id);
+        time += 20_000;
+        return { status: "synced", contactId: "contact" };
+      },
+    }, { stopStartingAfterMs: 20_000 });
+    assert.deepEqual(calls, [1]);
+    assert.equal(result.summary.processed, 1);
+  } finally {
+    Date.now = now;
+  }
 });
