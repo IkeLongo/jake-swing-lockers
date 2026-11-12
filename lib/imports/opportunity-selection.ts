@@ -15,10 +15,7 @@ import {
   type OpportunityResolutionResponse,
 } from "./opportunity-page";
 
-// Opportunity selection for staged fittings. Existing opportunities are only
-// listed and accepted for the GHL contact staff approved on the Customer step
-// (ImportBatch.approvedGhlContactId); a saved GolfClient.ghlContactId is not
-// consulted. All GHL access here is read-only.
+// Existing opportunities are scoped to the selected customer's saved contact.
 
 export interface OpportunitySelectionBatch extends GhlGateBatch {
   id: number;
@@ -70,7 +67,7 @@ const fail = (
 const APPROVAL_REQUIRED = fail(
   409,
   "ghl_approval_required",
-  "Approve the GHL contact on the Customer step before choosing an opportunity.",
+  "Select a customer before choosing an opportunity.",
 );
 
 function customerState(batch: OpportunitySelectionBatch): CustomerResolutionState {
@@ -224,8 +221,7 @@ export async function saveOpportunitySelection(
     );
   }
 
-  // Revalidated locally on every write: the stored approval must still match
-  // the current customer identity.
+  // Revalidate the selected customer's saved contact on every write.
   const scope = getOpportunityContactScope(batch, batch.client);
   if (scope.kind === "approval_required") return APPROVAL_REQUIRED;
 
@@ -234,7 +230,7 @@ export async function saveOpportunitySelection(
       return fail(
         409,
         "existing_opportunity_not_allowed",
-        "A new GHL contact was approved for this fitting, so existing opportunities cannot be selected.",
+        "Existing opportunities are unavailable until the customer has a saved GHL contact.",
       );
     }
     try {
@@ -248,7 +244,7 @@ export async function saveOpportunitySelection(
           validation.reason,
           validation.reason === "not_found"
             ? "The selected GHL opportunity was not found."
-            : "The selected opportunity is not an open opportunity for the approved GHL contact in the Swing Locker pipeline.",
+            : "The selected opportunity is not an open opportunity for this customer's GHL contact in the Swing Locker pipeline.",
         );
       }
     } catch {

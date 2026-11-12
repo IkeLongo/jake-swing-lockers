@@ -1,4 +1,4 @@
-import { decodeSyncError, FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation, hasUnresolvedFittingSyncState } from "@/lib/ghl/syncErrorMarker";
+import { decodeSyncError, FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation, hasUnresolvedFittingSyncState, isContactApprovalRecoveryError } from "@/lib/ghl/syncErrorMarker";
 import { hasPersistedCustomerResolution } from "./customer-workflow-routing";
 import {
   flattenPlan,
@@ -26,7 +26,12 @@ export interface ConfirmBatch {
     ghlSyncStatus: string | null;
     ghlSyncError?: string | null;
     ghlSyncState?: unknown;
-    client?: Parameters<typeof hasUnresolvedCustomerCreation>[0];
+    client?: Parameters<typeof hasUnresolvedCustomerCreation>[0] & {
+      ghlContactId?: string | null;
+      syncState?: (NonNullable<Parameters<typeof hasUnresolvedCustomerCreation>[0]["syncState"]> & {
+        workStatus?: string;
+      }) | null;
+    };
   } | null;
 }
 
@@ -84,11 +89,18 @@ export function getConfirmPageState(batch: ConfirmBatch): ConfirmPageState {
       (session.client && hasUnresolvedCustomerCreation(session.client))) {
     return { stage: "crm_action_required", syncAttempted: true, error: FITTING_RECONCILIATION_MESSAGE };
   }
+  if (session.client?.syncState?.workStatus === "needs_review" ||
+      session.client?.syncState?.workStatus === "needs_reconciliation") {
+    return { stage: "crm_action_required", syncAttempted: true, error: "Customer contact synchronization requires staff review before this fitting can sync." };
+  }
   if (session.ghlSyncStatus === "synced") {
     return { stage: "synced", syncAttempted: true, error: null };
   }
   if (session.ghlSyncStatus === "failed") {
     const { message, actionRequired } = decodeSyncError(session.ghlSyncError);
+    if (isContactApprovalRecoveryError(message)) {
+      return { stage: "crm_pending", syncAttempted: true, error: "CRM sync can be retried after the customer contact is available." };
+    }
     return {
       stage: actionRequired ? "crm_action_required" : "crm_pending",
       syncAttempted: true,

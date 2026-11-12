@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { getOpportunityPageRedirect } from "@/lib/imports/opportunity-page";
 import {
   GHL_APPROVAL_BATCH_SELECT,
-  getCurrentGhlDecision,
+  getCustomerContactDecision,
 } from "@/lib/imports/ghl-approval-gate";
 import { getStagedCustomerSummary } from "@/lib/imports/staged-customer-summary";
 import { StagedFittingHeader } from "../../_components/StagedFittingHeader";
@@ -39,7 +39,7 @@ export default async function ImportOpportunityPage({
       proposedPhone: true,
       ...GHL_APPROVAL_BATCH_SELECT,
       selectedGolfClient: {
-        select: { firstName: true, lastName: true, email: true, phone: true },
+        select: { firstName: true, lastName: true, email: true, phone: true, ghlContactId: true },
       },
     },
   });
@@ -47,7 +47,7 @@ export default async function ImportOpportunityPage({
 
   const destination = getOpportunityPageRedirect(
     batch,
-    getCurrentGhlDecision(batch, batch.selectedGolfClient),
+    getCustomerContactDecision(batch, batch.selectedGolfClient),
   );
   if (destination) redirect(destination);
 

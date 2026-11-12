@@ -148,7 +148,7 @@ test("gate: unresolved approval is null", () => {
 test("gate: a changed local identity makes the approval stale", () => {
   const batch = stagedBatch(existingOutcome(), { proposedEmail: "other@example.com" });
   assert.equal(getCurrentGhlDecision(batch, null), null);
-  assert.deepEqual(getOpportunityContactScope(batch, null), { kind: "approval_required" });
+  assert.deepEqual(getOpportunityContactScope(batch, null), { kind: "new" });
 });
 
 test("gate: a saved GolfClient.ghlContactId is never an approval", () => {
@@ -161,12 +161,14 @@ test("gate: a saved GolfClient.ghlContactId is never an approval", () => {
   assert.equal(getCurrentGhlDecision(gate, batch.client), null);
 });
 
-test("scope: existing uses the approved contact, new has no contact", () => {
-  assert.deepEqual(getOpportunityContactScope(stagedBatch(existingOutcome()), null), {
+test("scope: existing uses the saved customer contact, not an old approval", () => {
+  const client = { firstName: "Ann", lastName: "Lee", email: "ann@example.com", phone: "+12105550100", ghlContactId: "c-1" };
+  const batch = stagedBatch(newOutcome(), { customerResolution: "existing", selectedGolfClientId: 3, client });
+  assert.deepEqual(getOpportunityContactScope(batch, client), {
     kind: "existing",
     contactId: "c-1",
   });
-  assert.deepEqual(getOpportunityContactScope(stagedBatch(newOutcome()), null), {
+  assert.deepEqual(getOpportunityContactScope(stagedBatch(existingOutcome()), null), {
     kind: "new",
   });
 });
@@ -208,8 +210,16 @@ function makeDeps(
   return { deps, calls };
 }
 
-test("GET: staged-new customer with an approved existing contact lists that contact's opportunities", async () => {
-  const { deps, calls } = makeDeps(stagedBatch(existingOutcome()));
+function linkedBatch() {
+  return stagedBatch(existingOutcome(), {
+    customerResolution: "existing",
+    selectedGolfClientId: 3,
+    client: { firstName: "Ann", lastName: "Lee", email: "ann@example.com", phone: "+12105550100", ghlContactId: "c-1" },
+  });
+}
+
+test("GET: a saved customer contact lists that contact's opportunities", async () => {
+  const { deps, calls } = makeDeps(linkedBatch());
   const result = await getOpportunityOptions(deps, 1);
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -228,31 +238,26 @@ test("GET: a new-contact decision offers no existing opportunities and makes no 
   assert.equal(calls.listOpen.length, 0);
 });
 
-test("GET/PUT: unresolved or stale approval is rejected with ghl_approval_required", async () => {
+test("GET/PUT: absent or stale approval does not prevent choosing a new opportunity", async () => {
   for (const batch of [
     stagedBatch(null),
     stagedBatch(existingOutcome(), { proposedPhone: "+12105559999" }),
   ]) {
     const { deps, calls } = makeDeps(batch);
     const get = await getOpportunityOptions(deps, 1);
-    assert.equal(get.ok, false);
-    if (!get.ok) assert.equal(get.code, "ghl_approval_required");
+    assert.equal(get.ok, true);
     const put = await saveOpportunitySelection(deps, 1, {
       opportunityResolution: "new",
       selectedGhlOpportunityId: null,
     });
-    assert.equal(put.ok, false);
-    if (!put.ok) {
-      assert.equal(put.status, 409);
-      assert.equal(put.code, "ghl_approval_required");
-    }
-    assert.equal(calls.commits, 0);
+    assert.equal(put.ok, true);
+    assert.equal(calls.commits, 1);
     assert.equal(calls.listOpen.length, 0);
   }
 });
 
-test("PUT: existing opportunity is validated against the approved contact", async () => {
-  const { deps, calls } = makeDeps(stagedBatch(existingOutcome()));
+test("PUT: existing opportunity is validated against the saved customer contact", async () => {
+  const { deps, calls } = makeDeps(linkedBatch());
   const result = await saveOpportunitySelection(deps, 1, {
     opportunityResolution: "existing",
     selectedGhlOpportunityId: "opp-1",
@@ -263,7 +268,7 @@ test("PUT: existing opportunity is validated against the approved contact", asyn
 });
 
 test("PUT: an opportunity belonging to another contact is rejected without saving", async () => {
-  const { deps, calls } = makeDeps(stagedBatch(existingOutcome()), {
+  const { deps, calls } = makeDeps(linkedBatch(), {
     validate: async () => ({ valid: false, reason: "not_relevant" }),
   });
   const result = await saveOpportunitySelection(deps, 1, {
@@ -297,7 +302,7 @@ test("PUT: a new-contact decision rejects selecting an existing opportunity", as
 });
 
 test("PUT: GHL validation failure is a 502 and nothing is saved", async () => {
-  const { deps, calls } = makeDeps(stagedBatch(existingOutcome()), {
+  const { deps, calls } = makeDeps(linkedBatch(), {
     validate: async () => {
       throw new Error("boom");
     },

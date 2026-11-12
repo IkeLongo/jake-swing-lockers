@@ -86,6 +86,12 @@ function createTx(
     async lockNewCustomerCreation() {
       await tx.$queryRaw`SELECT id FROM StagedCustomerCreationMutex WHERE id = 1 FOR UPDATE`;
     },
+    async lockCustomerContact(clientId) {
+      const rows = await tx.$queryRaw<{ ghlContactId: string | null }[]>`
+        SELECT ghlContactId FROM GolfClient WHERE id = ${clientId} FOR UPDATE
+      `;
+      return rows[0]?.ghlContactId;
+    },
     loadBatch: (batchId) => loadBatch(tx, batchId),
     loadSummaries: (batchId) => loadSummaries(tx, batchId),
     listClientsForDuplicateCheck: () => loadClientsForDuplicateCheck(tx),

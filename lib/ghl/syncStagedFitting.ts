@@ -6,7 +6,6 @@ import {
   type SyncClubTest,
 } from "./golfDemoSyncContent";
 import { ContactNeedsReviewError } from "./resolveStagedContact";
-import { getBatchGhlApprovalStatus, getCurrentGhlDecision } from "@/lib/imports/ghl-approval-gate";
 import { isDefiniteGhlNoMutation } from "./client";
 import { FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation, hasUnresolvedFittingSyncState } from "./syncErrorMarker";
 
@@ -27,6 +26,7 @@ export interface StagedSyncClient {
   ghlContactCreationState?: unknown;
   syncState?: {
     desiredVersion: number;
+    workStatus?: string;
     creationAttemptId?: string | null;
     creationAttemptVersion?: number | null;
     creationAttemptStatus?: string | null;
@@ -174,7 +174,7 @@ export type StagedSyncResult =
       status: "failed";
       demoSessionId: number;
       retryable: boolean;
-      code?: "contact-needs-review" | "creation-needs-reconciliation" | "sync-needs-reconciliation";
+      code?: "contact-needs-review" | "creation-needs-reconciliation" | "sync-needs-reconciliation" | "customer-sync-pending";
       error: string;
     }
   | {
@@ -283,6 +283,14 @@ export async function syncStagedFittingToGHL(
     return { ok: false, status: "failed", demoSessionId: session.id, retryable: false,
       code: "creation-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE };
   }
+  if (client.syncState?.workStatus === "needs_review" || client.syncState?.workStatus === "needs_reconciliation") {
+    return { ok: false, status: "failed", demoSessionId: session.id, retryable: false,
+      code: "contact-needs-review", error: "Customer contact synchronization requires staff review before this fitting can sync." };
+  }
+  if (!client.ghlContactId) {
+    return { ok: false, status: "failed", demoSessionId: session.id, retryable: true,
+      code: "customer-sync-pending", error: "The fitting is saved. Customer contact synchronization must complete before CRM sync." };
+  }
   if (
     session.ghlSyncStatus === "synced" &&
     session.ghlOpportunityId &&
@@ -301,71 +309,30 @@ export async function syncStagedFittingToGHL(
 
   let ghlContactId: string | null = null;
   try {
-    const approvalStatus = getBatchGhlApprovalStatus(batch, client);
-    const contactDecision = getCurrentGhlDecision(batch, client);
     if (
-      !contactDecision ||
-      (contactDecision === "new" && resolution !== "new") ||
       (batch.customerResolution === "existing" &&
         batch.selectedGolfClientId !== client.id) ||
       (batch.customerResolution === "new" && batch.selectedGolfClientId !== null)
     ) {
       throw new ContactNeedsReviewError(
         "identity_conflict",
-        approvalStatus === "stale"
-          ? "The GHL contact approval is stale. Review and approve it again before syncing."
-          : "A current GHL contact approval for this finalized customer is required before syncing.",
+        "The finalized fitting does not match its selected customer.",
       );
     }
-
-    // 1. Resolve exactly the staff-approved identity before syncing the fitting.
-    if (contactDecision === "existing") {
-      const approvedContactId = batch.approvedGhlContactId!;
-      if (client.ghlContactId && client.ghlContactId !== approvedContactId) {
-        throw new ContactNeedsReviewError(
-          "identity_conflict",
-          "The local customer is linked to a different GHL contact than the one approved for this fitting.",
-        );
-      }
-      await deps.verifyApprovedContact(approvedContactId, client.id);
-      if (!client.ghlContactId) {
-        await deps.saveContactId(client.id, approvedContactId);
-      }
-      ghlContactId = approvedContactId;
-    } else {
-      const identity =
-        batch.customerResolution === "existing"
-          ? {
-              firstName: client.firstName,
-              lastName: client.lastName,
-              email: client.email,
-              phone: client.phone,
-            }
-          : {
-              firstName: batch.proposedFirstName,
-              lastName: batch.proposedLastName,
-              email: batch.proposedEmail,
-              phone: batch.proposedPhone,
-            };
-      const resolved = await deps.resolveNewContact(
-        identity,
-        {
-          sessionId: session.id,
-          batchId: batch.id,
-          clientId: client.id,
-          savedGhlContactId: client.ghlContactId,
-          expectedVersion: client.syncState?.desiredVersion ?? null,
-        },
-      );
-      ghlContactId = resolved.id;
+    if (state && typeof state === "object" && !Array.isArray(state) &&
+        "contact" in state && state.contact && typeof state.contact === "object" &&
+        "contactId" in state.contact && state.contact.contactId !== client.ghlContactId) {
+      throw new ContactNeedsReviewError("identity_conflict", "The fitting's resolved contact differs from the customer's saved contact.");
     }
+    ghlContactId = client.ghlContactId;
+    await deps.verifyApprovedContact(ghlContactId, client.id);
 
     const summaries = buildGolfDemoSummaries(session);
     const lockerUrl = `${deps.appBaseUrl()}/swing-locker/${session.lockerToken}`;
 
     // 2. Opportunity.
     let ghlOpportunityId: string;
-    if (resolution === "existing") {
+    if (resolution === "existing" || session.ghlOpportunityId) {
       // Read-only: an attached opportunity is never renamed, restaged or re-valued.
       const validation = await deps.validateOpportunity(
         session.ghlOpportunityId!,

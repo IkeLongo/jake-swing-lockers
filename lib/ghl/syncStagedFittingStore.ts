@@ -155,7 +155,7 @@ async function assertContactAvailableToClient(
   if (owner && owner.id !== clientId) {
     throw new ContactNeedsReviewError(
       "identity_conflict",
-      "The approved GHL contact is already linked to a different local customer.",
+      "The GHL contact is already linked to a different local customer.",
     );
   }
 }
@@ -237,13 +237,13 @@ async function verifyApprovedContact(
   if (!contact) {
     throw new ContactNeedsReviewError(
       "identity_conflict",
-      "The approved GHL contact no longer exists. Review the customer decision before syncing.",
+      "The customer's saved GHL contact no longer exists. Staff review is required before syncing.",
     );
   }
   if (contact.locationId !== stagedContactApi.locationId()) {
     throw new ContactNeedsReviewError(
       "wrong_location",
-      "The approved GHL contact does not belong to the configured GHL location.",
+      "The customer's saved GHL contact does not belong to the configured GHL location.",
     );
   }
   await assertContactAvailableToClient(db, clientId, ghlContactId);
@@ -561,6 +561,7 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
                   syncState: {
                     select: {
                       desiredVersion: true,
+                      workStatus: true,
                       creationAttemptId: true,
                       creationAttemptVersion: true,
                       creationAttemptStatus: true,

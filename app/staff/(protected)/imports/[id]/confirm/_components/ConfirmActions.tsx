@@ -10,8 +10,6 @@ import {
   type ConfirmPhase,
 } from "@/lib/imports/confirm-flow";
 import type { ConfirmStage } from "@/lib/imports/confirm-page";
-import { isContactApprovalRecoveryError } from "@/lib/ghl/syncErrorMarker";
-import { ContactRecovery } from "./ContactRecovery";
 
 interface Props {
   batchId: number;
@@ -151,15 +149,6 @@ export function ConfirmActions({ batchId, initialStage, syncAttempted, initialEr
         <p className="mt-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-foreground font-body">
           {phase.error}
         </p>
-        {isContactApprovalRecoveryError(phase.error) && (
-          <ContactRecovery
-            batchId={batchId}
-            onRecovered={() => {
-              setPhase({ kind: "crm_pending", error: "Contact approval updated. Retry CRM sync." });
-              router.refresh();
-            }}
-          />
-        )}
         <div className="mt-3 flex items-center justify-between gap-3">
           {backToImports}
           {viewFitting}

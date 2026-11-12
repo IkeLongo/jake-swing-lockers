@@ -60,40 +60,54 @@ export async function claimFittingSync(
   sessionId: number,
   expectedClientId?: number,
 ): Promise<string | null> {
+  const result = await claimFittingSyncResult(db, sessionId, expectedClientId);
+  return result.status === "claimed" ? result.token : null;
+}
+
+export async function claimFittingSyncResult(
+  db: PrismaClient,
+  sessionId: number,
+  expectedClientId?: number,
+): Promise<{ status: "claimed"; token: string } | { status: "customer_busy" | "blocked" }> {
   const token = randomUUID();
   return db.$transaction(async (tx) => {
     const target = await tx.demoSession.findUnique({
       where: { id: sessionId },
       select: { clientId: true },
     });
-    if (!target || (expectedClientId !== undefined && target.clientId !== expectedClientId)) return null;
+    if (!target || (expectedClientId !== undefined && target.clientId !== expectedClientId)) return { status: "blocked" };
     const customers = await tx.$queryRaw<{ id: number }[]>`
       SELECT id FROM GolfClient WHERE id = ${target.clientId} FOR UPDATE
     `;
-    if (!customers.length) return null;
+    if (!customers.length) return { status: "blocked" };
     const states = await tx.$queryRaw<{
       workStatus: string;
       claimToken: string | null;
       claimedVersion: number | null;
       leaseExpiresAt: Date | null;
+      leaseValid: number | bigint | null;
     }[]>`
-      SELECT workStatus, claimToken, claimedVersion, leaseExpiresAt
+      SELECT workStatus, claimToken, claimedVersion, leaseExpiresAt,
+        leaseExpiresAt > CURRENT_TIMESTAMP(3) AS leaseValid
       FROM GolfClientSyncState WHERE golfClientId = ${target.clientId} FOR UPDATE
     `;
     const customerState = states[0];
+    const sessions = await tx.$queryRaw<{ id: number; ghlSyncState: Prisma.JsonValue }[]>`
+      SELECT id, ghlSyncState FROM DemoSession
+      WHERE clientId = ${target.clientId} ORDER BY id FOR UPDATE
+    `;
+    const session = sessions.find((row) => row.id === sessionId);
+    if (!session || sessions.some((row) => hasUnresolvedFittingSyncState(rawSessionState(row.ghlSyncState)))) return { status: "blocked" };
+    if (customerState?.workStatus === "processing" && Number(customerState.leaseValid) === 1) {
+      return { status: "customer_busy" };
+    }
     if (customerState && (
       customerState.workStatus === "processing" ||
       customerState.workStatus === "needs_reconciliation" ||
       customerState.claimToken !== null ||
       customerState.claimedVersion !== null ||
       customerState.leaseExpiresAt !== null
-    )) return null;
-    const sessions = await tx.$queryRaw<{ id: number; ghlSyncState: Prisma.JsonValue }[]>`
-      SELECT id, ghlSyncState FROM DemoSession
-      WHERE clientId = ${target.clientId} ORDER BY id FOR UPDATE
-    `;
-    const session = sessions.find((row) => row.id === sessionId);
-    if (!session || sessions.some((row) => hasUnresolvedFittingSyncState(rawSessionState(row.ghlSyncState)))) return null;
+    )) return { status: "blocked" };
     const state = sessionState(rawSessionState(session.ghlSyncState));
     await tx.demoSession.update({
       where: { id: sessionId },
@@ -104,7 +118,7 @@ export async function claimFittingSync(
         } as Prisma.InputJsonObject,
       },
     });
-    return token;
+    return { status: "claimed", token };
   });
 }
 

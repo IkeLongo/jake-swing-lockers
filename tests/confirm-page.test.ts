@@ -150,6 +150,28 @@ test("a persisted action-required failure stays non-retryable after refresh", ()
   });
 });
 
+test("obsolete approval errors are retryable, but unresolved claims still block", () => {
+  const error = encodeSyncError("The GHL contact approval is stale. Review and approve it again before syncing.", false);
+  const finalized = batch({
+    status: "finalized", demoSessionId: 9,
+    demoSession: { status: "finalized", ghlSyncStatus: "failed", ghlSyncError: error },
+  });
+  assert.equal(getConfirmPageState(finalized).stage, "crm_pending");
+  finalized.demoSession!.ghlSyncState = { version: 1, fittingClaim: { token: "interrupted" } };
+  assert.equal(getConfirmPageState(finalized).stage, "crm_action_required");
+});
+
+test("customer sync review blocks fitting retry after refresh", () => {
+  const state = getConfirmPageState(batch({
+    status: "finalized", demoSessionId: 9,
+    demoSession: {
+      status: "finalized", ghlSyncStatus: null,
+      client: { syncState: { workStatus: "needs_review" } },
+    },
+  }));
+  assert.equal(state.stage, "crm_action_required");
+});
+
 test("claims and unresolved creation markers require review after refresh, even if marked synced", () => {
   for (const ghlSyncState of [
     { version: 1, fittingClaim: { token: "interrupted" } },

@@ -361,6 +361,13 @@ async function syncClaimedCustomer(
 
   let contactId: string;
   if (match.status === "matched") {
+    if (!customer.ghlContactId) {
+      return failClaim(services, claim, {
+        kind: "review",
+        code: "unlinked_ghl_contact_match",
+        message: "An existing GHL contact matches this unlinked customer. Staff review is required before linking.",
+      });
+    }
     const linkResult = await verifyLinkedContact(services, claim, customer, match);
     if (linkResult !== "ready") {
       return linkResult === "deferred"

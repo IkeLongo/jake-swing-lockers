@@ -36,6 +36,7 @@ export interface GhlGateClient {
   lastName: string | null;
   email: string | null;
   phone: string | null;
+  ghlContactId?: string | null;
 }
 
 export function getBatchGhlApprovalStatus(
@@ -63,4 +64,13 @@ export function getCurrentGhlDecision(
   const status = getBatchGhlApprovalStatus(batch, client);
   if (!hasCurrentGhlApproval(status)) return null;
   return status === "approved_existing" ? "existing" : "new";
+}
+
+export function getCustomerContactDecision(
+  batch: GhlGateBatch,
+  client: GhlGateClient | null,
+): GhlContactDecision | null {
+  if (batch.customerResolution === "new") return "new";
+  if (batch.customerResolution !== "existing" || !batch.selectedGolfClientId || !client) return null;
+  return client.ghlContactId?.trim() ? "existing" : "new";
 }

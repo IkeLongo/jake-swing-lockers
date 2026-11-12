@@ -49,9 +49,9 @@ export function hasPersistedCustomerResolution(
 }
 
 /**
- * `ghlDecision` is the current, persisted GHL contact decision (see
- * `getCurrentGhlDecision`); null means unresolved or stale. Legacy batches
- * linked to a DemoSession and non-TrackMan batches are never gated.
+ * `ghlDecision` reflects whether the selected customer has a saved GHL contact;
+ * null means the local customer is unresolved. Linked sessions and
+ * non-TrackMan batches are never gated.
  */
 export function getReviewPageRedirect(
   batch: ImportCustomerWorkflowState,

@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { getReviewPageRedirect } from "@/lib/imports/customer-workflow-routing";
 import {
   GHL_APPROVAL_BATCH_SELECT,
-  getCurrentGhlDecision,
+  getCustomerContactDecision,
 } from "@/lib/imports/ghl-approval-gate";
 import { getStagedCustomerSummary } from "@/lib/imports/staged-customer-summary";
 import { StagedFittingHeader } from "../../_components/StagedFittingHeader";
@@ -66,7 +66,7 @@ export default async function ImportMapPage({
         trackmanPlayerEmail: true,
         createdAt: true,
         selectedGolfClient: {
-          select: { firstName: true, lastName: true, email: true, phone: true },
+          select: { firstName: true, lastName: true, email: true, phone: true, ghlContactId: true },
         },
         demoSession: {
           select: {
@@ -98,7 +98,7 @@ export default async function ImportMapPage({
   if (!batch) notFound();
   const redirectToCustomer = getReviewPageRedirect(
     batch,
-    getCurrentGhlDecision(batch, batch.selectedGolfClient),
+    getCustomerContactDecision(batch, batch.selectedGolfClient),
   );
   if (redirectToCustomer) redirect(redirectToCustomer);
 

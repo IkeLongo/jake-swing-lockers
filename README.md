@@ -28,9 +28,9 @@ customer contact sync safeguards and GHL configuration have been validated;
 the flag also affects existing contact-writing workflows. There is no scheduler.
 
 When this flag is disabled, legacy GolfClient sync and legacy demo sync update
-only an already-linked GHL contact; they no longer create one. Use the staged
-fitting customer-review workflow to approve or create a contact before those
-legacy workflows can sync an unlinked customer. This can also delay customer
+only an already-linked GHL contact; they no longer create one. An unlinked
+customer remains pending until customer contact sync is enabled and processed.
+This can also delay customer
 emails or Swing Locker delivery that depend on a saved contact. A legacy
 customer update is blocked while any of that customer's fitting claims or
 creation markers needs reconciliation.
@@ -63,13 +63,21 @@ manual review rather than automatic reposting. An unexpected error or interrupte
 request may leave a claim for the existing lease/reconciliation safeguards to
 handle. Keep batches small enough for the deployment's request timeout.
 
-## Finalized fitting contact recovery
+## Staged fitting contact synchronization
 
-When CRM sync reports an outdated contact approval, an active staff member can
-review the current verified contact on the fitting's Confirm page, explicitly
-approve it, and then retry CRM sync. Recovery does not change the fitting or its
-opportunity. Fittings with unresolved creation attempts, a previously created
-new opportunity, or already-added tags require separate reconciliation.
+Staff select a local customer, not a GHL contact. A saved customer contact is
+verified and reused; a newly finalized customer is queued for contact sync. Existing
+opportunities can only be selected once the customer has a saved GHL contact.
+Otherwise staff can choose a new opportunity and finalize the fitting locally.
+CRM sync remains pending without creating a contact or opportunity until the
+customer contact exists. Once customer sync succeeds, staff can retry CRM sync
+on the Confirm page. There is currently no scheduler or automatic fitting retry.
+Matching an existing remote contact to an unlinked customer requires review;
+it is never linked automatically.
+
+Previous fitting contact approvals no longer select the contact for normal sync.
+Unresolved claims, creation attempts, or conflicting resolved contact markers
+still require reconciliation; do not clear them just because an approval is old.
 
 ### Reconciling an interrupted fitting sync
 

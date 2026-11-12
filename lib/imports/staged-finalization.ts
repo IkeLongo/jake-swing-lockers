@@ -11,7 +11,6 @@ import {
   type FinalizeStore,
   type PlannableSummary,
 } from "./finalizationPlan";
-import { getBatchGhlApprovalStatus, getCurrentGhlDecision } from "./ghl-approval-gate";
 import { resolveFittingDate } from "./opportunity-naming";
 
 // Local-only finalization of a staged TrackMan ImportBatch:
@@ -71,6 +70,7 @@ export interface StagedFinalizeTx<S extends PlannableSummary> {
   lockBatch(batchId: number): Promise<void>;
   /** Must hold the singleton mutex row until the finalization transaction commits. */
   lockNewCustomerCreation(): Promise<void>;
+  lockCustomerContact(clientId: number): Promise<string | null | undefined>;
   loadBatch(batchId: number): Promise<StagedFinalizeBatch | null>;
   loadSummaries(batchId: number): Promise<S[]>;
   listClientsForDuplicateCheck(): Promise<ClientIdentity[]>;
@@ -210,30 +210,6 @@ export function validateStagedBatch(batch: StagedFinalizeBatch): Failure | null 
     );
   }
 
-  const approvalStatus = getBatchGhlApprovalStatus(batch, batch.selectedGolfClient);
-  const contactDecision = getCurrentGhlDecision(batch, batch.selectedGolfClient);
-  if (!contactDecision) {
-    return fail(
-      409,
-      "ghl_approval_required",
-      approvalStatus === "stale"
-        ? "The GHL contact approval is stale. Review and approve the contact again."
-        : "Approve the GHL contact before finalizing.",
-    );
-  }
-  if (
-    contactDecision === "existing" &&
-    batch.customerResolution === "existing" &&
-    batch.selectedGolfClient?.ghlContactId &&
-    batch.selectedGolfClient.ghlContactId !== batch.approvedGhlContactId
-  ) {
-    return fail(
-      409,
-      "saved_contact_conflict",
-      "The selected customer is already linked to a different GHL contact.",
-    );
-  }
-
   const resolution = batch.opportunityResolution;
   const opportunityId = batch.selectedGhlOpportunityId;
   // The name and date override belong only to a new opportunity, and the
@@ -271,18 +247,11 @@ export function validateStagedBatch(batch: StagedFinalizeBatch): Failure | null 
         "A new customer cannot be attached to an existing opportunity.",
       );
     }
-    if (contactDecision === "new") {
+    if (!batch.selectedGolfClient?.ghlContactId) {
       return fail(
         409,
-        "new_contact_existing_opportunity",
-        "A new GHL contact decision cannot use an existing opportunity.",
-      );
-    }
-    if (!batch.approvedGhlContactId) {
-      return fail(
-        409,
-        "ghl_approval_required",
-        "Approve an existing GHL contact before using an existing opportunity.",
+        "no_ghl_contact",
+        "The customer needs a saved GHL contact before using an existing opportunity.",
       );
     }
     return null;
@@ -397,7 +366,7 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
     try {
       const validation = await deps.validateOpportunity(
         batch.selectedGhlOpportunityId!,
-        batch.approvedGhlContactId!,
+        batch.selectedGolfClient!.ghlContactId!,
       );
       if (!validation.valid) {
         return fail(
@@ -437,6 +406,12 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
         true,
       );
     }
+    if (locked.customerResolution === "existing") {
+      const currentContactId = await tx.lockCustomerContact(locked.selectedGolfClient!.id);
+      if (currentContactId !== locked.selectedGolfClient!.ghlContactId) {
+        return fail(409, "state_changed", "The customer contact changed. Review the fitting and try again.", true);
+      }
+    }
 
     const { rows, clubCount } = planClubs(await tx.loadSummaries(batchId));
     if (clubCount === 0) {
@@ -453,9 +428,6 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
     const resolvedClient = await resolveClientId(tx, locked);
     if (!resolvedClient.ok) return resolvedClient.failure;
     const clientId = resolvedClient.clientId;
-    if (getCurrentGhlDecision(locked, locked.selectedGolfClient) === "existing") {
-      await tx.associateClientWithGhlContact(clientId, locked.approvedGhlContactId!);
-    }
     const ghlOpportunityId =
       locked.opportunityResolution === "existing"
         ? locked.selectedGhlOpportunityId

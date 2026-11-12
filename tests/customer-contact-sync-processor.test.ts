@@ -360,7 +360,7 @@ test("a missing or competing saved contact stops the processor without writing",
   }
 });
 
-test("links a unique existing contact before updating it", async () => {
+test("an unlinked matching contact requires review without linking or creating", async () => {
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
   const h = harness({
     match: async (_customer, savedContactId) =>
@@ -369,10 +369,11 @@ test("links a unique existing contact before updating it", async () => {
 
   const result = await processCustomerContactSync(7, h.services);
 
-  assert.deepEqual(result, { status: "synced", contactId: "existing" });
-  assert.equal(h.customer.ghlContactId, "existing");
-  assert.deepEqual(h.calls.link, ["existing"]);
-  assert.deepEqual(h.calls.update, ["existing"]);
+  assert.equal(result.status, "needs_review");
+  assert.equal(h.customer.ghlContactId, null);
+  assert.deepEqual(h.calls.link, []);
+  assert.deepEqual(h.calls.update, []);
+  assert.equal(h.calls.create.length, 0);
   assert.equal(h.calls.reserve, 0);
 });
 
@@ -618,6 +619,7 @@ test("a fitting-blocked claim cannot use the already-synced fallback", async () 
 test("profile changes during matching preserve the newer version without a stale write", async () => {
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
   const h = harness({
+    customer: { ghlContactId: "existing" },
     match: async () => matched("existing"),
   });
   const originalLink = h.services.link;

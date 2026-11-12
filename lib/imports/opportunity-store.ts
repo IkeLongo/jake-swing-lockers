@@ -30,7 +30,7 @@ export function createPrismaOpportunityDeps(
           trackmanSessionDate: true,
           ...GHL_APPROVAL_BATCH_SELECT,
           selectedGolfClient: {
-            select: { firstName: true, lastName: true, email: true, phone: true },
+            select: { firstName: true, lastName: true, email: true, phone: true, ghlContactId: true },
           },
         },
       });

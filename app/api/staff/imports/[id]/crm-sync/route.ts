@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { syncStagedFittingToGHL } from "@/lib/ghl/syncStagedFitting";
 import { createPrismaStagedSyncDeps } from "@/lib/ghl/syncStagedFittingStore";
-import { claimFittingSync, releaseFittingSync } from "@/lib/ghl/fittingSyncClaim";
+import { claimFittingSyncResult, releaseFittingSync } from "@/lib/ghl/fittingSyncClaim";
 import { FITTING_RECONCILIATION_MESSAGE } from "@/lib/ghl/syncErrorMarker";
 
 // POST /api/staff/imports/[id]/crm-sync
@@ -34,13 +34,20 @@ export async function POST(
       return NextResponse.json({ error: "Finalize the fitting before syncing." }, { status: 409 });
     }
     const sessionId = batch.demoSessionId;
-    const claim = await claimFittingSync(db, sessionId);
-    if (!claim) {
+    const claimResult = await claimFittingSyncResult(db, sessionId);
+    if (claimResult.status === "customer_busy") {
+      return NextResponse.json(
+        { success: false, status: "failed", code: "customer-sync-pending", error: "Customer contact synchronization is in progress. Retry CRM sync after it completes.", retryable: true },
+        { status: 409 },
+      );
+    }
+    if (claimResult.status !== "claimed") {
       return NextResponse.json(
         { success: false, status: "failed", code: "sync-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE, retryable: false },
         { status: 409 },
       );
     }
+    const claim = claimResult.token;
     const deps = createPrismaStagedSyncDeps(db);
     const loadBatch = deps.loadBatch;
     deps.loadBatch = async (batchId) => {

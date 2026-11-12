@@ -213,8 +213,8 @@ export function OpportunitySection({ batchId }: Props) {
         </h2>
         {!data.canSelectExisting ? (
           <p className="mt-2 text-sm text-muted-foreground font-body">
-            A new GHL contact will be created for this customer, so there are
-            no existing opportunities to choose from. Create a new one below.
+            This customer does not yet have a saved GHL contact, so existing
+            opportunities are unavailable. Create a new one below.
           </p>
         ) : noExisting ? (
           <p className="mt-2 text-sm text-muted-foreground font-body">

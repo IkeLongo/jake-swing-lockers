@@ -56,7 +56,7 @@ function makeBatch(over: Partial<StagedSyncBatch> = {}, sessionOver: Record<stri
       clubTests: [
         { clubRole: "demo", clubType: "7i", brand: "Ping", model: "G430", isRecommended: false, estimatedPrice: { toNumber: () => 1000 } },
       ],
-      client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: null },
+      client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-new" },
       ...sessionOver,
     },
     ...over,
@@ -246,26 +246,40 @@ function harness(batch: StagedSyncBatch) {
   return { deps, calls, opts, db };
 }
 
-test("new opportunity + customer without GHL contact", async () => {
-  const h = harness(makeBatch());
+test("a fitting waits without remote writes until its customer contact is saved", async () => {
+  const h = harness(makeBatch({}, {
+    client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: null },
+  }));
   const r = await syncStagedFittingToGHL(h.deps, 1);
-  assert.equal(r.ok, true);
-  if (!r.ok) return;
-  assert.equal(r.ghlContactId, "contact-new");
-  assert.equal(r.ghlOpportunityId, "opp-1");
-  assert.equal(h.calls.contactCreates, 1);
-  assert.deepEqual(h.calls.newContactInputs, [{
-    firstName: "Ann",
-    lastName: "Lee",
-    email: "a@b.co",
-    phone: null,
-  }]);
+  assert.equal(r.ok === false && r.code, "customer-sync-pending");
+  assert.equal(r.ok === false && r.status === "failed" && r.retryable, true);
+  assert.equal(h.calls.contactCreates + h.calls.createOpportunity + h.calls.fields + h.calls.tags, 0);
+  assert.equal(h.db.batch.demoSession!.ghlSyncStatus, null);
+  h.db.batch.demoSession!.client.ghlContactId = "contact-new";
+  const resumed = await syncStagedFittingToGHL(h.deps, 1);
+  assert.equal(resumed.ok && resumed.ghlContactId, "contact-new");
+  assert.equal(h.calls.contactCreates, 0);
   assert.equal(h.calls.createOpportunity, 1);
-  assert.equal(h.db.batch.demoSession!.client.ghlContactId, "contact-new");
-  assert.equal(h.db.batch.demoSession!.ghlSyncStatus, "synced");
 });
 
-test("existing customer new-contact approval creates from persisted customer identity, not batch proposals", async () => {
+test("customer review and conflicting resolved fitting contact block remote writes", async () => {
+  const review = harness(makeBatch({}, {
+    client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: null,
+      syncState: { desiredVersion: 1, workStatus: "needs_review" } },
+  }));
+  const reviewed = await syncStagedFittingToGHL(review.deps, 1);
+  assert.equal(reviewed.ok === false && reviewed.code, "contact-needs-review");
+  assert.equal(review.calls.contactCreates + review.calls.createOpportunity, 0);
+
+  const conflict = harness(makeBatch({}, {
+    ghlSyncState: { version: 1, contact: { status: "resolved", batchId: 1, clientId: 3, contactId: "other" } },
+  }));
+  const blocked = await syncStagedFittingToGHL(conflict.deps, 1);
+  assert.equal(blocked.ok === false && blocked.code, "contact-needs-review");
+  assert.equal(conflict.calls.verifiedContacts.length + conflict.calls.createOpportunity, 0);
+});
+
+test("an existing customer without a contact also waits without creating one", async () => {
   const b = approveBatch(
     makeBatch(
       {
@@ -292,13 +306,8 @@ test("existing customer new-contact approval creates from persisted customer ide
   );
   const h = harness(b);
   const result = await syncStagedFittingToGHL(h.deps, 1);
-  assert.equal(result.ok, true);
-  assert.deepEqual(h.calls.newContactInputs, [{
-    firstName: "Ann",
-    lastName: "Lee",
-    email: "ann@example.com",
-    phone: "+12105550100",
-  }]);
+  assert.equal(result.ok === false && result.code, "customer-sync-pending");
+  assert.equal(h.calls.contactCreates, 0);
 });
 
 test("existing ghlContactId is reused", async () => {
@@ -317,7 +326,7 @@ test("existing ghlContactId is reused", async () => {
   assert.deepEqual(h.calls.verifiedContacts, ["contact-old"]);
 });
 
-test("existing approved contact never falls back to a different saved GHL contact", async () => {
+test("the saved customer contact takes precedence over obsolete approval", async () => {
   const b = approveBatch(
     makeBatch(
       { customerResolution: "existing", selectedGolfClientId: 3 },
@@ -330,36 +339,31 @@ test("existing approved contact never falls back to a different saved GHL contac
   );
   const h = harness(b);
   const r = await syncStagedFittingToGHL(h.deps, 1);
-  assert.equal(r.ok, false);
-  assert.equal(r.ok === false && r.code, "contact-needs-review");
-  assert.deepEqual(h.calls.verifiedContacts, []);
-  assert.equal(h.calls.createOpportunity, 0);
+  assert.equal(r.ok && r.ghlContactId, "contact-old");
+  assert.deepEqual(h.calls.verifiedContacts, ["contact-old"]);
   assert.equal(h.db.batch.demoSession!.client.ghlContactId, "contact-old");
 });
 
-test("missing and stale GHL approvals stop before any CRM work", async () => {
+test("missing and stale GHL approvals do not block a verified saved contact", async () => {
   const missing = makeBatch({ ghlContactDecision: null });
   const stale = makeBatch();
   stale.ghlContactApprovalSignature = "stale";
   for (const batch of [missing, stale]) {
     const h = harness(batch);
     const r = await syncStagedFittingToGHL(h.deps, 1);
-    assert.equal(r.ok, false);
-    assert.equal(r.ok === false && r.code, "contact-needs-review");
-    assert.equal(h.calls.contactCreates + h.calls.createOpportunity, 0);
+    assert.equal(r.ok, true);
+    assert.equal(h.calls.contactCreates, 0);
   }
 });
 
-test("new-contact approval does not reuse a pre-existing customer contact link", async () => {
+test("a new-contact approval cannot cause a second contact", async () => {
   const b = makeBatch({}, {
     client: { id: 3, firstName: "Ann", lastName: "Lee", email: "a@b.co", phone: null, ghlContactId: "contact-old" },
   });
   const h = harness(b);
   const r = await syncStagedFittingToGHL(h.deps, 1);
-  assert.equal(r.ok, false);
-  assert.equal(r.ok === false && r.code, "contact-needs-review");
+  assert.equal(r.ok && r.ghlContactId, "contact-old");
   assert.equal(h.calls.contactCreates, 0);
-  assert.equal(h.calls.createOpportunity, 0);
 });
 
 test("new-contact approval cannot sync to an existing opportunity", async () => {
@@ -378,7 +382,7 @@ test("new-contact approval cannot sync to an existing opportunity", async () => 
   const h = harness(b);
   const r = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(r.ok, false);
-  assert.equal(r.ok === false && r.code, "contact-needs-review");
+  assert.equal(r.ok === false && r.code, "customer-sync-pending");
   assert.equal(h.calls.verifiedContacts.length + h.calls.contactCreates, 0);
   assert.equal(h.calls.validate + h.calls.createOpportunity, 0);
 });
@@ -386,7 +390,7 @@ test("new-contact approval cannot sync to an existing opportunity", async () => 
 test("contact and opportunity IDs are persisted before later steps", async () => {
   const h = harness(makeBatch());
   await syncStagedFittingToGHL(h.deps, 1);
-  assert.deepEqual(h.calls.order, ["saveContact", "saveOpp", "fields", "tagMarker"]);
+  assert.deepEqual(h.calls.order, ["saveOpp", "fields", "tagMarker"]);
 });
 
 test("definitive field rejection keeps the opportunity ID and safely retries", async () => {
@@ -402,7 +406,7 @@ test("definitive field rejection keeps the opportunity ID and safely retries", a
   const second = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(second.ok && second.ghlOpportunityId, "opp-1");
   assert.equal(h.calls.createOpportunity, 1);
-  assert.equal(h.calls.contactCreates, 1);
+  assert.equal(h.calls.contactCreates, 0);
 });
 
 test("a definitive opportunity rejection can safely retry", async () => {
@@ -618,7 +622,7 @@ test("already-synced legacy linked sessions remain a no-op without new approval 
 
 test("a contact needing review fails the sync non-retryably without touching the fitting", async () => {
   const h = harness(makeBatch());
-  h.deps.resolveNewContact = async () => {
+  h.deps.verifyApprovedContact = async () => {
     throw new ContactNeedsReviewError("multiple_matches", "Multiple GHL contacts match.");
   };
   const r = await syncStagedFittingToGHL(h.deps, 1);
@@ -628,7 +632,7 @@ test("a contact needing review fails the sync non-retryably without touching the
   assert.equal(r.code, "contact-needs-review");
   assert.deepEqual(h.calls.failedRetryable, [false]);
   assert.equal(h.calls.createOpportunity, 0);
-  assert.equal(h.db.batch.demoSession!.client.ghlContactId, null);
+  assert.equal(h.db.batch.demoSession!.client.ghlContactId, "contact-new");
   assert.equal(h.db.batch.demoSession!.status, "finalized");
   assert.equal(h.db.batch.demoSession!.ghlSyncStatus, "failed");
 });

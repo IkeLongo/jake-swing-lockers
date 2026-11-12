@@ -240,6 +240,8 @@ function harness(
             customerCreationLock.release =
               await shared?.acquireCustomerCreationLock();
           },
+          lockCustomerContact: async (id) =>
+            state.clientLinks.find((link) => link.id === id)?.ghlContactId,
           loadBatch: async () => reload(),
           loadSummaries: async () => state.summaries,
           listClientsForDuplicateCheck: async () => state.clients.map((c) => ({ ...c })),
@@ -372,7 +374,21 @@ test("existing customer without ghlContactId + new opportunity is valid", async 
   assert.equal(r.ok, true);
 });
 
-test("existing opportunity validates against the approved contact, not the saved client field", async () => {
+test("a customer contact changed during finalization prevents writes", async () => {
+  const h = harness(makeBatch(), [summary(1)]);
+  const validate = h.deps.validateOpportunity;
+  h.deps.validateOpportunity = async (...args) => {
+    const result = await validate(...args);
+    h.state.clientLinks[0]!.ghlContactId = "changed";
+    return result;
+  };
+  const result = await finalizeStagedImport(h.deps, input);
+  assert.equal(result.ok === false && result.code, "state_changed");
+  assert.equal(h.state.sessions.length, 0);
+  assert.equal(h.state.clubs.length, 0);
+});
+
+test("existing opportunity cannot use an approval when the customer has no saved contact", async () => {
   const h = harness(
     makeBatch({
       selectedGolfClient: {
@@ -387,9 +403,9 @@ test("existing opportunity validates against the approved contact, not the saved
     [summary(1)],
   );
   const r = await finalizeStagedImport(h.deps, input);
-  assert.equal(r.ok, true);
-  assert.deepEqual(h.opts.validatedContacts, ["contact-1"]);
-  assert.equal(h.state.clientLinks[0]!.ghlContactId, "contact-1");
+  assert.equal(r.ok === false && r.code, "no_ghl_contact");
+  assert.deepEqual(h.opts.validatedContacts, []);
+  assert.equal(h.state.clientLinks[0]!.ghlContactId, null);
 });
 
 test("an existing opportunity owned by a different GHL contact blocks finalization", async () => {
@@ -399,7 +415,7 @@ test("an existing opportunity owned by a different GHL contact blocks finalizati
       selectedGhlOpportunityId: "opp-owned-by-other-contact",
       selectedGolfClient: {
         id: 10,
-        ghlContactId: null,
+        ghlContactId: "contact-1",
         firstName: "Ann",
         lastName: "Lee",
         email: "ann@example.com",
@@ -413,7 +429,7 @@ test("an existing opportunity owned by a different GHL contact blocks finalizati
   assert.equal(r.ok === false && r.code, "opportunity_no_longer_valid");
   assert.deepEqual(h.opts.validatedContacts, ["contact-1"]);
   assert.equal(h.state.sessions.length, 0);
-  assert.equal(h.state.clientLinks[0]!.ghlContactId, null);
+  assert.equal(h.state.clientLinks[0]!.ghlContactId, "contact-1");
 });
 
 function newCustomerBatch(over: Partial<StagedFinalizeBatch> = {}) {
@@ -679,16 +695,16 @@ test("current new-contact approval allows local finalization without a contact a
   assert.equal(h.opts.ghlCalls, 0);
 });
 
-test("a new local customer is linked to the approved existing GHL contact", async () => {
+test("an obsolete approval cannot associate a new local customer", async () => {
   const batch = approveBatch(newCustomerBatch(), "existing", "contact-1");
   const h = harness(batch, [summary(1)]);
   const r = await finalizeStagedImport(h.deps, input);
   assert.equal(r.ok, true);
   assert.equal(h.state.clients.length, 1);
-  assert.equal(h.state.clientLinks[0]!.ghlContactId, "contact-1");
+  assert.equal(h.state.clientLinks[0]!.ghlContactId, null);
 });
 
-test("missing and stale GHL approvals block finalization before external checks or writes", async () => {
+test("missing and stale approvals do not block finalization with a saved contact", async () => {
   const missing = makeBatch({
     ghlContactDecision: null,
     approvedGhlContactId: null,
@@ -701,14 +717,14 @@ test("missing and stale GHL approvals block finalization before external checks 
   for (const batch of [missing, stale]) {
     const h = harness(batch, [summary(1)]);
     const r = await finalizeStagedImport(h.deps, input);
-    assert.equal(r.ok === false && r.code, "ghl_approval_required");
-    assert.equal(h.opts.ghlCalls, 0);
-    assert.equal(h.state.sessions.length, 0);
+    assert.equal(r.ok, true);
+    assert.equal(h.opts.ghlCalls, 1);
+    assert.equal(h.state.sessions.length, 1);
     assert.equal(h.state.clients.length, 0);
   }
 });
 
-test("a signed approve-new snapshot containing candidates cannot finalize locally", async () => {
+test("an obsolete approval snapshot cannot link a new local customer", async () => {
   const batch = approveBatch(newCustomerBatch(), "new", null, {
     v: 1,
     discoverySignature: "a".repeat(64),
@@ -727,24 +743,25 @@ test("a signed approve-new snapshot containing candidates cannot finalize locall
   });
   const h = harness(batch, [summary(1)]);
   const result = await finalizeStagedImport(h.deps, input);
-  assert.equal(result.ok === false && result.code, "ghl_approval_required");
+  assert.equal(result.ok, true);
   assert.equal(h.opts.ghlCalls, 0);
-  assert.equal(h.state.sessions.length, 0);
-  assert.equal(h.state.clients.length, 0);
+  assert.equal(h.state.sessions.length, 1);
+  assert.equal(h.state.clients.length, 1);
+  assert.equal(h.state.clientLinks[0]!.ghlContactId, null);
 });
 
-test("a new-contact decision cannot be finalized with an existing opportunity", async () => {
+test("an obsolete new-contact decision does not override the saved contact", async () => {
   const h = harness(
     approveBatch(makeBatch(), "new", null),
     [summary(1)],
   );
   const r = await finalizeStagedImport(h.deps, input);
-  assert.equal(r.ok === false && r.code, "new_contact_existing_opportunity");
-  assert.equal(h.opts.ghlCalls, 0);
-  assert.equal(h.state.sessions.length, 0);
+  assert.equal(r.ok, true);
+  assert.deepEqual(h.opts.validatedContacts, ["contact-1"]);
+  assert.equal(h.state.sessions.length, 1);
 });
 
-test("a different saved GHL association blocks finalization", async () => {
+test("existing opportunity validation uses the saved contact, not an old approval", async () => {
   const h = harness(
     makeBatch({
       selectedGolfClient: {
@@ -759,12 +776,12 @@ test("a different saved GHL association blocks finalization", async () => {
     [summary(1)],
   );
   const r = await finalizeStagedImport(h.deps, input);
-  assert.equal(r.ok === false && r.code, "saved_contact_conflict");
-  assert.equal(h.opts.ghlCalls, 0);
-  assert.equal(h.state.sessions.length, 0);
+  assert.equal(r.ok, true);
+  assert.deepEqual(h.opts.validatedContacts, ["contact-other"]);
+  assert.equal(h.state.sessions.length, 1);
 });
 
-test("a GHL contact linked to another local customer is not reassigned", async () => {
+test("an obsolete approval cannot reassign another customer's GHL contact", async () => {
   const batch = approveBatch(
     makeBatch({
       opportunityResolution: "new",
@@ -784,8 +801,9 @@ test("a GHL contact linked to another local customer is not reassigned", async (
   const h = harness(batch, [summary(1)]);
   h.state.clientLinks.push({ id: 11, ghlContactId: "contact-1" });
   const r = await finalizeStagedImport(h.deps, input);
-  assert.equal(r.ok === false && r.code, "ghl_contact_association_conflict");
-  assert.equal(h.state.sessions.length, 0);
+  assert.equal(r.ok, true);
+  assert.equal(h.state.sessions.length, 1);
+  assert.equal(h.state.clientLinks.find((link) => link.id === 10)!.ghlContactId, null);
   assert.equal(h.state.clientLinks.find((link) => link.id === 11)!.ghlContactId, "contact-1");
 });
 

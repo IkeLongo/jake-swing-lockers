@@ -7,7 +7,7 @@ import {
   listCustomerSyncCandidates,
   type CustomerSyncClaim,
 } from "../lib/ghl/customerSyncWorkerState";
-import { claimFittingSync, releaseFittingSync } from "../lib/ghl/fittingSyncClaim";
+import { claimFittingSync, claimFittingSyncResult, releaseFittingSync } from "../lib/ghl/fittingSyncClaim";
 import { Prisma } from "../app/generated/prisma/client";
 
 interface Row {
@@ -268,6 +268,16 @@ test("fitting claims block customer workers except the verified owning fitting",
   assert.deepEqual(await claimCustomerSync(h.db, 1, 1000), { status: "fitting_blocked" });
   assert.equal(await releaseFittingSync(h.db, 10, token), true);
   assert.deepEqual(await claimCustomerSync(h.db, 1, 1000, { sessionId: 10, token }), { status: "fitting_blocked" });
+});
+
+test("fitting distinguishes a live customer worker from an interrupted one", async () => {
+  const h = harness([row(1)]);
+  h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: null });
+  await claimed(h, 1);
+  assert.deepEqual(await claimFittingSyncResult(h.db, 10), { status: "customer_busy" });
+  h.advance(1000);
+  assert.deepEqual(await claimFittingSyncResult(h.db, 10), { status: "blocked" });
+  assert.equal(h.sessions.get(10)!.ghlSyncState, null);
 });
 
 test("interrupted or unresolved sibling fitting states remain blocking", async () => {

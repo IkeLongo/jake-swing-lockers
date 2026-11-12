@@ -195,7 +195,7 @@ test("existing opportunity selection stores no name or override", async () => {
     proposedFirstName: null,
     proposedLastName: null,
     proposedEmail: null,
-    client: { firstName: "Ann", lastName: "Lee", email: "ann@example.com", phone: null },
+    client: { firstName: "Ann", lastName: "Lee", email: "ann@example.com", phone: null, ghlContactId: "c-1" },
     ghlContactDecision: "existing",
     approvedGhlContactId: "c-1",
     opportunityResolution: "new",

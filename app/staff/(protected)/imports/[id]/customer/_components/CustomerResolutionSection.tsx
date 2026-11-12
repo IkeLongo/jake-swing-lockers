@@ -15,12 +15,6 @@ import {
   type NewCustomerReview,
 } from "@/lib/imports/new-customer-review";
 import { DuplicateReviewPanel } from "./DuplicateReviewPanel";
-import { GhlContactDiscoverySection } from "./GhlContactDiscoverySection";
-import type { GhlApprovalView } from "@/lib/ghl/approveBatchContact";
-import {
-  canContinueWithApproval,
-  getApprovalContinueHint,
-} from "@/lib/ghl/approvalUi";
 
 interface Props {
   batchId: number;
@@ -29,7 +23,6 @@ interface Props {
   initialState: CustomerResolutionState;
   initialSelectedCustomer: ClientSearchResult | null;
   initialReview: NewCustomerReview | null;
-  initialApproval: GhlApprovalView | null;
 }
 
 interface SaveResponse {
@@ -75,7 +68,6 @@ export function CustomerResolutionSection({
   initialState,
   initialSelectedCustomer,
   initialReview,
-  initialApproval,
 }: Props) {
   const router = useRouter();
   const [review, setReview] = useState<NewCustomerReview | null>(initialReview);
@@ -93,8 +85,6 @@ export function CustomerResolutionSection({
     hasPersistedCustomerResolution(initialState),
   );
   const initialResolutionValid = hasPersistedCustomerResolution(initialState);
-  const [approval, setApproval] = useState<GhlApprovalView | null>(initialApproval);
-  const [identityVersion, setIdentityVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -239,10 +229,6 @@ export function CustomerResolutionSection({
         });
       }
       setPersisted(true);
-      // A save may have cleared the approval; the remounted GHL section
-      // reloads the real state before Continue is enabled again.
-      setApproval(null);
-      setIdentityVersion((v) => v + 1);
       router.refresh();
       return true;
     } catch {
@@ -257,8 +243,6 @@ export function CustomerResolutionSection({
   const showExistingSummary = choice?.mode === "existing" && !showPicker;
   const newReview = choice?.mode === "new" ? review : null;
   const reviewBlocking = isReviewBlocking(newReview);
-  const canContinue = canContinueWithApproval(approval);
-  const continueHint = getApprovalContinueHint(approval);
 
   return (
     <div className="space-y-4">
@@ -462,24 +446,9 @@ export function CustomerResolutionSection({
       </section>
 
       {choice && persisted && !reviewBlocking && (
-        <GhlContactDiscoverySection
-          key={identityVersion}
-          batchId={batchId}
-          initialApproval={identityVersion === 0 ? initialApproval : null}
-          onApprovalChange={setApproval}
-        />
-      )}
-
-      {choice && persisted && !reviewBlocking && (
         <div className="space-y-2">
-          {continueHint && (
-            <p className="text-sm text-muted-foreground font-body">
-              {continueHint}
-            </p>
-          )}
           <button
             type="button"
-            disabled={!canContinue}
             onClick={() => router.push(`/staff/imports/${batchId}/map`)}
             className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 font-subheading"
           >

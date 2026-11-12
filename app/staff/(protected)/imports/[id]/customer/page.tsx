@@ -7,8 +7,6 @@ import type { CustomerResolutionState } from "@/lib/imports/customer-resolution"
 import { getCustomerPageRedirect } from "@/lib/imports/customer-workflow-routing";
 import { buildNewCustomerReview } from "@/lib/imports/new-customer-review-server";
 import { loadClientsForDuplicateCheck } from "@/lib/imports/new-customer-review-store";
-import { buildApprovalView } from "@/lib/ghl/approveBatchContact";
-import { getBatchGhlApprovalStatus } from "@/lib/imports/ghl-approval-gate";
 import { CustomerResolutionSection } from "./_components/CustomerResolutionSection";
 
 export const metadata: Metadata = {
@@ -88,22 +86,6 @@ export default async function ImportCustomerPage({
         )
       : null;
 
-  const initialApproval = buildApprovalView(
-    getBatchGhlApprovalStatus(
-      batch,
-      initialState.customerResolution === "existing"
-        ? batch.selectedGolfClient
-        : null,
-    ),
-    {
-      decision: batch.ghlContactDecision,
-      approvedContactId: batch.approvedGhlContactId,
-      approvedAt: batch.ghlContactApprovedAt,
-      approvedByStaffUserId: batch.ghlContactApprovedByStaffUserId,
-      snapshot: batch.ghlContactReviewSnapshot,
-    },
-  );
-
   return (
     <div className="max-w-3xl">
       <Link
@@ -149,7 +131,6 @@ export default async function ImportCustomerPage({
         initialState={initialState}
         initialSelectedCustomer={batch.selectedGolfClient}
         initialReview={initialReview}
-        initialApproval={initialApproval}
       />
     </div>
   );

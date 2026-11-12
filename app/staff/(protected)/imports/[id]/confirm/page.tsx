@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { STAFF_SESSION_COOKIE, verifyStaffSessionToken } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { getOpportunityById } from "@/lib/ghl/opportunities";
-import { GHL_APPROVAL_BATCH_SELECT, getCurrentGhlDecision } from "@/lib/imports/ghl-approval-gate";
+import { GHL_APPROVAL_BATCH_SELECT, getCustomerContactDecision } from "@/lib/imports/ghl-approval-gate";
 import {
   formatFittingDate,
   getConfirmClubs,
@@ -53,7 +53,7 @@ export default async function ImportConfirmPage({
         selectedGhlOpportunityId: true,
         trackmanSessionDate: true,
         selectedGolfClient: {
-          select: { firstName: true, lastName: true, email: true, phone: true },
+          select: { firstName: true, lastName: true, email: true, phone: true, ghlContactId: true },
         },
         demoSession: {
           select: {
@@ -70,6 +70,7 @@ export default async function ImportConfirmPage({
                 lastName: true,
                 email: true,
                 phone: true,
+                ghlContactId: true,
                 ghlContactCreationState: true,
                 syncState: {
                   select: {
@@ -77,6 +78,7 @@ export default async function ImportConfirmPage({
                     creationAttemptVersion: true,
                     creationAttemptStatus: true,
                     creationAttemptedAt: true,
+                    workStatus: true,
                   },
                 },
               },
@@ -92,7 +94,9 @@ export default async function ImportConfirmPage({
   ]);
   if (!batch) notFound();
 
-  const ghlDecision = getCurrentGhlDecision(batch, batch.selectedGolfClient);
+  const ghlDecision = batch.demoSession
+    ? (batch.demoSession.client.ghlContactId ? "existing" : "new")
+    : getCustomerContactDecision(batch, batch.selectedGolfClient);
   const clubs = getConfirmClubs(summaries);
   const destination = getConfirmPageRedirect(batch, clubs.length, ghlDecision);
   if (destination) redirect(destination);
@@ -158,13 +162,13 @@ export default async function ImportConfirmPage({
             <div className="mt-2 rounded-lg border border-border bg-card px-4 py-2.5">
               <p className="text-sm font-semibold text-foreground font-body">
                 {ghlDecision === "existing"
-                  ? "Existing GHL contact"
-                  : "New GHL contact"}
+                  ? "Customer contact linked"
+                  : "Customer contact pending"}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground font-body">
                 {ghlDecision === "existing"
-                  ? "Staff approved using the existing GHL contact for this customer."
-                  : "Staff approved creating a new GHL contact when the CRM sync runs."}
+                  ? "CRM synchronization uses this customer's saved contact."
+                  : "Customer contact synchronization must complete before the fitting can sync."}
               </p>
             </div>
           </section>
