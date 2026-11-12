@@ -1,7 +1,9 @@
 "use server";
 
 import { randomUUID } from "crypto";
+import { cookies } from "next/headers";
 import { db } from "@/lib/db";
+import { STAFF_SESSION_COOKIE, verifyStaffSessionToken } from "@/lib/auth/session";
 import { demoFormSchema, type ActionResult, type ClubTabValues } from "@/lib/validations/demo";
 import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
 import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
@@ -10,6 +12,23 @@ import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-stor
 export async function createDemoSession(
   rawData: unknown
 ): Promise<ActionResult> {
+  const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
+  const session = token ? verifyStaffSessionToken(token) : null;
+  if (
+    !session?.valid ||
+    !Number.isSafeInteger(session.payload.staffUserId) ||
+    session.payload.staffUserId < 1
+  ) {
+    return { success: false, message: "Unauthorized." };
+  }
+  const staff = await db.staffUser.findUnique({
+    where: { id: session.payload.staffUserId },
+    select: { isActive: true },
+  });
+  if (!staff?.isActive) {
+    return { success: false, message: "Unauthorized." };
+  }
+
   // ── 1. Validate ──────────────────────────────────────────────────────────────
   const parsed = demoFormSchema.safeParse(rawData);
 
