@@ -7,6 +7,8 @@ import {
   listCustomerSyncCandidates,
   type CustomerSyncClaim,
 } from "../lib/ghl/customerSyncWorkerState";
+import { claimFittingSync, releaseFittingSync } from "../lib/ghl/fittingSyncClaim";
+import { Prisma } from "../app/generated/prisma/client";
 
 interface Row {
   golfClientId: number;
@@ -53,6 +55,7 @@ function row(id: number, patch: Partial<Row> = {}): Row {
 
 function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
   const rows = new Map(initial.map((value) => [value.golfClientId, { ...value }]));
+  const sessions = new Map<number, { id: number; clientId: number; ghlSyncState: unknown }>();
   const tails = new Map<number, Promise<void>>();
   const sql: string[] = [];
   const transactionSql: string[][] = [];
@@ -95,7 +98,16 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
             local = rows.has(id) ? { ...rows.get(id)! } : null;
             return local ? [{ id }] : [];
           }
+          if (query.includes("FROM DemoSession WHERE id")) {
+            return sessions.has(id) ? [{ id }] : [];
+          }
           assert.equal(lockedId, id);
+          if (query.includes("FROM DemoSession")) {
+            return [...sessions.values()]
+              .filter((session) => session.clientId === id)
+              .sort((a, b) => a.id - b.id)
+              .map((session) => structuredClone(session));
+          }
           return local ? [{
             ...local,
             ...(options.unsignedAsBigInt ? {
@@ -112,6 +124,22 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
           async findUniqueOrThrow() {
             assert.ok(local);
             return { ghlContactCreationState: local.legacyClaim };
+          },
+        },
+        demoSession: {
+          async findUnique({ where }: { where: { id: number } }) {
+            const session = sessions.get(where.id);
+            return session ? { clientId: session.clientId } : null;
+          },
+          async findUniqueOrThrow({ where }: { where: { id: number } }) {
+            const session = sessions.get(where.id);
+            assert.ok(session);
+            return { ghlSyncState: structuredClone(session.ghlSyncState) };
+          },
+          async update({ where, data }: { where: { id: number }; data: { ghlSyncState: unknown } }) {
+            const session = sessions.get(where.id);
+            assert.ok(session);
+            session.ghlSyncState = data.ghlSyncState === Prisma.DbNull ? null : structuredClone(data.ghlSyncState);
           },
         },
         golfClientSyncState: {
@@ -189,6 +217,7 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
   return {
     db: db as never,
     rows,
+    sessions,
     sql,
     transactionSql,
     advance(ms: number) { now += ms; },
@@ -216,9 +245,86 @@ test("two workers cannot claim one customer; different customers can be claimed"
   assert.equal(h.rows.get(2)?.attemptCount, 1);
   for (const transaction of h.transactionSql) {
     const locks = transaction.filter((query) => query.includes("FOR UPDATE"));
-    assert.equal(locks.length, 2);
+    assert.equal(locks.length, 3);
     assert.match(locks[0]!, /FROM GolfClient WHERE/);
     assert.match(locks[1]!, /FROM GolfClientSyncState WHERE/);
+    assert.match(locks[2]!, /FROM DemoSession/);
+  }
+});
+
+test("fitting claims block customer workers except the verified owning fitting", async () => {
+  const h = harness([row(1)]);
+  h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: null });
+  h.sessions.set(11, { id: 11, clientId: 1, ghlSyncState: null });
+  const token = await claimFittingSync(h.db, 10);
+  assert.ok(token);
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000), { status: "fitting_blocked" });
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000, { sessionId: 10, token: "wrong" }), { status: "fitting_blocked" });
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000, { sessionId: 11, token }), { status: "fitting_blocked" });
+  const nested = await claimCustomerSync(h.db, 1, 1000, { sessionId: 10, token });
+  assert.equal(nested.status, "claimed");
+  if (nested.status !== "claimed") throw new Error("nested claim failed");
+  assert.deepEqual(await completeCustomerSync(h.db, nested.claim), { status: "applied" });
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000), { status: "fitting_blocked" });
+  assert.equal(await releaseFittingSync(h.db, 10, token), true);
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000, { sessionId: 10, token }), { status: "fitting_blocked" });
+});
+
+test("interrupted or unresolved sibling fitting states remain blocking", async () => {
+  const h = harness([row(1)]);
+  h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: JSON.stringify({ version: 1, fittingClaim: { token: "interrupted" } }) });
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000), { status: "fitting_blocked" });
+  assert.equal(h.rows.get(1)?.workStatus, "pending");
+  h.sessions.get(10)!.ghlSyncState = null;
+  const token = await claimFittingSync(h.db, 10);
+  assert.ok(token);
+  h.sessions.set(11, { id: 11, clientId: 1, ghlSyncState: { version: 1, opportunity: { status: "creating" } } });
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000, { sessionId: 10, token }), { status: "fitting_blocked" });
+  h.sessions.delete(11);
+  assert.equal(await releaseFittingSync(h.db, 10, token), true);
+  assert.equal((await claimCustomerSync(h.db, 1, 1000)).status, "claimed");
+});
+
+test("customer claims block fittings until safely released; expired claims require reconciliation", async () => {
+  const h = harness([row(1)]);
+  h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: null });
+  const claim = await claimed(h, 1);
+  assert.equal(await claimFittingSync(h.db, 10), null);
+  assert.deepEqual(await failCustomerSync(h.db, claim, {
+    kind: "retryable", retrySafety: "no_remote_write", delayMs: 1000, code: "read_failed", message: "Read failed",
+  }), { status: "applied" });
+  const token = await claimFittingSync(h.db, 10);
+  assert.ok(token);
+  assert.equal(await releaseFittingSync(h.db, 10, token), true);
+  h.advance(1000);
+  const next = await claimed(h, 1);
+  h.advance(1000);
+  assert.equal(await claimFittingSync(h.db, 10), null);
+  assert.deepEqual(await claimCustomerSync(h.db, 1, 1000), { status: "needs_reconciliation" });
+  assert.equal(await claimFittingSync(h.db, 10), null);
+  assert.deepEqual(await completeCustomerSync(h.db, next), { status: "lost_claim" });
+});
+
+test("concurrent fitting and customer claims have only one winner", async () => {
+  for (const fittingFirst of [true, false]) {
+    const h = harness([row(1)]);
+    h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: null });
+    const fitting = () => claimFittingSync(h.db, 10);
+    const customer = () => claimCustomerSync(h.db, 1, 1000);
+    const [fit, worker] = fittingFirst
+      ? await Promise.all([fitting(), customer()])
+      : await Promise.all([customer(), fitting()]).then(([worker, fit]) => [fit, worker] as const);
+    assert.equal(Number(fit !== null) + Number(worker.status === "claimed"), 1);
+    if (fit) {
+      assert.equal(worker.status, "fitting_blocked");
+      assert.equal(await releaseFittingSync(h.db, 10, fit), true);
+      assert.equal((await claimCustomerSync(h.db, 1, 1000)).status, "claimed");
+    } else {
+      assert.equal(worker.status, "claimed");
+      if (worker.status !== "claimed") throw new Error("worker claim failed");
+      assert.deepEqual(await completeCustomerSync(h.db, worker.claim), { status: "applied" });
+      assert.ok(await claimFittingSync(h.db, 10));
+    }
   }
 });
 

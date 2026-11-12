@@ -19,6 +19,42 @@ function rawSessionState(value: Prisma.JsonValue): unknown {
   }
 }
 
+export interface FittingSyncOwner {
+  sessionId: number;
+  token: string;
+}
+
+export async function fittingSyncBlocksCustomer(
+  tx: Prisma.TransactionClient,
+  clientId: number,
+  owner?: FittingSyncOwner,
+): Promise<boolean> {
+  if (owner && (!Number.isSafeInteger(owner.sessionId) || owner.sessionId < 1 ||
+      typeof owner.token !== "string" || !owner.token)) return true;
+  const sessions = await tx.$queryRaw<{ id: number; ghlSyncState: Prisma.JsonValue }[]>`
+    SELECT id, ghlSyncState FROM DemoSession
+    WHERE clientId = ${clientId} ORDER BY id FOR UPDATE
+  `;
+  let ownerFound = false;
+  for (const session of sessions) {
+    const raw = rawSessionState(session.ghlSyncState);
+    if (owner && session.id === owner.sessionId) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return true;
+      const state = raw as Record<string, unknown>;
+      const claim = state.fittingClaim;
+      if (!claim || typeof claim !== "object" || Array.isArray(claim) ||
+          (claim as Record<string, unknown>).token !== owner.token) return true;
+      const rest = { ...state };
+      delete rest.fittingClaim;
+      if (hasUnresolvedFittingSyncState(rest)) return true;
+      ownerFound = true;
+    } else if (hasUnresolvedFittingSyncState(raw)) {
+      return true;
+    }
+  }
+  return owner !== undefined && !ownerFound;
+}
+
 export async function claimFittingSync(
   db: PrismaClient,
   sessionId: number,
@@ -35,6 +71,23 @@ export async function claimFittingSync(
       SELECT id FROM GolfClient WHERE id = ${target.clientId} FOR UPDATE
     `;
     if (!customers.length) return null;
+    const states = await tx.$queryRaw<{
+      workStatus: string;
+      claimToken: string | null;
+      claimedVersion: number | null;
+      leaseExpiresAt: Date | null;
+    }[]>`
+      SELECT workStatus, claimToken, claimedVersion, leaseExpiresAt
+      FROM GolfClientSyncState WHERE golfClientId = ${target.clientId} FOR UPDATE
+    `;
+    const customerState = states[0];
+    if (customerState && (
+      customerState.workStatus === "processing" ||
+      customerState.workStatus === "needs_reconciliation" ||
+      customerState.claimToken !== null ||
+      customerState.claimedVersion !== null ||
+      customerState.leaseExpiresAt !== null
+    )) return null;
     const sessions = await tx.$queryRaw<{ id: number; ghlSyncState: Prisma.JsonValue }[]>`
       SELECT id, ghlSyncState FROM DemoSession
       WHERE clientId = ${target.clientId} ORDER BY id FOR UPDATE

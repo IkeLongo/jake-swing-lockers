@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@/app/generated/prisma/client";
+import { fittingSyncBlocksCustomer, type FittingSyncOwner } from "./fittingSyncClaim";
 
 export interface CustomerSyncClaim {
   golfClientId: number;
@@ -10,6 +11,7 @@ export interface CustomerSyncClaim {
 export type CustomerSyncClaimResult =
   | { status: "claimed"; claim: CustomerSyncClaim }
   | { status: "unavailable" }
+  | { status: "fitting_blocked" }
   | { status: "needs_reconciliation" };
 
 export type CustomerSyncTransitionResult =
@@ -184,12 +186,16 @@ export async function claimCustomerSync(
   db: PrismaClient,
   golfClientId: number,
   leaseMs: number,
+  fittingOwner?: FittingSyncOwner,
 ): Promise<CustomerSyncClaimResult> {
   assertClientId(golfClientId);
   assertDuration(leaseMs, "leaseMs");
   return db.$transaction(async (tx) => {
     const row = await lockCustomerAndState(tx, golfClientId);
     if (!row) return { status: "unavailable" };
+    if (await fittingSyncBlocksCustomer(tx, golfClientId, fittingOwner)) {
+      return { status: "fitting_blocked" };
+    }
     const { state } = row;
     if (state.workStatus === "processing") {
       if (Number(state.leaseValid) === 1) return { status: "unavailable" };

@@ -37,9 +37,10 @@ creation markers needs reconciliation.
 Fitting claims now serialize syncs for the same customer, including a legacy
 customer update. Stop old-version sync requests before deployment: an
 already-running older process does not honor these safeguards.
-Before enabling customer synchronization, reconcile interrupted legacy fitting
-claims: the independent customer processor does not check fitting claims before
-reserving a contact creation.
+Customer workers and fitting claims coordinate under the customer lock. Active
+or interrupted fitting claims block independent customer sync; an active or
+unreconciled customer worker blocks fitting sync. Reconcile interrupted work
+before resuming either operation.
 
 An active staff administrator can invoke one batch from a same-origin browser
 session by sending a JSON POST to `/api/staff/admin/customer-contact-sync`, for

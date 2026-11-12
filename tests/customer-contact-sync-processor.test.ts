@@ -597,6 +597,24 @@ test("concurrent worker and enabled legacy writer share one contact claim", asyn
   assert.equal(h.calls.update.length, 1);
 });
 
+test("a fitting-blocked claim cannot use the already-synced fallback", async () => {
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  const h = harness({
+    customer: {
+      ghlContactId: "saved",
+      syncState: { workStatus: "synced", desiredVersion: 1, syncedVersion: 1 },
+    },
+  });
+  h.services.claim = async () => ({ status: "fitting_blocked" });
+  let reads = 0;
+  h.services.match = async () => { reads++; return matched("saved"); };
+  h.services.loadCustomer = async () => { reads++; return h.customer; };
+  assert.equal((await processCustomerContactSync(7, h.services)).status, "unavailable");
+  assert.equal(reads, 0);
+  assert.equal(h.calls.update.length, 0);
+  assert.equal(h.calls.create.length, 0);
+});
+
 test("profile changes during matching preserve the newer version without a stale write", async () => {
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
   const h = harness({

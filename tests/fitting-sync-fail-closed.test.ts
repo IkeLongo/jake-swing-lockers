@@ -63,9 +63,17 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   let failLegacyLoad = false;
   let failStagedLoad = false;
   let siblingState: unknown = null;
+  let workerState: null | {
+    workStatus: string; desiredVersion: number; syncedVersion: number;
+    claimedVersion: null; claimToken: null; leaseExpiresAt: null;
+    creationAttemptId: null; creationAttemptVersion: null;
+    creationAttemptStatus: null; creationAttemptedAt: null;
+    retryDue: null; leaseValid: null;
+  } = null;
   const fake = {
     async $transaction<T>(fn: (tx: object) => Promise<T>): Promise<T> { return fn(this); },
     async $queryRaw(strings: TemplateStringsArray) {
+      if (strings.join("?").includes("FROM GolfClientSyncState")) return workerState ? [workerState] : [];
       if (strings.join("?").includes("SELECT id, ghlSyncState")) {
         return [
           { id: 7, ghlSyncState: structuredClone(session.ghlSyncState) },
@@ -88,7 +96,10 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     },
     golfClient: {
       async findMany() { return []; },
-      async findUnique() { return { id: 3 }; },
+      async findUnique(args: { select?: { firstName?: boolean } }) {
+        return args.select?.firstName ? client : { id: 3 };
+      },
+      async findUniqueOrThrow() { return { ghlContactCreationState: client.ghlContactCreationState }; },
       async update() {},
     },
     importBatch: {
@@ -250,5 +261,18 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   const success = await runStaged();
   assert.equal(success.status, 200);
   assert.equal((await success.json()).status, "synced");
+  assert.equal(session.ghlSyncState, null);
+
+  reset();
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  workerState = {
+    workStatus: "synced", desiredVersion: 1, syncedVersion: 1,
+    claimedVersion: null, claimToken: null, leaseExpiresAt: null,
+    creationAttemptId: null, creationAttemptVersion: null,
+    creationAttemptStatus: null, creationAttemptedAt: null,
+    retryDue: null, leaseValid: null,
+  };
+  Object.assign(client, { syncState: workerState });
+  assert.equal((await syncGolfDemoToGHL(7)).success, true);
   assert.equal(session.ghlSyncState, null);
 });

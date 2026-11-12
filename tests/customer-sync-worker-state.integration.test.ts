@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, afterEach, before, describe, test } from "node:test";
 import { enqueueCustomerSync } from "../lib/ghl/customerSyncOutbox";
+import { claimFittingSync, releaseFittingSync } from "../lib/ghl/fittingSyncClaim";
 import {
   claimCustomerSync,
   completeCustomerSync,
@@ -33,6 +34,7 @@ describe("customer sync worker state MySQL integration", { skip }, () => {
 
   afterEach(async () => {
     if (!verified || fixtureIds.length === 0) return;
+    await db.demoSession.deleteMany({ where: { clientId: { in: fixtureIds } } });
     await db.golfClient.deleteMany({ where: { id: { in: fixtureIds.splice(0) } } });
   });
 
@@ -74,6 +76,57 @@ describe("customer sync worker state MySQL integration", { skip }, () => {
     assert.equal(results.filter((result) => result.status === "unavailable").length, 1);
     assert.equal((await db.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: first } })).attemptCount, 1);
     assert.equal((await db.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: second } })).attemptCount, 1);
+  });
+
+  test("customer and fitting claims serialize in both directions and only the owner may nest", async () => {
+    const id = await fixture();
+    const session = await db.demoSession.create({ data: { clientId: id, lockerToken: randomUUID() } });
+    const other = await db.demoSession.create({ data: { clientId: id, lockerToken: randomUUID() } });
+    const fitting = await claimFittingSync(db, session.id);
+    assert.ok(fitting);
+    assert.deepEqual(await claimCustomerSync(db, id, 60_000), { status: "fitting_blocked" });
+    assert.deepEqual(await claimCustomerSync(db, id, 60_000, { sessionId: session.id, token: randomUUID() }), { status: "fitting_blocked" });
+    assert.deepEqual(await claimCustomerSync(db, id, 60_000, { sessionId: other.id, token: fitting }), { status: "fitting_blocked" });
+    const nested = await claimCustomerSync(db, id, 60_000, { sessionId: session.id, token: fitting });
+    assert.equal(nested.status, "claimed");
+    if (nested.status !== "claimed") throw new Error("nested claim failed");
+    await db.$transaction((tx) => enqueueCustomerSync(tx, { golfClientId: id, reason: "profile_changed" }));
+    assert.deepEqual(await completeCustomerSync(db, nested.claim), { status: "applied" });
+    assert.equal((await db.golfClientSyncState.findUniqueOrThrow({ where: { golfClientId: id } })).workStatus, "pending");
+    assert.equal(await releaseFittingSync(db, session.id, fitting), true);
+
+    const worker = await requireClaim(id);
+    assert.equal(await claimFittingSync(db, session.id), null);
+    assert.deepEqual(await failCustomerSync(db, worker, {
+      kind: "retryable", retrySafety: "no_remote_write", delayMs: 1000, code: "read_failed", message: "Read failed",
+    }), { status: "applied" });
+    const next = await claimFittingSync(db, session.id);
+    assert.ok(next);
+    assert.equal(await releaseFittingSync(db, session.id, next), true);
+  });
+
+  test("concurrent customer and fitting acquisition has exactly one winner", async () => {
+    for (let iteration = 0; iteration < 4; iteration++) {
+      const id = await fixture();
+      const session = await db.demoSession.create({ data: { clientId: id, lockerToken: randomUUID() } });
+      const [fitting, customer] = await Promise.all([
+        claimFittingSync(db, session.id),
+        claimCustomerSync(db, id, 60_000),
+      ]);
+      assert.equal(Number(fitting !== null) + Number(customer.status === "claimed"), 1);
+      if (fitting) {
+        assert.equal(customer.status, "fitting_blocked");
+        assert.equal(await releaseFittingSync(db, session.id, fitting), true);
+      } else {
+        assert.equal(customer.status, "claimed");
+        if (customer.status !== "claimed") throw new Error("customer claim failed");
+        assert.equal(await claimFittingSync(db, session.id), null);
+        assert.deepEqual(await completeCustomerSync(db, customer.claim), { status: "applied" });
+        const next = await claimFittingSync(db, session.id);
+        assert.ok(next);
+        assert.equal(await releaseFittingSync(db, session.id, next), true);
+      }
+    }
   });
 
   test("a locked customer does not prevent claiming a different customer", async () => {

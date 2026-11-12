@@ -19,6 +19,7 @@ import {
   type CustomerSyncFailure,
   type CustomerSyncTransitionResult,
 } from "./customerSyncWorkerState";
+import type { FittingSyncOwner } from "./fittingSyncClaim";
 import {
   ContactDiscoveryUnavailableError,
   type DiscoveredContact,
@@ -113,10 +114,11 @@ export function isCustomerContactSyncEnabled(): boolean {
 
 function createServices(
   database: PrismaClient,
+  fittingOwner?: FittingSyncOwner,
 ): CustomerContactSyncServices {
   return {
     claim: (golfClientId) =>
-      claimCustomerSync(database, golfClientId, CUSTOMER_SYNC_LEASE_MS),
+      claimCustomerSync(database, golfClientId, CUSTOMER_SYNC_LEASE_MS, fittingOwner),
     loadCustomer: (golfClientId) =>
       database.golfClient.findUnique({
         where: { id: golfClientId },
@@ -634,6 +636,7 @@ async function returnVerifiedSyncedContact(
 export async function processCustomerContactSync(
   golfClientId: number,
   suppliedServices?: CustomerContactSyncServices,
+  fittingOwner?: FittingSyncOwner,
 ): Promise<CustomerContactSyncResult> {
   if (!Number.isSafeInteger(golfClientId) || golfClientId < 1) {
     throw new RangeError("golfClientId must be a positive safe integer.");
@@ -642,8 +645,12 @@ export async function processCustomerContactSync(
 
   const services = suppliedServices ?? createServices(
     (await import("@/lib/db")).db,
+    fittingOwner,
   );
   const claimResult = await services.claim(golfClientId);
+  if (claimResult.status === "fitting_blocked") {
+    return { status: "unavailable", message: "A fitting sync or unresolved fitting state blocks customer synchronization." };
+  }
   if (claimResult.status === "needs_reconciliation") {
     return { status: "needs_reconciliation" };
   }

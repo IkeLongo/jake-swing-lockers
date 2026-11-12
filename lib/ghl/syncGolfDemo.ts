@@ -48,7 +48,7 @@ export async function syncGolfDemoToGHL(
       requiresReconciliation: true,
     };
   }
-  const result = await syncGolfDemoClaimed(demoSessionId);
+  const result = await syncGolfDemoClaimed(demoSessionId, claim);
   if (!result.requiresReconciliation && !await releaseFittingSync(db, demoSessionId, claim)) {
     return { success: false, error: FITTING_RECONCILIATION_MESSAGE, requiresReconciliation: true };
   }
@@ -56,7 +56,8 @@ export async function syncGolfDemoToGHL(
 }
 
 async function syncGolfDemoClaimed(
-  demoSessionId: number
+  demoSessionId: number,
+  claim: string,
 ): Promise<GhlSyncResult> {
   // ── 1. Load session with all relations ────────────────────────────────────
   let session;
@@ -97,7 +98,7 @@ async function syncGolfDemoClaimed(
     let resolution: ContactResolution;
     if (customerContactSyncEnabled) {
       uncertain = true;
-      const result = await processCustomerContactSync(client.id);
+      const result = await processCustomerContactSync(client.id, undefined, { sessionId: demoSessionId, token: claim });
       if (result.status !== "synced") {
         uncertain = result.status !== "needs_review" && result.status !== "disabled" &&
           !(result.status === "retry_scheduled" &&

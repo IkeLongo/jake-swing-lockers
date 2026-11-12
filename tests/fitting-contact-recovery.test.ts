@@ -90,6 +90,7 @@ function harness() {
       try { return await fn(fake as never); } finally { release(); }
     },
     async $queryRaw(strings: TemplateStringsArray) {
+      if (strings.join("?").includes("FROM GolfClientSyncState")) return [];
       if (strings.join("?").includes("SELECT id, ghlSyncState")) {
         return [{ id: session.id, ghlSyncState: structuredClone(session.ghlSyncState) }];
       }

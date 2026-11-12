@@ -43,6 +43,7 @@ test("disabled customer sync never creates contacts or bypasses fitting claims",
       try { return await fn(this); } finally { release(); }
     },
     async $queryRaw(strings: TemplateStringsArray) {
+      if (strings.join("?").includes("FROM GolfClientSyncState")) return [];
       if (strings.join("?").includes("SELECT id, ghlSyncState")) {
         return [...sessions.values()].map((row) => structuredClone(row));
       }
