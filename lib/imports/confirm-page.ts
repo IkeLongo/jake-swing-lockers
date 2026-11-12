@@ -1,4 +1,4 @@
-import { decodeSyncError } from "@/lib/ghl/syncErrorMarker";
+import { decodeSyncError, FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation, hasUnresolvedFittingSyncState } from "@/lib/ghl/syncErrorMarker";
 import { hasPersistedCustomerResolution } from "./customer-workflow-routing";
 import {
   flattenPlan,
@@ -25,6 +25,8 @@ export interface ConfirmBatch {
     status: string;
     ghlSyncStatus: string | null;
     ghlSyncError?: string | null;
+    ghlSyncState?: unknown;
+    client?: Parameters<typeof hasUnresolvedCustomerCreation>[0];
   } | null;
 }
 
@@ -77,6 +79,10 @@ export function getConfirmPageState(batch: ConfirmBatch): ConfirmPageState {
   const session = batch.demoSession;
   if (batch.demoSessionId === null || session?.status !== "finalized") {
     return { stage: "ready", syncAttempted: false, error: null };
+  }
+  if (hasUnresolvedFittingSyncState(session.ghlSyncState) ||
+      (session.client && hasUnresolvedCustomerCreation(session.client))) {
+    return { stage: "crm_action_required", syncAttempted: true, error: FITTING_RECONCILIATION_MESSAGE };
   }
   if (session.ghlSyncStatus === "synced") {
     return { stage: "synced", syncAttempted: true, error: null };

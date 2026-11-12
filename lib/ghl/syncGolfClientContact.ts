@@ -1,5 +1,8 @@
 import { db } from "@/lib/db";
-import { upsertContact } from "./contacts";
+import { ContactResolutionError, upsertContact } from "./contacts";
+import { isDefiniteGhlNoMutation } from "./client";
+import { claimFittingSync, releaseFittingSync } from "./fittingSyncClaim";
+import { FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation } from "./syncErrorMarker";
 import {
   isCustomerContactSyncEnabled,
   processCustomerContactSync,
@@ -28,16 +31,26 @@ import {
  */
 export async function syncGolfClientContact(clientId: number): Promise<void> {
   // ── Load client ────────────────────────────────────────────────────────────
-  const client = await db.golfClient.findUnique({
-    where: { id: clientId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      ghlContactId: true,
+  const select = {
+    id: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    phone: true,
+    ghlContactId: true,
+    ghlContactCreationState: true,
+    syncState: {
+      select: {
+        creationAttemptId: true,
+        creationAttemptVersion: true,
+        creationAttemptStatus: true,
+        creationAttemptedAt: true,
+      },
     },
+  } as const;
+  let client = await db.golfClient.findUnique({
+    where: { id: clientId },
+    select,
   });
 
   if (!client) {
@@ -48,6 +61,8 @@ export async function syncGolfClientContact(clientId: number): Promise<void> {
 
   // ── Swing Locker upsert ────────────────────────────────────────────────────
   let ghlContactId: string;
+  let fittingClaim: { sessionId: number; token: string } | null = null;
+  let uncertain = false;
 
   try {
     if (customerContactSyncEnabled) {
@@ -61,7 +76,31 @@ export async function syncGolfClientContact(clientId: number): Promise<void> {
       }
       ghlContactId = result.contactId;
     } else {
-      const resolution = await upsertContact(
+      if (hasUnresolvedCustomerCreation(client)) throw new Error(FITTING_RECONCILIATION_MESSAGE);
+      if (!client.ghlContactId) {
+        throw new ContactResolutionError(
+          "contact_match_requires_review",
+          "This customer has no saved GHL contact. Review and approve a contact through the staged fitting workflow before syncing.",
+        );
+      }
+      const fitting = await db.demoSession.findFirst({
+        where: { clientId },
+        select: { id: true },
+        orderBy: { id: "asc" },
+      });
+      if (fitting) {
+        const token = await claimFittingSync(db, fitting.id, clientId);
+        if (!token) throw new Error(FITTING_RECONCILIATION_MESSAGE);
+        fittingClaim = { sessionId: fitting.id, token };
+        client = await db.golfClient.findUnique({ where: { id: clientId }, select });
+        if (!client || hasUnresolvedCustomerCreation(client)) {
+          throw new Error(FITTING_RECONCILIATION_MESSAGE);
+        }
+      }
+      uncertain = true;
+      let resolution;
+      try {
+        resolution = await upsertContact(
         {
           firstName: client.firstName,
           lastName: client.lastName,
@@ -71,11 +110,12 @@ export async function syncGolfClientContact(clientId: number): Promise<void> {
         client.ghlContactId,
         {
           contactMatchPolicy: "require-review",
+          requireExistingLink: true,
           ownClientId: client.id,
           findLinkedClients: (contactIds) =>
             db.golfClient.findMany({
               where: {
-                id: { not: client.id },
+                id: { not: clientId },
                 ghlContactId: { in: contactIds },
               },
               select: {
@@ -86,11 +126,22 @@ export async function syncGolfClientContact(clientId: number): Promise<void> {
               },
             }),
         },
-      );
+        );
+      } catch (error) {
+        if (error instanceof ContactResolutionError || isDefiniteGhlNoMutation(error)) uncertain = false;
+        throw error;
+      }
       ghlContactId = resolution.id;
+      uncertain = false;
     }
 
-    await addTagsToContact(ghlContactId, [TAG_SL_CLIENT]);
+    if (fittingClaim) uncertain = true;
+    try {
+      await addTagsToContact(ghlContactId, [TAG_SL_CLIENT]);
+    } catch (error) {
+      if (isDefiniteGhlNoMutation(error)) uncertain = false;
+      throw error;
+    }
 
     await db.golfClient.update({
       where: { id: clientId },
@@ -101,6 +152,7 @@ export async function syncGolfClientContact(clientId: number): Promise<void> {
         ghlLastSyncedAt: new Date(),
       },
     });
+    uncertain = false;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[syncGolfClientContact] Swing Locker sync failed:", message);
@@ -112,6 +164,10 @@ export async function syncGolfClientContact(clientId: number): Promise<void> {
       },
     });
     return;
+  } finally {
+    if (fittingClaim && !uncertain) {
+      await releaseFittingSync(db, fittingClaim.sessionId, fittingClaim.token);
+    }
   }
 
   // ── RiverCity temporary mirror (SMS only) ─────────────────────────────────

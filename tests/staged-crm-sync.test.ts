@@ -138,7 +138,7 @@ function harness(batch: StagedSyncBatch) {
   };
   const opts = {
     validation: { valid: true } as SyncOpportunityValidation | "throw",
-    failAt: null as null | "fields" | "tags" | "create-rejected" | "create-ambiguous" | "contact",
+    failAt: null as null | "fields" | "fields-rejected" | "tags" | "tag-marker" | "create-rejected" | "create-ambiguous" | "contact",
   };
   const db = { batch, localWrites: 0 };
   const session = () => db.batch.demoSession!;
@@ -222,12 +222,14 @@ function harness(batch: StagedSyncBatch) {
       calls.fields++;
       calls.order.push("fields");
       if (opts.failAt === "fields") throw new Error("fields failed");
+      if (opts.failAt === "fields-rejected") throw new GhlApiError(429, "Too Many Requests", "");
     },
     addTags: async () => {
       calls.tags++;
       if (opts.failAt === "tags") throw new Error("tags failed");
     },
     markTagsAdded: async () => {
+      if (opts.failAt === "tag-marker") throw new Error("database unavailable");
       calls.order.push("tagMarker");
       session().ghlLockerReadyTagAddedAt = new Date();
     },
@@ -387,9 +389,9 @@ test("contact and opportunity IDs are persisted before later steps", async () =>
   assert.deepEqual(h.calls.order, ["saveContact", "saveOpp", "fields", "tagMarker"]);
 });
 
-test("failure after opportunity creation keeps the ID; retry reuses it", async () => {
+test("definitive field rejection keeps the opportunity ID and safely retries", async () => {
   const h = harness(makeBatch());
-  h.opts.failAt = "fields";
+  h.opts.failAt = "fields-rejected";
   const first = await syncStagedFittingToGHL(h.deps, 1);
   assert.equal(first.ok, false);
   assert.equal(first.ok === false && first.status === "failed" && first.retryable, true);
@@ -545,16 +547,44 @@ test("tags are not re-added after success; already-synced is a no-op", async () 
   assert.equal(h.calls.createOpportunity, 1);
 });
 
-test("tag failure leaves no marker; retry adds tags once without a new opportunity", async () => {
-  const h = harness(makeBatch());
-  h.opts.failAt = "tags";
-  await syncStagedFittingToGHL(h.deps, 1);
-  assert.equal(h.db.batch.demoSession!.ghlLockerReadyTagAddedAt, null);
-  h.opts.failAt = null;
-  const r = await syncStagedFittingToGHL(h.deps, 1);
-  assert.equal(r.ok, true);
-  assert.equal(h.calls.createOpportunity, 1);
-  assert.equal(h.calls.tags, 2);
+test("uncertain field or tag writes require reconciliation", async () => {
+  for (const failAt of ["fields", "tags", "tag-marker"] as const) {
+    const h = harness(makeBatch());
+    h.opts.failAt = failAt;
+    const result = await syncStagedFittingToGHL(h.deps, 1);
+    assert.equal(result.ok, false);
+    if (result.ok || result.status !== "failed") assert.fail("expected failure");
+    assert.equal(result.code, "sync-needs-reconciliation");
+    assert.equal(result.retryable, false);
+    assert.deepEqual(h.calls.failedRetryable, [false]);
+    assert.equal(h.db.batch.demoSession!.ghlLockerReadyTagAddedAt, null);
+  }
+});
+
+test("staged sync refuses unresolved creation markers before any remote work", async () => {
+  for (const marker of [
+    { contact: { status: "creating" } },
+    { opportunity: { status: "creating" } },
+    { contact: { status: "unknown" } },
+  ]) {
+    const h = harness(makeBatch({}, { ghlSyncState: { version: 1, ...marker } }));
+    const result = await syncStagedFittingToGHL(h.deps, 1);
+    assert.equal(result.ok, false);
+    if (result.ok || result.status !== "failed") assert.fail("expected failure");
+    assert.equal(result.code, "creation-needs-reconciliation");
+    assert.equal(h.calls.newContactResolutions + h.calls.createOpportunity + h.calls.fields + h.calls.tags, 0);
+  }
+  for (const customerState of [
+    { ghlContactCreationState: { status: "creating" } },
+    { syncState: { desiredVersion: 1, creationAttemptStatus: "unknown" } },
+  ]) {
+    const b = makeBatch();
+    Object.assign(b.demoSession!.client, customerState);
+    const h = harness(b);
+    const result = await syncStagedFittingToGHL(h.deps, 1);
+    assert.equal(result.ok === false && result.code, "creation-needs-reconciliation");
+    assert.equal(h.calls.newContactResolutions + h.calls.createOpportunity + h.calls.fields + h.calls.tags, 0);
+  }
 });
 
 test("tags already applied are not re-added when a later step is retried", async () => {

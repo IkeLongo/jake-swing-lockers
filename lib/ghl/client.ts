@@ -29,10 +29,22 @@ export class GhlApiError extends Error {
   }
 }
 
+export class GhlConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GhlConfigurationError";
+  }
+}
+
+export function isDefiniteGhlNoMutation(error: unknown): boolean {
+  return error instanceof GhlConfigurationError || error instanceof GhlDuplicateContactError ||
+    (error instanceof GhlApiError && [400, 401, 403, 404, 422, 429].includes(error.status));
+}
+
 function getToken(): string {
   const token = process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
   if (!token) {
-    throw new Error("Missing GHL_SWINGLOCKER_PRIVATE_TOKEN environment variable.");
+    throw new GhlConfigurationError("Missing GHL_SWINGLOCKER_PRIVATE_TOKEN environment variable.");
   }
   return token;
 }

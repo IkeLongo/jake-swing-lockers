@@ -51,7 +51,7 @@ export type CustomerContactSyncResult =
       status: "needs_review" | "unavailable" | "needs_reconciliation";
       message?: string;
     }
-  | { status: "retry_scheduled"; message: string }
+  | { status: "retry_scheduled"; message: string; retrySafety?: Extract<CustomerSyncFailure, { kind: "retryable" }>["retrySafety"] }
   | { status: "synced"; contactId: string };
 
 export interface CustomerContactSyncServices {
@@ -244,7 +244,7 @@ async function failClaim(
   failure: CustomerSyncFailure,
 ): Promise<CustomerContactSyncResult> {
   const transition = await services.fail(claim, failure);
-  return transitionResult(
+  const result = transitionResult(
     transition,
     failure.kind === "retryable"
       ? "retry_scheduled"
@@ -253,6 +253,9 @@ async function failClaim(
         : "needs_reconciliation",
     failure.message,
   );
+  return failure.kind === "retryable" && result.status === "retry_scheduled"
+    ? { ...result, retrySafety: failure.retrySafety }
+    : result;
 }
 
 async function verifyLinkedContact(

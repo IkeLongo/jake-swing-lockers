@@ -1,4 +1,4 @@
-import { ghlFetch } from "./client";
+import { ghlFetch, GhlConfigurationError } from "./client";
 import type {
   ContactLookupPage,
   GhlContactLite,
@@ -7,7 +7,7 @@ import type {
 
 function locationId(): string {
   const id = process.env.GHL_SWINGLOCKER_LOCATION_ID;
-  if (!id) throw new Error("Missing GHL_SWINGLOCKER_LOCATION_ID environment variable.");
+  if (!id) throw new GhlConfigurationError("Missing GHL_SWINGLOCKER_LOCATION_ID environment variable.");
   return id;
 }
 

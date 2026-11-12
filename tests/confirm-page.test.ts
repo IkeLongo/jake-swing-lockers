@@ -12,7 +12,7 @@ import {
   runCrmSync,
   type FetchLike,
 } from "../lib/imports/confirm-flow";
-import { decodeSyncError, encodeSyncError } from "../lib/ghl/syncErrorMarker";
+import { decodeSyncError, encodeSyncError, FITTING_RECONCILIATION_MESSAGE } from "../lib/ghl/syncErrorMarker";
 
 function batch(over: Partial<ConfirmBatch> = {}): ConfirmBatch {
   return {
@@ -150,6 +150,30 @@ test("a persisted action-required failure stays non-retryable after refresh", ()
   });
 });
 
+test("claims and unresolved creation markers require review after refresh, even if marked synced", () => {
+  for (const ghlSyncState of [
+    { version: 1, fittingClaim: { token: "interrupted" } },
+    { version: 1, opportunity: { status: "creating" } },
+    { version: 1, contact: { status: "creating" } },
+  ]) {
+    const state = getConfirmPageState(batch({
+      status: "finalized", demoSessionId: 9,
+      demoSession: { status: "finalized", ghlSyncStatus: "synced", ghlSyncState },
+    }));
+    assert.deepEqual(state, {
+      stage: "crm_action_required", syncAttempted: true, error: FITTING_RECONCILIATION_MESSAGE,
+    });
+  }
+  const customerAttempt = getConfirmPageState(batch({
+    status: "finalized", demoSessionId: 9,
+    demoSession: {
+      status: "finalized", ghlSyncStatus: "failed",
+      client: { syncState: { creationAttemptStatus: "unknown" } },
+    },
+  }));
+  assert.equal(customerAttempt.stage, "crm_action_required");
+});
+
 test("sync error marker round-trips and plain errors stay retryable", () => {
   assert.deepEqual(decodeSyncError(encodeSyncError("x", true)), { message: "x", actionRequired: false });
   assert.deepEqual(decodeSyncError(encodeSyncError("x", false)), { message: "x", actionRequired: true });
@@ -230,7 +254,7 @@ test("CRM failure after local success is saved / pending, not a failed fitting",
   });
 
   const down = fakeFetch({ finalize: FINALIZE_OK, "crm-sync": "throw" });
-  assert.equal((await finalizeAndSync(down.fn, 5)).kind, "crm_pending");
+  assert.equal((await finalizeAndSync(down.fn, 5)).kind, "crm_action_required");
 });
 
 test("retry calls only crm-sync", async () => {
@@ -259,6 +283,14 @@ test("non-retryable CRM failure requires action instead of retry", async () => {
   });
 });
 
+test("claim conflict response requires review even without a status field", async () => {
+  const f = fakeFetch({
+    "crm-sync": { ok: false, status: 409, body: { retryable: false, error: FITTING_RECONCILIATION_MESSAGE } },
+  });
+  assert.deepEqual(await runCrmSync(f.fn, 5), {
+    kind: "crm_action_required", error: FITTING_RECONCILIATION_MESSAGE,
+  });
+});
 test("an already-finalized retry that finalize reports as already finalized still syncs", async () => {
   const f = fakeFetch({
     finalize: { ok: true, status: 200, body: { success: true, alreadyFinalized: true } },

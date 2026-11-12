@@ -2,14 +2,18 @@ import { db } from "@/lib/db";
 import {
   upsertContact,
   updateContactCustomFields,
+  ContactResolutionError,
   type ContactResolution,
 } from "./contacts";
+import { isDefiniteGhlNoMutation } from "./client";
 import {
   isCustomerContactSyncEnabled,
   processCustomerContactSync,
 } from "./customerContactSyncProcessor";
 import { addTagsToContact } from "./tags";
 import { upsertGolfDemoOpportunity } from "./opportunities";
+import { claimFittingSync, releaseFittingSync } from "./fittingSyncClaim";
+import { FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation } from "./syncErrorMarker";
 import {
   GOLF_DEMO_TAGS,
   buildGolfDemoCustomFields,
@@ -28,6 +32,7 @@ export interface GhlSyncResult {
   ghlOpportunityId?: string;
   tagsAdded?: string[];
   error?: string;
+  requiresReconciliation?: boolean;
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -35,36 +40,68 @@ export interface GhlSyncResult {
 export async function syncGolfDemoToGHL(
   demoSessionId: number
 ): Promise<GhlSyncResult> {
+  const claim = await claimFittingSync(db, demoSessionId);
+  if (!claim) {
+    return {
+      success: false,
+      error: FITTING_RECONCILIATION_MESSAGE,
+      requiresReconciliation: true,
+    };
+  }
+  const result = await syncGolfDemoClaimed(demoSessionId);
+  if (!result.requiresReconciliation && !await releaseFittingSync(db, demoSessionId, claim)) {
+    return { success: false, error: FITTING_RECONCILIATION_MESSAGE, requiresReconciliation: true };
+  }
+  return result;
+}
+
+async function syncGolfDemoClaimed(
+  demoSessionId: number
+): Promise<GhlSyncResult> {
   // ── 1. Load session with all relations ────────────────────────────────────
-  const session = await db.demoSession.findUnique({
-    where: { id: demoSessionId },
-    include: {
-      client: true,
-      clubTests: {
-        include: { metrics: true },
-        orderBy: [{ pairIndex: "asc" }, { clubRole: "asc" }],
+  let session;
+  try {
+    session = await db.demoSession.findUnique({
+      where: { id: demoSessionId },
+      include: {
+        client: { include: { syncState: true } },
+        clubTests: {
+          include: { metrics: true },
+          orderBy: [{ pairIndex: "asc" }, { clubRole: "asc" }],
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    console.error("[syncGolfDemoToGHL] Could not load the fitting:", error);
+    return { success: false, error: "Could not load the fitting for CRM sync." };
+  }
 
   if (!session) {
     return { success: false, error: `DemoSession ${demoSessionId} not found.` };
   }
 
   const client = session.client;
+  if (hasUnresolvedCustomerCreation(client)) {
+    return { success: false, error: FITTING_RECONCILIATION_MESSAGE, requiresReconciliation: true };
+  }
   const customerContactSyncEnabled = isCustomerContactSyncEnabled();
   const appUrl = process.env.APP_BASE_URL ?? "https://jlgolfsales.rivercitycreatives.com";
   const lockerUrl = `${appUrl}/swing-locker/${session.lockerToken}`;
 
   // Track the resolved contact ID so the catch block can preserve it
   let resolvedGhlContactId: string | undefined;
+  let uncertain = false;
 
   try {
     // ── 2. Upsert GHL contact ───────────────────────────────────────────────
     let resolution: ContactResolution;
     if (customerContactSyncEnabled) {
+      uncertain = true;
       const result = await processCustomerContactSync(client.id);
       if (result.status !== "synced") {
+        uncertain = result.status !== "needs_review" && result.status !== "disabled" &&
+          !(result.status === "retry_scheduled" &&
+            (result.retrySafety === "no_remote_write" || result.retrySafety === "definitively_rejected"));
         const detail =
           "message" in result && result.message ? ` ${result.message}` : "";
         throw new Error(
@@ -73,7 +110,9 @@ export async function syncGolfDemoToGHL(
       }
       resolution = { id: result.contactId };
     } else {
-      resolution = await upsertContact(
+      uncertain = true;
+      try {
+        resolution = await upsertContact(
         {
           firstName: client.firstName,
           lastName: client.lastName,
@@ -83,6 +122,7 @@ export async function syncGolfDemoToGHL(
         client.ghlContactId,
         {
           contactMatchPolicy: "require-review",
+          requireExistingLink: true,
           ownClientId: client.id,
           findLinkedClients: (contactIds) =>
             db.golfClient.findMany({
@@ -98,7 +138,11 @@ export async function syncGolfDemoToGHL(
               },
             }),
         },
-      );
+        );
+      } catch (error) {
+        if (error instanceof ContactResolutionError || isDefiniteGhlNoMutation(error)) uncertain = false;
+        throw error;
+      }
     }
     resolvedGhlContactId = resolution.id;
 
@@ -114,6 +158,7 @@ export async function syncGolfDemoToGHL(
         ghlSyncError: null,
       },
     });
+    uncertain = false;
 
     // ── 4. Build club summary strings ───────────────────────────────────────
     const summaries = buildGolfDemoSummaries(session);
@@ -129,19 +174,33 @@ export async function syncGolfDemoToGHL(
 
     let customFieldsUpdated = false;
     if (customFields.length > 0) {
-      await updateContactCustomFields(resolvedGhlContactId, customFields);
+      uncertain = true;
+      try {
+        await updateContactCustomFields(resolvedGhlContactId, customFields);
+        uncertain = false;
+      } catch (error) {
+        if (isDefiniteGhlNoMutation(error)) uncertain = false;
+        throw error;
+      }
       customFieldsUpdated = true;
     }
 
     // ── 6. Upsert opportunity ────────────────────────────────────────────────
-    const ghlOpportunityId = await upsertGolfDemoOpportunity(
+    uncertain = true;
+    let ghlOpportunityId: string;
+    try {
+      ghlOpportunityId = await upsertGolfDemoOpportunity(
       {
         name: golfDemoOpportunityName(client),
         contactId: resolvedGhlContactId,
         monetaryValue,
       },
       session.ghlOpportunityId
-    );
+      );
+    } catch (error) {
+      if (isDefiniteGhlNoMutation(error)) uncertain = false;
+      throw error;
+    }
 
     // ── 7. Add tags to trigger GHL workflow ──────────────────────────────────
     const tagsAdded = [...GOLF_DEMO_TAGS];
@@ -179,6 +238,7 @@ export async function syncGolfDemoToGHL(
         message: `Synced demo session ${demoSessionId} to GHL. Opportunity: ${ghlOpportunityId}`,
       },
     });
+    uncertain = false;
 
     return {
       success: true,
@@ -230,7 +290,8 @@ export async function syncGolfDemoToGHL(
     return {
       success: false,
       ...(resolvedGhlContactId ? { ghlContactId: resolvedGhlContactId } : {}),
-      error: message,
+      error: uncertain ? FITTING_RECONCILIATION_MESSAGE : message,
+      ...(uncertain ? { requiresReconciliation: true } : {}),
     };
   }
 }

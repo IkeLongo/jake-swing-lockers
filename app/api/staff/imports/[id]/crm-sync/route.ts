@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import { syncStagedFittingToGHL } from "@/lib/ghl/syncStagedFitting";
 import { createPrismaStagedSyncDeps } from "@/lib/ghl/syncStagedFittingStore";
+import { claimFittingSync, releaseFittingSync } from "@/lib/ghl/fittingSyncClaim";
+import { FITTING_RECONCILIATION_MESSAGE } from "@/lib/ghl/syncErrorMarker";
 
 // POST /api/staff/imports/[id]/crm-sync
 //
@@ -23,10 +25,37 @@ export async function POST(
   }
 
   try {
-    const result = await syncStagedFittingToGHL(
-      createPrismaStagedSyncDeps(db),
-      Number(id),
-    );
+    const batch = await db.importBatch.findUnique({
+      where: { id: Number(id) },
+      select: { demoSessionId: true },
+    });
+    if (!batch) return NextResponse.json({ error: "Import batch not found." }, { status: 404 });
+    if (!batch.demoSessionId) {
+      return NextResponse.json({ error: "Finalize the fitting before syncing." }, { status: 409 });
+    }
+    const sessionId = batch.demoSessionId;
+    const claim = await claimFittingSync(db, sessionId);
+    if (!claim) {
+      return NextResponse.json(
+        { success: false, status: "failed", code: "sync-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE, retryable: false },
+        { status: 409 },
+      );
+    }
+    const deps = createPrismaStagedSyncDeps(db);
+    const loadBatch = deps.loadBatch;
+    deps.loadBatch = async (batchId) => {
+      const current = await loadBatch(batchId);
+      return current?.demoSession?.id === sessionId ? current : null;
+    };
+    const result = await syncStagedFittingToGHL(deps, Number(id));
+    const uncertain = !result.ok && result.status === "failed" &&
+      (result.code === "creation-needs-reconciliation" || result.code === "sync-needs-reconciliation");
+    if (!uncertain && !await releaseFittingSync(db, sessionId, claim)) {
+      return NextResponse.json(
+        { success: false, status: "failed", code: "sync-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE, retryable: false },
+        { status: 409 },
+      );
+    }
 
     if (result.ok) {
       return NextResponse.json({
@@ -61,7 +90,7 @@ export async function POST(
   } catch (error) {
     console.error("[POST /api/staff/imports/[id]/crm-sync]", error);
     return NextResponse.json(
-      { success: false, error: "Failed to run CRM sync.", retryable: true },
+      { success: false, status: "failed", error: "CRM sync could not be confirmed. Refresh the fitting and seek staff review before retrying.", retryable: false },
       { status: 500 },
     );
   }

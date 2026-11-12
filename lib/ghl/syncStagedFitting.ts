@@ -7,6 +7,8 @@ import {
 } from "./golfDemoSyncContent";
 import { ContactNeedsReviewError } from "./resolveStagedContact";
 import { getBatchGhlApprovalStatus, getCurrentGhlDecision } from "@/lib/imports/ghl-approval-gate";
+import { isDefiniteGhlNoMutation } from "./client";
+import { FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation, hasUnresolvedFittingSyncState } from "./syncErrorMarker";
 
 // CRM sync for a locally finalized, staged TrackMan fitting.
 //
@@ -22,7 +24,14 @@ export interface StagedSyncClient {
   email: string | null;
   phone: string | null;
   ghlContactId: string | null;
-  syncState?: { desiredVersion: number } | null;
+  ghlContactCreationState?: unknown;
+  syncState?: {
+    desiredVersion: number;
+    creationAttemptId?: string | null;
+    creationAttemptVersion?: number | null;
+    creationAttemptStatus?: string | null;
+    creationAttemptedAt?: Date | null;
+  } | null;
 }
 
 export interface StagedSyncSession {
@@ -63,6 +72,7 @@ export interface StagedSyncBatch {
 
 export interface StagedSyncState {
   version: 1;
+  fittingClaim?: { token: string; claimedAt: string };
   contact?:
     | {
         status: "creating";
@@ -147,6 +157,7 @@ export type StagedSyncPreconditionCode =
   | "not_eligible"
   | "not_finalized"
   | "no_session"
+  | "load_failed"
   | "invalid_opportunity_state";
 
 export type StagedSyncResult =
@@ -163,19 +174,19 @@ export type StagedSyncResult =
       status: "failed";
       demoSessionId: number;
       retryable: boolean;
-      code?: "contact-needs-review" | "creation-needs-reconciliation";
+      code?: "contact-needs-review" | "creation-needs-reconciliation" | "sync-needs-reconciliation";
       error: string;
     }
   | {
       ok: false;
       status: "rejected";
-      httpStatus: 404 | 409;
+      httpStatus: 404 | 409 | 503;
       code: StagedSyncPreconditionCode;
       error: string;
     };
 
 function rejected(
-  httpStatus: 404 | 409,
+  httpStatus: 404 | 409 | 503,
   code: StagedSyncPreconditionCode,
   error: string,
 ): StagedSyncResult {
@@ -192,11 +203,28 @@ export class CreationNeedsReconciliationError extends Error {
   }
 }
 
+class SyncNeedsReconciliationError extends Error {}
+
+async function guardedMutation<T>(mutate: () => Promise<T>): Promise<T> {
+  try {
+    return await mutate();
+  } catch (error) {
+    if (isDefiniteGhlNoMutation(error)) throw error;
+    throw new SyncNeedsReconciliationError(FITTING_RECONCILIATION_MESSAGE, { cause: error });
+  }
+}
+
 export async function syncStagedFittingToGHL(
   deps: StagedSyncDeps,
   batchId: number,
 ): Promise<StagedSyncResult> {
-  const batch = await deps.loadBatch(batchId);
+  let batch;
+  try {
+    batch = await deps.loadBatch(batchId);
+  } catch (error) {
+    console.error("[syncStagedFittingToGHL] Could not load the fitting:", error);
+    return rejected(503, "load_failed", "Could not load the fitting for CRM sync. Try again.");
+  }
   if (!batch) return rejected(404, "batch_not_found", "Import batch not found.");
   if (batch.parserMode !== "trackman-result") {
     return rejected(409, "not_eligible", "This import is not a staged TrackMan fitting.");
@@ -207,6 +235,19 @@ export async function syncStagedFittingToGHL(
   const session = batch.demoSession;
   if (!session || session.status !== "finalized") {
     return rejected(409, "no_session", "This import has no finalized fitting session.");
+  }
+  // The caller's own claim is expected here; creation markers are not.
+  const state = session.ghlSyncState;
+  if (state && typeof state === "object" && !Array.isArray(state)) {
+    const remaining = { ...state } as Record<string, unknown>;
+    delete remaining.fittingClaim;
+    if (hasUnresolvedFittingSyncState(remaining)) {
+      return { ok: false, status: "failed", demoSessionId: session.id, retryable: false,
+        code: "creation-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE };
+    }
+  } else if (hasUnresolvedFittingSyncState(state)) {
+    return { ok: false, status: "failed", demoSessionId: session.id, retryable: false,
+      code: "creation-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE };
   }
 
   const resolution = batch.opportunityResolution;
@@ -238,6 +279,10 @@ export async function syncStagedFittingToGHL(
   }
 
   const client = session.client;
+  if (hasUnresolvedCustomerCreation(client)) {
+    return { ok: false, status: "failed", demoSessionId: session.id, retryable: false,
+      code: "creation-needs-reconciliation", error: FITTING_RECONCILIATION_MESSAGE };
+  }
   if (
     session.ghlSyncStatus === "synced" &&
     session.ghlOpportunityId &&
@@ -357,13 +402,17 @@ export async function syncStagedFittingToGHL(
       deps.now().toISOString(),
     );
     if (fields.length > 0) {
-      await deps.updateContactCustomFields(ghlContactId, fields);
+      await guardedMutation(() => deps.updateContactCustomFields(ghlContactId!, fields));
     }
 
     // 4. Workflow tags, once; the marker is saved before any later work.
     if (!session.ghlLockerReadyTagAddedAt) {
-      await deps.addTags(ghlContactId, [...GOLF_DEMO_TAGS]);
-      await deps.markTagsAdded(session.id, lockerUrl);
+      await guardedMutation(() => deps.addTags(ghlContactId!, [...GOLF_DEMO_TAGS]));
+      try {
+        await deps.markTagsAdded(session.id, lockerUrl);
+      } catch (error) {
+        throw new SyncNeedsReconciliationError(FITTING_RECONCILIATION_MESSAGE, { cause: error });
+      }
     }
 
     // 5. Final status + event log.
@@ -388,7 +437,8 @@ export async function syncStagedFittingToGHL(
     const retryable = !(
       err instanceof NonRetryableSyncError ||
       err instanceof ContactNeedsReviewError ||
-      err instanceof CreationNeedsReconciliationError
+      err instanceof CreationNeedsReconciliationError ||
+      err instanceof SyncNeedsReconciliationError
     );
     if (!(err instanceof CreationNeedsReconciliationError)) {
       try {
@@ -411,6 +461,9 @@ export async function syncStagedFittingToGHL(
       ...(err instanceof ContactNeedsReviewError ? { code: err.code } : {}),
       ...(err instanceof CreationNeedsReconciliationError
         ? { code: err.code }
+        : {}),
+      ...(err instanceof SyncNeedsReconciliationError
+        ? { code: "sync-needs-reconciliation" as const }
         : {}),
       error: message,
     };

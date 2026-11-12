@@ -45,14 +45,14 @@ export async function runCrmSync(
   const res = await post(fetchFn, `/api/staff/imports/${batchId}/crm-sync`);
   if (!res) {
     return {
-      kind: "crm_pending",
-      error: "Could not reach the server to sync with the CRM.",
+      kind: "crm_action_required",
+      error: "The CRM sync outcome could not be confirmed. Refresh the fitting and seek staff review before retrying.",
     };
   }
   if (res.ok && res.body.success) return { kind: "synced" };
 
   const error = res.body.error ?? "The CRM sync could not be completed.";
-  if (res.body.status === "failed" && res.body.retryable === false) {
+  if (res.body.retryable === false) {
     return { kind: "crm_action_required", error };
   }
   return { kind: "crm_pending", error };

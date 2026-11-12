@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { STAFF_SESSION_COOKIE, verifyStaffSessionToken } from "@/lib/auth/session";
 import { demoFormSchema, type ActionResult, type ClubTabValues } from "@/lib/validations/demo";
-import { syncGolfDemoToGHL } from "@/lib/ghl/syncGolfDemo";
+import { syncGolfDemoToGHL, type GhlSyncResult } from "@/lib/ghl/syncGolfDemo";
 import { syncGolfClientContact } from "@/lib/ghl/syncGolfClientContact";
 import { createGolfClientIfUnique } from "@/lib/imports/new-customer-review-store";
 
@@ -142,19 +142,21 @@ export async function createDemoSession(
     }
 
     // ── 6. Sync to GHL (non-blocking — failure must not break form submission) ──
-    let ghlSync: { success: boolean; error?: string } | undefined;
+    let ghlSync: GhlSyncResult;
     try {
       ghlSync = await syncGolfDemoToGHL(demoSession.id);
     } catch (ghlErr) {
       const msg = ghlErr instanceof Error ? ghlErr.message : String(ghlErr);
-      ghlSync = { success: false, error: msg };
+      ghlSync = { success: false, error: msg, requiresReconciliation: true };
     }
 
     // Apply golf-demo:client tag and persist ghlContactId on the GolfClient record.
     // syncGolfDemoToGHL already upserts the contact; this adds the identity tag.
-    void syncGolfClientContact(client.id).catch((err) => {
-      console.error("[GolfClient Sync] createDemoSession failed:", err);
-    });
+    if (!ghlSync.requiresReconciliation) {
+      void syncGolfClientContact(client.id).catch((err) => {
+        console.error("[GolfClient Sync] createDemoSession failed:", err);
+      });
+    }
 
     return {
       success: true,

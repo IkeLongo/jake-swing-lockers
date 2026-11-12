@@ -264,6 +264,38 @@ function fakeDatabase() {
   };
 }
 
+test("opportunity completion and sync retain the fitting claim until its owner releases it", async () => {
+  const fake = fakeDatabase();
+  const session = fake.sessions.get(7)!;
+  const fittingClaim = { token: "claim-token", claimedAt: new Date().toISOString() };
+  session.ghlSyncState = { version: 1, fittingClaim };
+  const deps = createPrismaStagedSyncDeps(fake.db as never);
+  assert.equal(await deps.ensureOpportunityId(7, 1, "contact", async () => "opportunity"), "opportunity");
+  assert.deepEqual(session.ghlSyncState, { version: 1, fittingClaim });
+  await deps.markSynced({
+    sessionId: 7, clientId: 3, ghlContactId: "contact",
+    ghlOpportunityId: "opportunity", lockerUrl: "https://example.test/locker",
+  });
+  assert.deepEqual(session.ghlSyncState, { version: 1, fittingClaim });
+});
+
+test("missing opportunity configuration clears its unissued creation marker", async () => {
+  const fake = fakeDatabase();
+  const deps = createPrismaStagedSyncDeps(fake.db as never);
+  const original = process.env.GHL_SWINGLOCKER_PIPELINE_ID;
+  delete process.env.GHL_SWINGLOCKER_PIPELINE_ID;
+  try {
+    await assert.rejects(deps.ensureOpportunityId(
+      7, 1, "contact", () => deps.createOpportunity({ name: "Test", contactId: "contact" }),
+    ), /GHL_SWINGLOCKER_PIPELINE_ID/);
+    const state = fake.sessions.get(7)!.ghlSyncState;
+    assert.ok(state === null || (typeof state === "object" && !("opportunity" in state)));
+  } finally {
+    if (original === undefined) delete process.env.GHL_SWINGLOCKER_PIPELINE_ID;
+    else process.env.GHL_SWINGLOCKER_PIPELINE_ID = original;
+  }
+});
+
 function installFakeGhlApi(opts: {
   loseCreateResponse?: boolean;
   delayCreate?: boolean;

@@ -23,11 +23,13 @@ test("legacy demo action rejects unauthenticated and inactive staff before write
   let staffReads = 0;
   let writes = 0;
   let networkCalls = 0;
+  let customerSyncReads = 0;
   const tx = {
     async $queryRaw() { return [{ id: 7 }]; },
     golfClient: {
       async findMany() { return []; },
-      async findUnique(args: { select: { ghlContactCreationState?: boolean } }) {
+      async findUnique(args: { select: { ghlContactCreationState?: boolean; firstName?: boolean } }) {
+        if (args.select.firstName) customerSyncReads++;
         return args.select.ghlContactCreationState
           ? { ghlContactCreationState: null }
           : null;
@@ -138,4 +140,5 @@ test("legacy demo action rejects unauthenticated and inactive staff before write
   if (authorized.success) assert.equal(authorized.demoSessionId, 9);
   assert.equal(writes, 4);
   assert.equal(networkCalls, 0);
+  assert.equal(customerSyncReads, 0);
 });

@@ -65,6 +65,8 @@ export interface ContactUpsertOptions {
   contactMatchPolicy?: "reuse" | "require-review";
   ownClientId?: number | null;
   findLinkedClients?: (contactIds: string[]) => Promise<LinkedClientRow[]>;
+  /** Do not create a contact when the caller has no verified saved link. */
+  requireExistingLink?: boolean;
 }
 
 function normalizedIdentity(input: ContactUpsertInput) {
@@ -221,6 +223,12 @@ export async function upsertContact(
   const identity = normalizedIdentity(input);
 
   const savedContactId = existingGhlContactId?.trim() || null;
+  if (options.requireExistingLink && !savedContactId) {
+    throw new ContactResolutionError(
+      "contact_match_requires_review",
+      "This customer has no saved GHL contact. Review and approve a contact through the staged fitting workflow before syncing.",
+    );
+  }
   let discovery: Awaited<ReturnType<typeof discoverStagedContacts>>;
   try {
     discovery = await discoverStagedContacts(

@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from "@/app/generated/prisma/client";
-import { GhlApiError, GhlDuplicateContactError } from "./client";
+import { GhlDuplicateContactError, isDefiniteGhlNoMutation } from "./client";
 import { updateContactCustomFields } from "./contacts";
 import {
   ContactNeedsReviewError,
@@ -128,24 +128,15 @@ function customerContactCreationStateValue(
 }
 
 function withoutContact(state: StagedSyncState): StagedSyncState {
-  return {
-    version: state.version,
-    ...(state.opportunity ? { opportunity: state.opportunity } : {}),
-  };
+  const rest = { ...state };
+  delete rest.contact;
+  return rest;
 }
 
 function withoutOpportunity(state: StagedSyncState): StagedSyncState {
-  return {
-    version: state.version,
-    ...(state.contact ? { contact: state.contact } : {}),
-  };
-}
-
-function isDefinitiveRejection(error: unknown): boolean {
-  return (
-    error instanceof GhlApiError &&
-    [400, 401, 403, 404, 422, 429].includes(error.status)
-  );
+  const rest = { ...state };
+  delete rest.opportunity;
+  return rest;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -317,7 +308,7 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
       createdId = created.id;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (error instanceof GhlDuplicateContactError || isDefinitiveRejection(error)) {
+      if (isDefiniteGhlNoMutation(error)) {
         let result;
         try {
           result = await rejectContactCreation(
@@ -566,8 +557,15 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
                   email: true,
                   phone: true,
                   ghlContactId: true,
+                  ghlContactCreationState: true,
                   syncState: {
-                    select: { desiredVersion: true },
+                    select: {
+                      desiredVersion: true,
+                      creationAttemptId: true,
+                      creationAttemptVersion: true,
+                      creationAttemptStatus: true,
+                      creationAttemptedAt: true,
+                    },
                   },
                 },
               },
@@ -772,23 +770,24 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
             "GHL rejected the new contact as a duplicate. Review the matching contact before syncing.",
           );
         }
-        if (isDefinitiveRejection(error)) {
+        if (isDefiniteGhlNoMutation(error)) {
           await clearContactCreationAttempt(sessionId, batchId, clientId);
           throw error;
         }
         throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
       }
 
-      const createdContact = await stagedContactApi.getContact(createdId);
-      if (!createdContact || createdContact.locationId !== stagedContactApi.locationId()) {
-        throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
-      }
-      await assertContactAvailableToClient(db, clientId, createdId);
       try {
+        const createdContact = await stagedContactApi.getContact(createdId);
+        if (!createdContact || createdContact.locationId !== stagedContactApi.locationId()) {
+          throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+        }
+        await assertContactAvailableToClient(db, clientId, createdId);
         await persistResolvedNewContact(sessionId, batchId, clientId, createdId);
       } catch (error) {
-        if (error instanceof ContactNeedsReviewError) throw error;
-        throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+        throw new CreationNeedsReconciliationError(
+          `${RECONCILIATION_REQUIRED} Created contact ${createdId} could not be verified and saved: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
       return { id: createdId };
     },
@@ -866,7 +865,7 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
       try {
         createdId = await create();
       } catch (error) {
-        if (isDefinitiveRejection(error)) {
+        if (isDefiniteGhlNoMutation(error)) {
           await clearOpportunityCreationAttempt(sessionId);
           throw error;
         }
@@ -911,15 +910,26 @@ export function createPrismaStagedSyncDeps(db: PrismaClient): StagedSyncDeps {
 
     async markSynced({ sessionId, clientId, ghlContactId, ghlOpportunityId, lockerUrl }) {
       const now = new Date();
-      await db.demoSession.update({
-        where: { id: sessionId },
-        data: {
-          lockerUrl,
-          ghlLastSyncedAt: now,
-          ghlSyncStatus: "synced",
-          ghlSyncError: null,
-          ghlSyncState: Prisma.DbNull,
-        },
+      await db.$transaction(async (tx) => {
+        await lockSession(tx, sessionId);
+        const session = await tx.demoSession.findUniqueOrThrow({
+          where: { id: sessionId },
+          select: { ghlSyncState: true },
+        });
+        const state = readSyncState(session.ghlSyncState);
+        await tx.demoSession.update({
+          where: { id: sessionId },
+          data: {
+            lockerUrl,
+            ghlLastSyncedAt: now,
+            ghlSyncStatus: "synced",
+            ghlSyncError: null,
+            ghlSyncState: stateValue({
+              version: 1,
+              ...(state.fittingClaim ? { fittingClaim: state.fittingClaim } : {}),
+            }),
+          },
+        });
       });
       await db.golfClient.update({
         where: { id: clientId },

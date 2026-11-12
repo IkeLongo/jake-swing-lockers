@@ -63,12 +63,22 @@ export default async function ImportConfirmPage({
             ghlOpportunityId: true,
             ghlSyncStatus: true,
             ghlSyncError: true,
+            ghlSyncState: true,
             client: {
               select: {
                 firstName: true,
                 lastName: true,
                 email: true,
                 phone: true,
+                ghlContactCreationState: true,
+                syncState: {
+                  select: {
+                    creationAttemptId: true,
+                    creationAttemptVersion: true,
+                    creationAttemptStatus: true,
+                    creationAttemptedAt: true,
+                  },
+                },
               },
             },
           },

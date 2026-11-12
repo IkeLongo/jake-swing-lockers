@@ -436,6 +436,7 @@ test("lookup failures use safe retry state and never create", async () => {
   const result = await processCustomerContactSync(7, h.services);
 
   assert.equal(result.status, "retry_scheduled");
+  if (result.status === "retry_scheduled") assert.equal(result.retrySafety, "no_remote_write");
   assert.equal(h.calls.create.length, 0);
   assert.deepEqual(h.calls.failures[0], {
     kind: "retryable",
@@ -536,6 +537,7 @@ test("idempotent contact update failures are retried on the next claim", async (
 
   const result = await processCustomerContactSync(7, h.services);
   assert.equal(result.status, "retry_scheduled");
+  if (result.status === "retry_scheduled") assert.equal(result.retrySafety, "idempotent_update");
   assert.deepEqual(
     await processCustomerContactSync(7, h.services),
     { status: "synced", contactId: "saved" },

@@ -1,18 +1,18 @@
-import { ghlFetch } from "./client";
+import { ghlFetch, GhlConfigurationError } from "./client";
 
 const LOCATION_ID = () => {
   const id = process.env.GHL_SWINGLOCKER_LOCATION_ID;
-  if (!id) throw new Error("Missing GHL_SWINGLOCKER_LOCATION_ID environment variable.");
+  if (!id) throw new GhlConfigurationError("Missing GHL_SWINGLOCKER_LOCATION_ID environment variable.");
   return id;
 };
 const PIPELINE_ID = () => {
   const id = process.env.GHL_SWINGLOCKER_PIPELINE_ID;
-  if (!id) throw new Error("Missing GHL_SWINGLOCKER_PIPELINE_ID environment variable.");
+  if (!id) throw new GhlConfigurationError("Missing GHL_SWINGLOCKER_PIPELINE_ID environment variable.");
   return id;
 };
 export const STAGE_DEMO_SUBMITTED = () => {
   const id = process.env.GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID;
-  if (!id) throw new Error("Missing GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID environment variable.");
+  if (!id) throw new GhlConfigurationError("Missing GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID environment variable.");
   return id;
 };
 export const STAGE_SWING_LOCKER_SENT = () => {
