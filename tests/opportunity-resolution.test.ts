@@ -7,12 +7,14 @@ import {
   parseOpportunityResolution,
 } from "@/lib/imports/opportunity-resolution";
 import { hasSameCustomerIdentity } from "@/lib/imports/customer-resolution";
+import { ghlFetch, makeGhlFetch, GhlConfigurationError } from "@/lib/ghl/client";
 
 const originalGhlEnvironment = {
   GHL_SWINGLOCKER_PRIVATE_TOKEN:
     process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN,
   GHL_SWINGLOCKER_LOCATION_ID: process.env.GHL_SWINGLOCKER_LOCATION_ID,
   GHL_SWINGLOCKER_PIPELINE_ID: process.env.GHL_SWINGLOCKER_PIPELINE_ID,
+  GHL_OPPORTUNITY_READ_ONLY: process.env.GHL_OPPORTUNITY_READ_ONLY,
 };
 
 after(() => {
@@ -312,5 +314,115 @@ test("listing opportunities returns the candidates without selecting one", async
     assert.equal(result.length, 2);
   } finally {
     globalThis.fetch = previousFetch;
+  }
+});
+
+test("opportunity read-only mode permits opportunity GETs and blocks other GHL requests", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousFlag = process.env.GHL_OPPORTUNITY_READ_ONLY;
+  const previousToken = process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
+  process.env.GHL_OPPORTUNITY_READ_ONLY = "true";
+  process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN = "test-token";
+  const calls: RequestInit[] = [];
+  globalThis.fetch = async (_input, init) => {
+    calls.push(init ?? {});
+    return Response.json({});
+  };
+
+  try {
+    const otherAccountFetch = makeGhlFetch("test-token");
+    await ghlFetch("/opportunities/search?location_id=test", { redirect: "follow" });
+    await otherAccountFetch("/opportunities/opp-123", { method: "get" });
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every((call) => call.redirect === "error"));
+
+    for (const fetchGhl of [ghlFetch, otherAccountFetch]) {
+      for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+        await assert.rejects(
+          fetchGhl("/opportunities/opp-123", { method }),
+          GhlConfigurationError,
+        );
+      }
+      for (const path of ["/contacts/lookup", "/conversations/messages", "/opportunities/opp%2F123"]) {
+        await assert.rejects(fetchGhl(path), GhlConfigurationError);
+      }
+      await assert.rejects(
+        fetchGhl("/opportunities/opp-123", {
+          headers: { "X-HTTP-Method-Override": "DELETE" },
+        }),
+        GhlConfigurationError,
+      );
+      await assert.rejects(
+        fetchGhl("/opportunities/opp-123", { body: "payload" }),
+        GhlConfigurationError,
+      );
+    }
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousFlag === undefined) delete process.env.GHL_OPPORTUNITY_READ_ONLY;
+    else process.env.GHL_OPPORTUNITY_READ_ONLY = previousFlag;
+    if (previousToken === undefined) delete process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
+    else process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN = previousToken;
+  }
+});
+
+test("opportunity selection reads work in read-only mode", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousFlag = process.env.GHL_OPPORTUNITY_READ_ONLY;
+  process.env.GHL_OPPORTUNITY_READ_ONLY = "true";
+  process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN = "test-token";
+  process.env.GHL_SWINGLOCKER_LOCATION_ID = "location-1";
+  process.env.GHL_SWINGLOCKER_PIPELINE_ID = "pipeline-1";
+  const opportunity = {
+    id: "opp-1",
+    name: "Fitting",
+    contactId: "contact-1",
+    locationId: "location-1",
+    pipelineId: "pipeline-1",
+    pipelineStageId: "stage-1",
+    status: "open",
+  };
+  globalThis.fetch = async (input) =>
+    String(input).includes("/opportunities/search?")
+      ? Response.json({ opportunities: [opportunity] })
+      : Response.json({ opportunity });
+
+  try {
+    const { listOpenOpportunitiesForContact, validateOpportunitySelection } =
+      await import("@/lib/ghl/opportunities");
+    assert.deepEqual(await listOpenOpportunitiesForContact("contact-1"), [opportunity]);
+    assert.deepEqual(await validateOpportunitySelection("opp-1", "contact-1"), {
+      valid: true,
+      opportunity,
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousFlag === undefined) delete process.env.GHL_OPPORTUNITY_READ_ONLY;
+    else process.env.GHL_OPPORTUNITY_READ_ONLY = previousFlag;
+  }
+});
+
+test("GHL requests retain existing behavior when opportunity read-only mode is disabled", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousFlag = process.env.GHL_OPPORTUNITY_READ_ONLY;
+  const previousToken = process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
+  process.env.GHL_OPPORTUNITY_READ_ONLY = "false";
+  process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN = "test-token";
+  let method: string | undefined;
+  globalThis.fetch = async (_input, init) => {
+    method = init?.method;
+    return Response.json({});
+  };
+
+  try {
+    await ghlFetch("/contacts", { method: "POST" });
+    assert.equal(method, "POST");
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousFlag === undefined) delete process.env.GHL_OPPORTUNITY_READ_ONLY;
+    else process.env.GHL_OPPORTUNITY_READ_ONLY = previousFlag;
+    if (previousToken === undefined) delete process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
+    else process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN = previousToken;
   }
 });

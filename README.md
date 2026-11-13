@@ -22,6 +22,12 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Customer contact synchronization
 
+For local opportunity testing, set `GHL_OPPORTUNITY_READ_ONLY=true`. Both GHL
+clients then allow only opportunity search and detail GET requests, reject
+redirects, and block all CRM writes and message delivery. This guard applies to
+requests made through these clients; it does not restrict the API token itself.
+Keep customer synchronization and SMS disabled while using this mode.
+
 The customer worker is disabled unless `GHL_CUSTOMER_CONTACT_SYNC_ENABLED=true`.
 Before enabling it, validate the GHL configuration and existing sync safeguards;
 the flag also affects legacy contact-writing workflows. Customer creation and

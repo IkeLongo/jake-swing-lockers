@@ -49,22 +49,45 @@ function getToken(): string {
   return token;
 }
 
+function guardOpportunityReadOnly(path: string, options: RequestInit): RequestInit {
+  if (process.env.GHL_OPPORTUNITY_READ_ONLY !== "true") return options;
+
+  const opportunityRead =
+    /^\/opportunities\/search(?:\?[^#]*)?$/.test(path) ||
+    /^\/opportunities\/[a-zA-Z0-9_-]+$/.test(path);
+  const headers = new Headers(options.headers);
+  if (
+    (options.method ?? "GET").toUpperCase() !== "GET" ||
+    !opportunityRead ||
+    options.body != null ||
+    ["x-http-method-override", "x-http-method", "x-method-override"].some(
+      (header) => headers.has(header),
+    )
+  ) {
+    throw new GhlConfigurationError(
+      "GHL opportunity read-only mode blocks this request.",
+    );
+  }
+  return { ...options, redirect: "error" };
+}
+
 export async function ghlFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const guardedOptions = guardOpportunityReadOnly(path, options);
   const token = getToken();
 
   const url = `${GHL_BASE}${path}`;
 
   const res = await fetch(url, {
     method: "GET",
-    ...options,
+    ...guardedOptions,
     headers: {
       "Authorization": `Bearer ${token}`,
       "Version": GHL_VERSION,
       "Content-Type": "application/json",
-      ...(options.headers ?? {}),
+      ...(guardedOptions.headers ?? {}),
     },
   });
 
@@ -116,16 +139,17 @@ export type GhlFetchFn = <T>(path: string, options?: RequestInit) => Promise<T>;
  */
 export function makeGhlFetch(token: string): GhlFetchFn {
   return async function<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const guardedOptions = guardOpportunityReadOnly(path, options);
     const url = `${GHL_BASE}${path}`;
 
     const res = await fetch(url, {
       method: "GET",
-      ...options,
+      ...guardedOptions,
       headers: {
         "Authorization": `Bearer ${token}`,
         "Version": GHL_VERSION,
         "Content-Type": "application/json",
-        ...(options.headers ?? {}),
+        ...(guardedOptions.headers ?? {}),
       },
     });
 

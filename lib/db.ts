@@ -14,6 +14,9 @@ function createAdapter() {
     password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
     database: parsed.pathname.replace(/^\//, ""),
     connectionLimit: 5,
+    // Temporary: MySQL handshake currently takes ~10s; the driver default is 1000ms.
+    connectTimeout: 30000,
+    acquireTimeout: 45000,
   });
 }
 
