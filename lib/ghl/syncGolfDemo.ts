@@ -14,8 +14,11 @@ import { addTagsToContact } from "./tags";
 import { upsertGolfDemoOpportunity } from "./opportunities";
 import { claimFittingSync, releaseFittingSync } from "./fittingSyncClaim";
 import { FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation } from "./syncErrorMarker";
+import { createPrismaStagedSyncDeps } from "./syncStagedFittingStore";
+import { validateFittingNoteConfiguration } from "./fittingNotes";
 import {
   GOLF_DEMO_TAGS,
+  buildFittingNote,
   buildGolfDemoCustomFields,
   buildGolfDemoSummaries,
   golfDemoOpportunityName,
@@ -66,6 +69,10 @@ async function syncGolfDemoClaimed(
       where: { id: demoSessionId },
       include: {
         client: { include: { syncState: true } },
+        importBatches: {
+          take: 2,
+          select: { id: true, status: true, createdAt: true },
+        },
         clubTests: {
           include: { metrics: true },
           orderBy: [{ pairIndex: "asc" }, { clubRole: "asc" }],
@@ -94,6 +101,7 @@ async function syncGolfDemoClaimed(
   let uncertain = false;
 
   try {
+    validateFittingNoteConfiguration();
     // ── 2. Upsert GHL contact ───────────────────────────────────────────────
     let resolution: ContactResolution;
     if (customerContactSyncEnabled) {
@@ -207,13 +215,23 @@ async function syncGolfDemoClaimed(
     const tagsAdded = [...GOLF_DEMO_TAGS];
     await addTagsToContact(resolvedGhlContactId, tagsAdded);
 
+    // Persist the opportunity and tags before the note's durable creation attempt.
+    await db.demoSession.update({
+      where: { id: demoSessionId },
+      data: { lockerUrl, ghlOpportunityId, ghlLockerReadyTagAddedAt: new Date() },
+    });
+    await createPrismaStagedSyncDeps(db).ensureFittingNote(
+      demoSessionId,
+      ghlOpportunityId,
+      buildFittingNote(session, appUrl, session.importBatches),
+    );
+
     // ── 8. Save sync status to DemoSession ───────────────────────────────────
     await db.demoSession.update({
       where: { id: demoSessionId },
       data: {
         lockerUrl,
         ghlOpportunityId,
-        ghlLockerReadyTagAddedAt: new Date(),
         ghlLastSyncedAt: new Date(),
         ghlSyncStatus: "synced",
         ghlSyncError: null,

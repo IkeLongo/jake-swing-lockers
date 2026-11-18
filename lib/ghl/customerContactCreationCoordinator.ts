@@ -4,6 +4,8 @@ import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
 import type { CustomerSyncClaim } from "./customerSyncWorkerState";
 import { isValidGhlContactId } from "@/lib/imports/ghl-contact-approval";
 import {
+  emailMatchKey,
+  phoneMatchKey,
   parseEmailStrict,
   parsePhoneStrict,
 } from "@/lib/imports/customer-identifiers";
@@ -240,6 +242,7 @@ export async function linkVerifiedCustomerContact(
     contactId: string;
     verifiedLocationId: string;
     expectedIdentity: CustomerContactIdentity;
+    requireUniqueIdentifiers?: boolean;
   },
 ): Promise<VerifiedContactLinkResult> {
   const { claim, contactId, verifiedLocationId } = input;
@@ -262,6 +265,12 @@ export async function linkVerifiedCustomerContact(
 
   try {
     return await db.$transaction(async (tx): Promise<VerifiedContactLinkResult> => {
+      if (input.requireUniqueIdentifiers) {
+        const mutex = await tx.$queryRaw<Array<{ id: number }>>`
+          SELECT id FROM StagedCustomerCreationMutex WHERE id = 1 FOR UPDATE
+        `;
+        if (mutex.length !== 1) throw new Error("Customer identity mutex is missing.");
+      }
       const row = await lockRows(tx, claim.golfClientId);
       if (!row) return { status: "customer_missing" };
       if (!row.state) return { status: "lost_claim" };
@@ -293,6 +302,18 @@ export async function linkVerifiedCustomerContact(
       };
       if (!sameCustomerIdentity(currentIdentity, expectedIdentity)) {
         return { status: "identity_changed" };
+      }
+      if (input.requireUniqueIdentifiers) {
+        const email = emailMatchKey(currentIdentity.email);
+        const phone = phoneMatchKey(currentIdentity.phone);
+        const others = await tx.golfClient.findMany({
+          where: { id: { not: claim.golfClientId } },
+          select: { email: true, phone: true },
+        });
+        if (others.some((other) =>
+          Boolean(email && emailMatchKey(other.email) === email) ||
+          Boolean(phone && phoneMatchKey(other.phone) === phone)
+        )) return { status: "contact_conflict" };
       }
       if (
         row.client.ghlContactId !== null &&

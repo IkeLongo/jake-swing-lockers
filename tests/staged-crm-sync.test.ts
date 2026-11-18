@@ -15,6 +15,7 @@ import {
   type GhlReviewSnapshot,
 } from "../lib/imports/ghl-contact-approval";
 import {
+  buildFittingNote,
   buildGolfDemoCustomFields,
   buildGolfDemoSummaries,
   golfDemoOpportunityName,
@@ -53,6 +54,7 @@ function makeBatch(over: Partial<StagedSyncBatch> = {}, sessionOver: Record<stri
       ghlSyncStatus: null,
       ghlSyncState: null,
       ghlLockerReadyTagAddedAt: null,
+      importBatches: [{ id: 1, status: "finalized", createdAt: new Date("2026-05-09T15:00:00Z") }],
       clubTests: [
         { clubRole: "demo", clubType: "7i", brand: "Ping", model: "G430", isRecommended: false, estimatedPrice: { toNumber: () => 1000 } },
       ],
@@ -114,6 +116,7 @@ interface Calls {
   validate: number;
   fields: number;
   tags: number;
+  notes: { sessionId: number; opportunityId: string; body: string }[];
   order: string[];
   failedRetryable: boolean[];
   verifiedContacts: string[];
@@ -129,6 +132,7 @@ function harness(batch: StagedSyncBatch) {
     validate: 0,
     fields: 0,
     tags: 0,
+    notes: [],
     order: [],
     failedRetryable: [],
     verifiedContacts: [],
@@ -147,6 +151,7 @@ function harness(batch: StagedSyncBatch) {
 
   const deps: StagedSyncDeps = {
     loadBatch: async () => cloneBatch(db.batch),
+    validateFittingNoteConfiguration: () => {},
     verifyApprovedContact: async (id) => {
       calls.verifiedContacts.push(id);
       if (opts.failAt === "contact") {
@@ -232,6 +237,10 @@ function harness(batch: StagedSyncBatch) {
       if (opts.failAt === "tag-marker") throw new Error("database unavailable");
       calls.order.push("tagMarker");
       session().ghlLockerReadyTagAddedAt = new Date();
+    },
+    ensureFittingNote: async (sessionId, opportunityId, body) => {
+      calls.notes.push({ sessionId, opportunityId, body });
+      return "note";
     },
     markSynced: async () => {
       session().ghlSyncStatus = "synced";
@@ -391,6 +400,70 @@ test("contact and opportunity IDs are persisted before later steps", async () =>
   const h = harness(makeBatch());
   await syncStagedFittingToGHL(h.deps, 1);
   assert.deepEqual(h.calls.order, ["saveOpp", "fields", "tagMarker"]);
+  assert.deepEqual(h.calls.notes, [{
+    sessionId: 7,
+    opportunityId: "opp-1",
+    body: "Fitting Date: 2026-05-08\nUpload Date: 2026-05-09\nDemo Session ID: 7\nClub Category: 7i\nIndividual Club Tests: 1\nClub Details:\n- Ping G430: $1,000.00\nView Fitting Details: https://app.test/staff/imports/1/map",
+  }]);
+});
+
+test("fitting note lists individual finalized tests and their prices", () => {
+  const fitting: SyncSessionInfo = {
+    id: 7,
+    demoDate: new Date("2026-05-08T12:00:00Z"),
+    salesRep: null,
+    currentClub: null,
+    clubTests: [
+      { clubRole: "demo", clubType: "7Iron", brand: "Ping", model: "G430", isRecommended: false, estimatedPrice: { toNumber: () => 1234.5 } },
+      { clubRole: "demo", clubType: "7Iron", brand: "Ping", model: "G430", isRecommended: false, estimatedPrice: null },
+      { clubRole: "demo", clubType: "3Wood", brand: null, model: null, isRecommended: false, estimatedPrice: { toNumber: () => 0 } },
+      { clubRole: "current", clubType: "Driver", brand: "Old", model: "Club", isRecommended: false, estimatedPrice: { toNumber: () => 99 } },
+    ],
+  };
+  assert.equal(
+    buildFittingNote(fitting, "https://app.test/", [
+      { id: 55, status: "finalized", createdAt: new Date("2026-05-09T15:00:00Z") },
+    ], 55),
+    [
+      "Fitting Date: 2026-05-08",
+      "Upload Date: 2026-05-09",
+      "Demo Session ID: 7",
+      "Club Category: 7 Iron, 3 Wood",
+      "Individual Club Tests: 3",
+      "Club Details:",
+      "- Ping G430: $1,234.50",
+      "- Ping G430: Price not entered",
+      "- Club 3: $0.00",
+      "View Fitting Details: https://app.test/staff/imports/55/map",
+    ].join("\n"),
+  );
+});
+
+test("fitting note omits upload information when the import association is missing or ambiguous", () => {
+  const fitting = makeBatch().demoSession!;
+  const batch = { id: 55, status: "finalized", createdAt: new Date("2026-05-09T15:00:00Z") };
+  for (const [batches, expectedId] of [
+    [[], undefined],
+    [[batch, { ...batch, id: 56 }], undefined],
+    [[{ ...batch, status: "reviewing" }], undefined],
+    [[batch], 56],
+  ] as const) {
+    const note = buildFittingNote(fitting, "https://app.test", batches, expectedId);
+    assert.doesNotMatch(note, /Upload Date:|View Fitting Details:/);
+    assert.match(note, /Demo Session ID: 7/);
+  }
+});
+
+test("staged sync omits an ambiguous import link without changing the opportunity", async () => {
+  const h = harness(makeBatch({}, {
+    importBatches: [
+      { id: 1, status: "finalized", createdAt: new Date("2026-05-09T15:00:00Z") },
+      { id: 2, status: "finalized", createdAt: new Date("2026-05-10T15:00:00Z") },
+    ],
+  }));
+  assert.equal((await syncStagedFittingToGHL(h.deps, 1)).ok, true);
+  assert.equal(h.calls.notes[0].opportunityId, "opp-1");
+  assert.doesNotMatch(h.calls.notes[0].body, /Upload Date:|View Fitting Details:/);
 });
 
 test("definitive field rejection keeps the opportunity ID and safely retries", async () => {

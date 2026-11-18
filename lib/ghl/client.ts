@@ -54,7 +54,9 @@ function guardOpportunityReadOnly(path: string, options: RequestInit): RequestIn
 
   const opportunityRead =
     /^\/opportunities\/search(?:\?[^#]*)?$/.test(path) ||
-    /^\/opportunities\/[a-zA-Z0-9_-]+$/.test(path);
+    /^\/opportunities\/[a-zA-Z0-9_-]+$/.test(path) ||
+    /^\/contacts\/lookup\?[^#]*$/.test(path) ||
+    /^\/contacts\/(?!lookup$)[a-zA-Z0-9_-]+$/.test(path);
   const headers = new Headers(options.headers);
   if (
     (options.method ?? "GET").toUpperCase() !== "GET" ||

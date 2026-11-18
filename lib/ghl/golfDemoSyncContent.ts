@@ -29,6 +29,49 @@ function clubLabel(test: SyncClubTest): string {
   return parts.length > 0 ? parts.join(" ") : test.clubType ?? "Unknown";
 }
 
+export interface FittingNoteImportBatch {
+  id: number;
+  status: string;
+  createdAt: Date;
+}
+
+export function buildFittingNote(
+  session: SyncSessionInfo,
+  appBaseUrl: string,
+  importBatches: readonly FittingNoteImportBatch[],
+  expectedBatchId?: number,
+): string {
+  const tests = session.clubTests.filter((test) => test.clubRole === "demo");
+  const categories = [...new Set(tests
+    .map((test) => test.clubType?.trim().replace(/(\d)([A-Z])/g, "$1 $2"))
+    .filter((category): category is string => Boolean(category)))];
+  const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+  const batch = importBatches.length === 1 &&
+    importBatches[0].status === "finalized" &&
+    (expectedBatchId === undefined || importBatches[0].id === expectedBatchId)
+    ? importBatches[0]
+    : null;
+  const lines = [
+    `Fitting Date: ${session.demoDate.toISOString().slice(0, 10)}`,
+    ...(batch ? [`Upload Date: ${batch.createdAt.toISOString().slice(0, 10)}`] : []),
+    `Demo Session ID: ${session.id}`,
+    `Club Category: ${categories.length ? categories.join(", ") : "Not recorded"}`,
+    `Individual Club Tests: ${tests.length}`,
+    "Club Details:",
+    ...(tests.length ? tests.map((test, index) => {
+      const name = [test.brand?.trim(), test.model?.trim()].filter(Boolean).join(" ") || `Club ${index + 1}`;
+      const price = test.estimatedPrice === null
+        ? "Price not entered"
+        : currency.format(test.estimatedPrice.toNumber());
+      return `- ${name}: ${price}`;
+    }) : ["- None recorded"]),
+  ];
+  if (batch) {
+    lines.push(`View Fitting Details: ${appBaseUrl.replace(/\/+$/, "")}/staff/imports/${batch.id}/map`);
+  }
+  return lines.join("\n");
+}
+
 export function buildGolfDemoSummaries(
   session: SyncSessionInfo,
 ): GolfDemoSummaries {

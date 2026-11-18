@@ -98,7 +98,8 @@ function assertClaim(claim: CustomerSyncClaim): void {
 async function lockCustomerAndState(
   tx: Prisma.TransactionClient,
   golfClientId: number,
-): Promise<{ state: LockedState; legacyCreationClaim: boolean } | null> {
+  initializeMissing = false,
+): Promise<{ state: LockedState; legacyCreationClaim: boolean; initialized: boolean } | null> {
   const customers = await tx.$queryRaw<Array<{ id: number }>>`
     SELECT id FROM GolfClient WHERE id = ${golfClientId} FOR UPDATE
   `;
@@ -108,7 +109,7 @@ async function lockCustomerAndState(
     where: { id: golfClientId },
     select: { ghlContactCreationState: true },
   });
-  const rows = await tx.$queryRaw<RawLockedState[]>`
+  let rows = await tx.$queryRaw<RawLockedState[]>`
     SELECT workStatus, desiredVersion, syncedVersion, claimedVersion, claimToken,
       leaseExpiresAt, creationAttemptId, creationAttemptVersion,
       creationAttemptStatus, creationAttemptedAt,
@@ -116,6 +117,20 @@ async function lockCustomerAndState(
       leaseExpiresAt > CURRENT_TIMESTAMP(3) AS leaseValid
     FROM GolfClientSyncState WHERE golfClientId = ${golfClientId} FOR UPDATE
   `;
+  let initialized = false;
+  if (!rows[0] && initializeMissing && customer.ghlContactCreationState === null) {
+    await tx.golfClientSyncState.create({ data: { golfClientId } });
+    initialized = true;
+    rows = await tx.$queryRaw<RawLockedState[]>`
+      SELECT workStatus, desiredVersion, syncedVersion, claimedVersion, claimToken,
+        leaseExpiresAt, creationAttemptId, creationAttemptVersion,
+        creationAttemptStatus, creationAttemptedAt,
+        nextAttemptAt <= CURRENT_TIMESTAMP(3) AS retryDue,
+        leaseExpiresAt > CURRENT_TIMESTAMP(3) AS leaseValid
+      FROM GolfClientSyncState WHERE golfClientId = ${golfClientId} FOR UPDATE
+    `;
+    if (!rows[0]) throw new Error("Created customer sync state could not be locked.");
+  }
   const raw = rows[0];
   if (!raw) return null;
   const state: LockedState = {
@@ -125,7 +140,7 @@ async function lockCustomerAndState(
     claimedVersion: readNullableVersion(raw.claimedVersion, "claimedVersion"),
     creationAttemptVersion: readNullableVersion(raw.creationAttemptVersion, "creationAttemptVersion"),
   };
-  return { state, legacyCreationClaim: customer.ghlContactCreationState !== null };
+  return { state, legacyCreationClaim: customer.ghlContactCreationState !== null, initialized };
 }
 
 function hasCreationAttempt(
@@ -187,13 +202,18 @@ export async function claimCustomerSync(
   golfClientId: number,
   leaseMs: number,
   fittingOwner?: FittingSyncOwner,
+  linkOnly = false,
 ): Promise<CustomerSyncClaimResult> {
   assertClientId(golfClientId);
   assertDuration(leaseMs, "leaseMs");
   return db.$transaction(async (tx) => {
-    const row = await lockCustomerAndState(tx, golfClientId);
+    const row = await lockCustomerAndState(tx, golfClientId, linkOnly);
     if (!row) return { status: "unavailable" };
     if (await fittingSyncBlocksCustomer(tx, golfClientId, fittingOwner)) {
+      if (row.initialized) {
+        await tx.golfClientSyncState.delete({ where: { golfClientId } });
+        return { status: "fitting_blocked" };
+      }
       if (row.state.workStatus === "pending" ||
           row.state.workStatus === "retryable_failed" ||
           (row.state.workStatus === "processing" && Number(row.state.leaseValid) !== 1)) {
@@ -215,7 +235,8 @@ export async function claimCustomerSync(
     }
     if (
       state.workStatus !== "pending" &&
-      !(state.workStatus === "retryable_failed" && Number(state.retryDue) === 1)
+      !(state.workStatus === "retryable_failed" && Number(state.retryDue) === 1) &&
+      !(linkOnly && state.workStatus === "synced" && state.syncedVersion === state.desiredVersion)
     ) {
       return { status: "unavailable" };
     }

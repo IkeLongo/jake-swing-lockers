@@ -10,6 +10,20 @@ const ACTION_REQUIRED_PREFIX = "[action-required] ";
 export const FITTING_RECONCILIATION_MESSAGE =
   "This fitting has an active or interrupted CRM sync or an unresolved creation attempt. Staff review and reconciliation are required before retrying.";
 
+export type FittingNoteState =
+  | { status: "creating"; opportunityId: string; attemptId: string; attemptedAt: string }
+  | { status: "created"; opportunityId: string; noteId: string };
+
+export function isFittingNoteState(value: unknown): value is FittingNoteState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const note = value as Record<string, unknown>;
+  if (typeof note.opportunityId !== "string" || !note.opportunityId) return false;
+  if (note.status === "created") return typeof note.noteId === "string" && Boolean(note.noteId);
+  return note.status === "creating" &&
+    typeof note.attemptId === "string" && Boolean(note.attemptId) &&
+    typeof note.attemptedAt === "string" && Boolean(note.attemptedAt);
+}
+
 export function hasUnresolvedCustomerCreation(client: {
   ghlContactCreationState?: unknown;
   syncState?: {
@@ -31,6 +45,8 @@ export function hasUnresolvedFittingSyncState(value: unknown): boolean {
   if (typeof value !== "object" || Array.isArray(value)) return true;
   const state = value as Record<string, unknown>;
   if (state.version !== 1 || state.fittingClaim !== undefined || state.opportunity !== undefined) return true;
+  if (state.fittingNote !== undefined &&
+      (!isFittingNoteState(state.fittingNote) || state.fittingNote.status !== "created")) return true;
   if (state.contact === undefined) return false;
   const contact = state.contact;
   return !contact || typeof contact !== "object" || Array.isArray(contact) ||

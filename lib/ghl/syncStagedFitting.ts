@@ -1,13 +1,15 @@
 import {
   GOLF_DEMO_TAGS,
+  buildFittingNote,
   buildGolfDemoCustomFields,
   buildGolfDemoSummaries,
   golfDemoOpportunityName,
+  type FittingNoteImportBatch,
   type SyncClubTest,
 } from "./golfDemoSyncContent";
 import { ContactNeedsReviewError } from "./resolveStagedContact";
 import { isDefiniteGhlNoMutation } from "./client";
-import { FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation, hasUnresolvedFittingSyncState } from "./syncErrorMarker";
+import { FITTING_RECONCILIATION_MESSAGE, hasUnresolvedCustomerCreation, hasUnresolvedFittingSyncState, type FittingNoteState } from "./syncErrorMarker";
 
 // CRM sync for a locally finalized, staged TrackMan fitting.
 //
@@ -51,6 +53,7 @@ export interface StagedSyncSession {
   ghlSyncState: unknown;
   ghlLockerReadyTagAddedAt: Date | null;
   clubTests: SyncClubTest[];
+  importBatches: FittingNoteImportBatch[];
   client: StagedSyncClient;
 }
 
@@ -97,6 +100,7 @@ export interface StagedSyncState {
     contactId: string;
     attemptedAt: string;
   };
+  fittingNote?: FittingNoteState;
 }
 
 export type SyncOpportunityValidation =
@@ -105,6 +109,7 @@ export type SyncOpportunityValidation =
 
 export interface StagedSyncDeps {
   loadBatch(batchId: number): Promise<StagedSyncBatch | null>;
+  validateFittingNoteConfiguration(): void;
   verifyApprovedContact(contactId: string, clientId: number): Promise<void>;
   resolveNewContact(
     input: Pick<StagedSyncClient, "firstName" | "lastName" | "email" | "phone">,
@@ -139,6 +144,11 @@ export interface StagedSyncDeps {
   ): Promise<void>;
   addTags(ghlContactId: string, tags: string[]): Promise<void>;
   markTagsAdded(sessionId: number, lockerUrl: string): Promise<void>;
+  ensureFittingNote(
+    sessionId: number,
+    opportunityId: string,
+    body: string,
+  ): Promise<string>;
   markSynced(args: {
     sessionId: number;
     clientId: number;
@@ -314,6 +324,7 @@ export async function syncStagedFittingToGHL(
 
   let ghlContactId: string | null = null;
   try {
+    deps.validateFittingNoteConfiguration();
     if (
       (batch.customerResolution === "existing" &&
         batch.selectedGolfClientId !== client.id) ||
@@ -387,7 +398,14 @@ export async function syncStagedFittingToGHL(
       }
     }
 
-    // 5. Final status + event log.
+    // 5. Persist the note before marking the fitting synced.
+    await deps.ensureFittingNote(
+      session.id,
+      ghlOpportunityId,
+      buildFittingNote(session, deps.appBaseUrl(), session.importBatches, batch.id),
+    );
+
+    // 6. Final status + event log.
     await deps.markSynced({
       sessionId: session.id,
       clientId: client.id,

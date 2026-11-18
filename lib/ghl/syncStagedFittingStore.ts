@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@/app/generated/prisma/client";
 import { GhlDuplicateContactError, isDefiniteGhlNoMutation } from "./client";
 import { updateContactCustomFields } from "./contacts";
+import { createFittingNote, validateFittingNoteConfiguration } from "./fittingNotes";
 import {
   ContactNeedsReviewError,
   findStagedContactMatch,
@@ -16,7 +18,7 @@ import {
   reserveStagedContactCreation,
   type ContactCreationAttempt,
 } from "./customerContactCreationCoordinator";
-import { encodeSyncError } from "./syncErrorMarker";
+import { encodeSyncError, isFittingNoteState } from "./syncErrorMarker";
 import { addTagsToContact } from "./tags";
 import {
   createGolfDemoOpportunity,
@@ -75,7 +77,8 @@ function readSyncState(value: unknown): StagedSyncState {
       Number.isSafeInteger((opportunity as Record<string, unknown>).batchId) &&
       typeof (opportunity as Record<string, unknown>).contactId === "string" &&
       typeof (opportunity as Record<string, unknown>).attemptedAt === "string");
-  if (state.version !== 1 || !validContact || !validOpportunity) {
+  if (state.version !== 1 || !validContact || !validOpportunity ||
+      (state.fittingNote !== undefined && !isFittingNoteState(state.fittingNote))) {
     throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
   }
   return value as StagedSyncState;
@@ -512,6 +515,7 @@ export function createPrismaStagedSyncDeps(
   };
 
   return {
+    validateFittingNoteConfiguration,
     loadBatch: (batchId) =>
       db.importBatch.findUnique({
         where: { id: batchId },
@@ -546,6 +550,10 @@ export function createPrismaStagedSyncDeps(
               needsRefinalization: true,
               ghlSyncState: true,
               ghlLockerReadyTagAddedAt: true,
+              importBatches: {
+                take: 2,
+                select: { id: true, status: true, createdAt: true },
+              },
               clubTests: {
                 select: {
                   clubRole: true,
@@ -922,6 +930,93 @@ export function createPrismaStagedSyncDeps(
       });
     },
 
+    async ensureFittingNote(sessionId, opportunityId, body) {
+      const attemptId = randomUUID();
+      const existingId = await db.$transaction(async (tx) => {
+        await lockSession(tx, sessionId);
+        const row = await tx.demoSession.findUniqueOrThrow({
+          where: { id: sessionId },
+          select: { ghlOpportunityId: true, ghlSyncState: true },
+        });
+        const state = readSyncState(row.ghlSyncState);
+        if (row.ghlOpportunityId !== opportunityId) {
+          throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+        }
+        if (state.fittingNote) {
+          if (state.fittingNote.status === "created" &&
+              state.fittingNote.opportunityId === opportunityId) return state.fittingNote.noteId;
+          throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+        }
+        const attemptedAt = new Date().toISOString();
+        await persistSessionState(tx, sessionId, {
+          ...state,
+          fittingNote: { status: "creating", opportunityId, attemptId, attemptedAt },
+        }, {
+          ghlSyncStatus: "failed",
+          ghlSyncError: encodeSyncError(
+            `GHL fitting note creation for DemoSession ${sessionId} may have reached GHL. Reconcile before retrying.`,
+            false,
+          ),
+        });
+        return null;
+      }, { maxWait: 10_000, timeout: 30_000 });
+      if (existingId) return existingId;
+
+      let noteId: string;
+      try {
+        noteId = await createFittingNote(opportunityId, body, requestSignal?.());
+      } catch (error) {
+        if (!isDefiniteGhlNoMutation(error)) {
+          throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+        }
+        try {
+          await db.$transaction(async (tx) => {
+            await lockSession(tx, sessionId);
+            const row = await tx.demoSession.findUniqueOrThrow({
+              where: { id: sessionId },
+              select: { ghlSyncState: true },
+            });
+            const state = readSyncState(row.ghlSyncState);
+            if (state.fittingNote?.status !== "creating" ||
+                state.fittingNote.attemptId !== attemptId ||
+                state.fittingNote.opportunityId !== opportunityId) {
+              throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+            }
+            const rest = { ...state };
+            delete rest.fittingNote;
+            await persistSessionState(tx, sessionId, rest);
+          }, { maxWait: 10_000, timeout: 30_000 });
+        } catch {
+          throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+        }
+        throw error;
+      }
+
+      try {
+        return await db.$transaction(async (tx) => {
+          await lockSession(tx, sessionId);
+          const row = await tx.demoSession.findUniqueOrThrow({
+            where: { id: sessionId },
+            select: { ghlOpportunityId: true, ghlSyncState: true },
+          });
+          const state = readSyncState(row.ghlSyncState);
+          if (row.ghlOpportunityId !== opportunityId ||
+              state.fittingNote?.status !== "creating" ||
+              state.fittingNote.attemptId !== attemptId ||
+              state.fittingNote.opportunityId !== opportunityId) {
+            throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+          }
+          await persistSessionState(tx, sessionId, {
+            ...state,
+            fittingNote: { status: "created", opportunityId, noteId },
+          });
+          return noteId;
+        }, { maxWait: 10_000, timeout: 30_000 });
+      } catch {
+        throw new CreationNeedsReconciliationError(RECONCILIATION_REQUIRED);
+      }
+    },
+
     async markSynced({ sessionId, clientId, ghlContactId, ghlOpportunityId, lockerUrl }) {
       const now = new Date();
       await db.$transaction(async (tx) => {
@@ -941,6 +1036,7 @@ export function createPrismaStagedSyncDeps(
             ghlSyncState: stateValue({
               version: 1,
               ...(state.fittingClaim ? { fittingClaim: state.fittingClaim } : {}),
+              ...(state.fittingNote ? { fittingNote: state.fittingNote } : {}),
             }),
           },
         });

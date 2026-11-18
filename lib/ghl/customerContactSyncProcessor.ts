@@ -1,5 +1,11 @@
 import type { PrismaClient } from "@/app/generated/prisma/client";
 import { normalizeEmail, normalizePhone } from "@/lib/auth/normalize";
+import {
+  emailMatchKey,
+  phoneMatchKey,
+  parseEmailStrict,
+  parsePhoneStrict,
+} from "@/lib/imports/customer-identifiers";
 import { GhlApiError, GhlDuplicateContactError } from "./client";
 import {
   acknowledgeContactCreation,
@@ -26,6 +32,7 @@ import {
 } from "./discoverStagedContacts";
 import { matchGhlContact, type GhlContactMatchResult } from "./matchGhlContact";
 import { createStagedContactApi } from "./stagedContactApi";
+import type { GhlContactLite } from "./resolveStagedContact";
 import {
   normalizeContactProfile,
   updateContactProfile,
@@ -60,17 +67,23 @@ export interface CustomerContactSyncServices {
   claim(golfClientId: number): Promise<
     Awaited<ReturnType<typeof claimCustomerSync>>
   >;
+  claimLink(golfClientId: number): Promise<
+    Awaited<ReturnType<typeof claimCustomerSync>>
+  >;
+  hasLocalIdentifierConflict(customer: CustomerContactRecord): Promise<boolean>;
+  getContact(contactId: string): Promise<GhlContactLite | null>;
   loadCustomer(golfClientId: number): Promise<CustomerContactRecord | null>;
   match(
     customer: CustomerContactRecord,
     savedContactId: string | null,
-    options?: { allowLinkedProfileDifferences?: boolean },
+    options?: { allowLinkedProfileDifferences?: boolean; allowUnlinkedProfileDifferences?: boolean },
   ): Promise<GhlContactMatchResult>;
   link(input: {
     claim: CustomerSyncClaim;
     contactId: string;
     verifiedLocationId: string;
     expectedIdentity: CustomerContactIdentity;
+    requireUniqueIdentifiers?: boolean;
   }): Promise<VerifiedContactLinkResult>;
   reserve(input: {
     golfClientId: number;
@@ -122,6 +135,21 @@ function createServices(
   return {
     claim: (golfClientId) =>
       claimCustomerSync(database, golfClientId, CUSTOMER_SYNC_LEASE_MS, fittingOwner),
+    claimLink: (golfClientId) =>
+      claimCustomerSync(database, golfClientId, CUSTOMER_SYNC_LEASE_MS, undefined, true),
+    hasLocalIdentifierConflict: async (customer) => {
+      const email = emailMatchKey(customer.email);
+      const phone = phoneMatchKey(customer.phone);
+      const others = await database.golfClient.findMany({
+        where: { id: { not: customer.id } },
+        select: { email: true, phone: true },
+      });
+      return others.some((other) =>
+        Boolean(email && emailMatchKey(other.email) === email) ||
+        Boolean(phone && phoneMatchKey(other.phone) === phone),
+      );
+    },
+    getContact: (contactId) => stagedContactApi.getContact(contactId),
     loadCustomer: (golfClientId) =>
       database.golfClient.findUnique({
         where: { id: golfClientId },
@@ -680,4 +708,117 @@ export async function processCustomerContactSync(
     });
   }
   return syncClaimedCustomer(services, claimResult.claim, customer);
+}
+
+export async function linkExistingCustomerContact(
+  golfClientId: number,
+  suppliedServices?: CustomerContactSyncServices,
+): Promise<CustomerContactSyncResult> {
+  if (!Number.isSafeInteger(golfClientId) || golfClientId < 1) {
+    throw new RangeError("golfClientId must be a positive safe integer.");
+  }
+  if (process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED !== "true") return { status: "disabled" };
+
+  const services = suppliedServices ?? createServices((await import("@/lib/db")).db);
+  const claimed = await services.claimLink(golfClientId);
+  if (claimed.status === "needs_reconciliation") return { status: "needs_reconciliation" };
+  if (claimed.status !== "claimed") return { status: "unavailable" };
+  const claim = claimed.claim;
+  try {
+    const customer = await services.loadCustomer(golfClientId);
+    if (!customer) {
+      return failClaim(services, claim, {
+        kind: "reconciliation", code: "customer_missing",
+        message: "The customer was unavailable after claiming contact linking.",
+      });
+    }
+    if (await services.hasLocalIdentifierConflict(customer)) {
+      return failClaim(services, claim, {
+        kind: "review", code: "local_identity_conflict",
+        message: "Another local customer has the same email or phone.",
+      });
+    }
+    const match = await services.match(customer, customer.ghlContactId, {
+      allowLinkedProfileDifferences: customer.ghlContactId !== null,
+      allowUnlinkedProfileDifferences: customer.ghlContactId === null,
+    });
+    if (
+      match.status !== "matched" ||
+      !match.contact.locationVerified ||
+      (customer.ghlContactId !== null && match.contact.id !== customer.ghlContactId)
+    ) {
+      return failClaim(services, claim, {
+        kind: "review", code: "ghl_link_match_review",
+        message: "The existing GHL contact could not be matched unambiguously.",
+      });
+    }
+    const remote = await services.getContact(match.contact.id);
+    if (!remote || remote.id !== match.contact.id || remote.locationId !== services.locationId()) {
+      return failClaim(services, claim, {
+        kind: "review", code: "ghl_link_contact_unverified",
+        message: "The matched GHL contact could not be verified.",
+      });
+    }
+    if (customer.ghlContactId === null) {
+      const email = parseEmailStrict(remote.email);
+      const phone = parsePhoneStrict(remote.phone);
+      const expected = normalizeContactProfile(identityOf(customer));
+      const verifiedEmail = match.contact.reasons.includes("email") &&
+        expected.email !== null && email.ok && email.value === expected.email;
+      const verifiedPhone = match.contact.reasons.includes("phone") &&
+        expected.phone !== null && phone.ok && phone.value === expected.phone;
+      if (!verifiedEmail && !verifiedPhone) {
+        return failClaim(services, claim, {
+          kind: "review", code: "ghl_link_identifier_unverified",
+          message: "The matched identifier could not be verified on the full GHL contact.",
+        });
+      }
+    }
+    const link = await services.link({
+      claim, contactId: match.contact.id, verifiedLocationId: services.locationId(),
+      expectedIdentity: identityOf(customer),
+      requireUniqueIdentifiers: true,
+    });
+    if (link.status !== "linked" && link.status !== "already_linked") {
+      if (link.status === "lost_claim") return { status: "unavailable" };
+      return failClaim(services, claim, {
+        kind: link.status === "attempt_unresolved" || link.status === "customer_missing"
+          ? "reconciliation" : "review",
+        code: "ghl_link_conflict",
+        message: `The GHL contact could not be safely linked (${link.status}).`,
+      });
+    }
+    const expected = normalizeContactProfile(identityOf(customer));
+    const sameField = (field: "firstName" | "lastName" | "email" | "phone") => {
+      if (!Object.prototype.hasOwnProperty.call(remote, field)) return false;
+      const value = remote[field];
+      if (value !== null && typeof value !== "string") return false;
+      const clean = typeof value === "string" ? value.trim() || null : null;
+      if (field === "email" || field === "phone") {
+        const parsed = field === "email" ? parseEmailStrict(clean) : parsePhoneStrict(clean);
+        return parsed.ok && parsed.value === expected[field];
+      }
+      return clean === expected[field];
+    };
+    if (!(["firstName", "lastName", "email", "phone"] as const).every(sameField)) {
+      return failClaim(services, claim, {
+        kind: "review", code: "ghl_link_profile_differs",
+        message: "The contact was linked, but its profile differs or could not be fully verified.",
+      });
+    }
+    const completed = await services.complete(claim);
+    return completed.status === "applied"
+      ? { status: "synced", contactId: match.contact.id }
+      : completed.status === "needs_reconciliation"
+        ? { status: "needs_reconciliation" }
+        : { status: "unavailable" };
+  } catch (error) {
+    console.error("[customer-contact-link] Verification failed.", {
+      errorType: error instanceof Error ? error.name : "unknown",
+    });
+    return failClaim(services, claim, {
+      kind: "review", code: "ghl_link_verification_failed",
+      message: "Contact verification failed; review before trying again.",
+    });
+  }
 }

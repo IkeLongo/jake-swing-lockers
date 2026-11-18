@@ -22,8 +22,8 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Customer contact synchronization
 
-For local opportunity testing, set `GHL_OPPORTUNITY_READ_ONLY=true`. Both GHL
-clients then allow only opportunity search and detail GET requests, reject
+For local opportunity and customer-link testing, set `GHL_OPPORTUNITY_READ_ONLY=true`. Both GHL
+clients then allow only opportunity search/detail and contact lookup/detail GET requests, reject
 redirects, and block all CRM writes and message delivery. This guard applies to
 requests made through these clients; it does not restrict the API token itself.
 Keep customer synchronization and SMS disabled while using this mode.
@@ -79,7 +79,7 @@ fetch("/api/staff/admin/customer-contact-sync", {
 }).then((response) => response.json()).then(console.log);
 ```
 
-The only accepted option is `limit`, an integer from 1 to 10 (default 5).
+For a batch, the only accepted option is `limit`, an integer from 1 to 10 (default 5).
 The response contains counts only. `processed` counts processor calls, not
 necessarily newly acquired claims; `succeeded` includes contacts already
 verified as synced by a concurrent invocation. `skipped` counts unavailable
@@ -87,6 +87,19 @@ claims or a processor disabled mid-run, and `needsReconciliation` requires
 manual review rather than automatic reposting. An unexpected error or interrupted
 request may leave a claim for the existing lease/reconciliation safeguards to
 handle. Keep batches small enough for the deployment's request timeout.
+
+For an individual existing customer, explicitly enable
+`GHL_CUSTOMER_LINK_ONLY_ENABLED=true` and, as an active administrator, send
+the same endpoint `{ "mode": "link-only", "golfClientId": 1 }` (substitute
+the intended local customer ID). This separate flag does not enable the normal
+customer worker. The operation reads GHL contacts but never creates or updates
+them. It verifies an existing saved ID or links an unambiguous email/US-phone
+match; conflicts, incomplete lookups and failures require review. A linked
+contact is marked synced only when the full remote profile is present and
+matches. Differing or incomplete profiles remain in review; interrupted claims
+and unresolved writes require reconciliation. Existing review states are not
+automatically cleared. For local testing, keep the read-only guard enabled; the
+guard does not itself make the GHL token read-only.
 
 ## Staged fitting contact synchronization
 
@@ -107,6 +120,32 @@ an opportunity decision arbitrarily. Existing customers without verified sync
 state are not automatically recovered; staff can use the existing fitting sync
 and customer reconciliation procedures. Matching an existing remote contact to
 an unlinked customer requires review; it is never linked automatically.
+
+### Fitting notes
+
+Successful fitting sync creates one dated note per DemoSession on its GHL
+opportunity. Configure the approved GHL user's ID in the server-only
+`GHL_FITTING_NOTE_AUTHOR_USER_ID` environment variable and grant the private
+integration `notes.write`. Configure `APP_BASE_URL` to the staff-accessible
+application URL; when exactly one finalized import is associated with the
+session, the note links to its authenticated staff import review page and shows
+the upload date; ambiguous or missing imports are omitted. The note lists each
+finalized test and its stored price, using numbered labels when no brand or
+model is recorded. The existing GHL read-only guard also blocks note creation.
+A missing author or a rejected note request leaves the fitting unsynced.
+
+The existing per-session sync state records an attempt before the note POST and
+the returned note ID afterward. A timeout, interrupted request, invalid
+response, or failure to persist the ID requires reconciliation, not an
+automatic repost. Successful IDs are retained for subsequent retries, including
+when several sessions use the same opportunity. Previously synced fittings are
+not automatically backfilled. Pending fitting recovery can create notes after
+deployment, so check existing recovery candidates and GHL workflows before
+enabling sync. Stop old-version workers before deployment.
+The note is a snapshot; re-finalizing a session does not update an existing
+note. The legacy fitting sync still updates its opportunity's stage and value as
+before; use staged sync with an existing opportunity for a test that must avoid
+those updates.
 
 The finalization screen already attempts CRM sync after the immediate customer
 attempt. Other customer requests do not start an additional fitting sync: doing
@@ -133,7 +172,7 @@ unrestricted endpoint.
    confirm the original request and any related
    customer sync have stopped, and record the time and operator.
 2. Read the session's `ghlSyncStatus`, `ghlSyncError`, `ghlSyncState` (including
-   `fittingClaim`, `contact`, and `opportunity`), `ghlOpportunityId`,
+   `fittingClaim`, `contact`, `opportunity`, and `fittingNote`), `ghlOpportunityId`,
    `ghlLockerReadyTagAddedAt`, and `GhlSyncEvent` entries. Also inspect the
    customer's `ghlContactId`, `ghlContactCreationState`, and
    `GolfClientSyncState` creation-attempt fields. Record the claim token,
@@ -145,7 +184,9 @@ unrestricted endpoint.
    contact, name, and time. Inspect the contact's custom fields and the
    `golf-demo:locker-ready` and `golf-demo:followup-active` tags and any workflow
    activity they triggered. A shared opportunity or tag is not proof that this
-   fitting's operation succeeded.
+   fitting's operation succeeded. For a `fittingNote` attempt, inspect the
+   opportunity's notes for the specific DemoSession and preserve the matching
+   note ID and association as evidence.
 4. Classify each operation as **confirmed success**, **confirmed rejection/no
    mutation**, or **uncertain**, using GHL records and request/event evidence.
    A search with no result alone does not prove a timed-out POST failed. Do not
@@ -156,6 +197,9 @@ unrestricted endpoint.
    Preserve the original customer, fitting, opportunity decision, club data,
    other sync-state fields and unrelated markers. Record a confirmed tag
    application in the existing tag marker only after its effects are reconciled.
+   For a confirmed note, replace only the matching `fittingNote` attempt with
+   `{ status: "created", opportunityId, noteId }` after verifying the note's
+   session and opportunity. Do not clear an uncertain attempt.
    For confirmed rejection, clear only the corresponding owned creation marker
    using a reviewed, transactionally locked maintenance operation. Do not clear
    customer-coordinator attempt fields without also reconciling their matching

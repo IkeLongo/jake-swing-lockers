@@ -12,6 +12,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     "SESSION_SECRET", "GHL_SWINGLOCKER_LOCATION_ID", "GHL_SWINGLOCKER_PRIVATE_TOKEN",
     "GHL_SWINGLOCKER_PIPELINE_ID", "GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID",
     "GHL_CUSTOMER_CONTACT_SYNC_ENABLED",
+    "GHL_FITTING_NOTE_AUTHOR_USER_ID",
   ] as const;
   const env = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   Object.assign(process.env, {
@@ -21,6 +22,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     GHL_SWINGLOCKER_PIPELINE_ID: "pipeline",
     GHL_SWINGLOCKER_STAGE_DEMO_SUBMITTED_ID: "stage",
     GHL_CUSTOMER_CONTACT_SYNC_ENABLED: "false",
+    GHL_FITTING_NOTE_AUTHOR_USER_ID: "author",
   });
   after(() => {
     globalThis.fetch = originalFetch;
@@ -41,7 +43,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     salesRep: null, currentClub: null, ghlOpportunityId: null as string | null,
     ghlSyncStatus: null as string | null, ghlSyncError: null as string | null,
     ghlSyncState: null as unknown, ghlLockerReadyTagAddedAt: null as Date | null,
-    clubTests: [], client,
+    clubTests: [], importBatches: [] as { id: number; status: string; createdAt: Date }[], client,
   };
   const snapshot: GhlReviewSnapshot = {
     v: 1, discoverySignature: "a".repeat(64), incomplete: false,
@@ -62,6 +64,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   });
   let failLegacyLoad = false;
   let failStagedLoad = false;
+  let failSyncedOnce = false;
   let siblingState: unknown = null;
   let workerState: null | {
     workStatus: string; desiredVersion: number; syncedVersion: number;
@@ -83,13 +86,19 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
       return [{ id: 7 }];
     },
     demoSession: {
-      async findUniqueOrThrow() { return { ghlSyncState: structuredClone(session.ghlSyncState) }; },
+      async findUniqueOrThrow() {
+        return { ghlSyncState: structuredClone(session.ghlSyncState), ghlOpportunityId: session.ghlOpportunityId };
+      },
       async findUnique(args: { select?: { clientId?: boolean } }) {
         if (args.select?.clientId) return { clientId: 3 };
         if (failLegacyLoad) throw new Error("local read failed");
         return session;
       },
       async update({ data }: { data: Record<string, unknown> }) {
+        if (failSyncedOnce && data.ghlSyncStatus === "synced") {
+          failSyncedOnce = false;
+          throw new Error("sync completion failed");
+        }
         Object.assign(session, data);
         if (data.ghlSyncState === Prisma.DbNull) session.ghlSyncState = null;
       },
@@ -115,6 +124,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   let contactGate: Promise<void> | null = null;
   let contactStarted: (() => void) | null = null;
   const calls: string[] = [];
+  const noteBodies: string[] = [];
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
@@ -150,6 +160,10 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
       if (mode === "tag-timeout") throw new Error("response timed out");
       return Response.json({});
     }
+    if (url.pathname === "/notes/" && method === "POST") {
+      noteBodies.push((JSON.parse(String(init?.body)) as { body: string }).body);
+      return Response.json({ note: { id: "note" } });
+    }
     throw new Error(`Unexpected mocked request: ${method} ${url.pathname}`);
   };
 
@@ -167,6 +181,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
     session.ghlOpportunityId = null;
     session.ghlLockerReadyTagAddedAt = null;
     calls.length = 0;
+    noteBodies.length = 0;
   };
 
   for (const marker of [
@@ -246,6 +261,16 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   process.env.GHL_SWINGLOCKER_PIPELINE_ID = "pipeline";
 
   reset();
+  delete process.env.GHL_FITTING_NOTE_AUTHOR_USER_ID;
+  assert.equal((await syncGolfDemoToGHL(7)).success, false);
+  assert.equal(calls.length, 0);
+  reset();
+  session.ghlOpportunityId = "opp";
+  assert.equal((await (await runStaged()).json()).status, "failed");
+  assert.equal(calls.length, 0);
+  process.env.GHL_FITTING_NOTE_AUTHOR_USER_ID = "author";
+
+  reset();
   mode = "opportunity-rejected";
   assert.equal((await syncGolfDemoToGHL(7)).requiresReconciliation, undefined);
   assert.equal(session.ghlSyncState, null);
@@ -259,8 +284,12 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
 
   reset();
   mode = "success";
+  session.importBatches = [{ id: 55, status: "finalized", createdAt: new Date("2026-05-09T15:00:00Z") }];
   assert.equal((await syncGolfDemoToGHL(7)).success, true);
-  assert.equal(session.ghlSyncState, null);
+  assert.deepEqual(session.ghlSyncState, { version: 1, fittingNote: { status: "created", opportunityId: "opp", noteId: "note" } });
+  assert.match(noteBodies[0], /Upload Date: 2026-05-09/);
+  assert.match(noteBodies[0], /\/staff\/imports\/55\/map/);
+  session.importBatches = [];
 
   reset();
   session.ghlOpportunityId = "opp";
@@ -279,7 +308,16 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   const success = await runStaged();
   assert.equal(success.status, 200);
   assert.equal((await success.json()).status, "synced");
-  assert.equal(session.ghlSyncState, null);
+  assert.deepEqual(session.ghlSyncState, { version: 1, fittingNote: { status: "created", opportunityId: "opp", noteId: "note" } });
+
+  reset();
+  session.ghlOpportunityId = "opp";
+  failSyncedOnce = true;
+  const failedAfterNote = await runStaged();
+  assert.equal((await failedAfterNote.json()).retryable, true);
+  assert.equal(calls.filter((call) => call === "POST /notes/").length, 1);
+  assert.equal((await (await runStaged()).json()).status, "synced");
+  assert.equal(calls.filter((call) => call === "POST /notes/").length, 1);
 
   reset();
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
@@ -292,7 +330,7 @@ test("legacy and staged entry points keep uncertain claims and release safe outc
   };
   Object.assign(client, { syncState: workerState });
   assert.equal((await syncGolfDemoToGHL(7)).success, true);
-  assert.equal(session.ghlSyncState, null);
+  assert.deepEqual(session.ghlSyncState, { version: 1, fittingNote: { status: "created", opportunityId: "opp", noteId: "note" } });
 
   const { db } = await import("../lib/db");
   const { runClaimedStagedFittingSync } = await import("../lib/ghl/runClaimedStagedFittingSync");

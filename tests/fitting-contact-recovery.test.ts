@@ -153,10 +153,11 @@ test("staff approval replaces the outdated decision and CRM sync can retry", asy
         ...h.batch,
         demoSession: {
           ...h.session, lockerToken: "token", demoDate: new Date(), salesRep: null,
-          currentClub: null, clubTests: [], client: { ...h.client, syncState: null },
+          currentClub: null, clubTests: [], importBatches: [], client: { ...h.client, syncState: null },
         },
       };
     },
+    validateFittingNoteConfiguration() {},
     async verifyApprovedContact(id) { usedContact = id; },
     async resolveNewContact() { throw new Error("must not create a contact"); },
     async saveContactId() { throw new Error("must not relink the customer"); },
@@ -166,6 +167,7 @@ test("staff approval replaces the outdated decision and CRM sync can retry", asy
     async updateContactCustomFields() {},
     async addTags() {},
     async markTagsAdded() {},
+    async ensureFittingNote() { return "note"; },
     async markSynced() {},
     async markFailed() { throw new Error("unexpected failure"); },
     now: () => new Date(),
