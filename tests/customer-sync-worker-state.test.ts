@@ -54,8 +54,9 @@ function row(id: number, patch: Partial<Row> = {}): Row {
   };
 }
 
-function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
+function harness(initial: Row[], options: { unsignedAsBigInt?: boolean; missingStates?: number[] } = {}) {
   const rows = new Map(initial.map((value) => [value.golfClientId, { ...value }]));
+  const missingStates = new Set(options.missingStates ?? []);
   const sessions = new Map<number, { id: number; clientId: number; ghlSyncState: unknown }>();
   const tails = new Map<number, Promise<void>>();
   const sql: string[] = [];
@@ -82,6 +83,7 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
     },
     async $transaction<T>(callback: (tx: never) => Promise<T>): Promise<T> {
       let local: Row | null = null;
+      let stateMissing = false;
       let lockedId: number | null = null;
       let release = () => {};
       const statements: string[] = [];
@@ -100,6 +102,7 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
             release = unlock;
             lockedId = id;
             local = rows.has(id) ? { ...rows.get(id)! } : null;
+            stateMissing = missingStates.has(id);
             return local ? [{ id }] : [];
           }
           if (query.includes("FROM DemoSession WHERE id")) {
@@ -112,7 +115,7 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
               .sort((a, b) => a.id - b.id)
               .map((session) => structuredClone(session));
           }
-          return local ? [{
+          return local && !stateMissing ? [{
             ...local,
             ...(options.unsignedAsBigInt ? {
               desiredVersion: BigInt(local.desiredVersion),
@@ -147,6 +150,17 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
           },
         },
         golfClientSyncState: {
+          async create({ data }: { data: { golfClientId: number } }) {
+            assert.ok(local);
+            assert.equal(data.golfClientId, local.golfClientId);
+            assert.ok(stateMissing);
+            stateMissing = false;
+          },
+          async delete({ where }: { where: { golfClientId: number } }) {
+            assert.ok(local);
+            assert.equal(where.golfClientId, local.golfClientId);
+            stateMissing = true;
+          },
           async update(args: { data: Partial<Row> }) {
             assert.ok(local);
             Object.assign(local, args.data);
@@ -215,7 +229,10 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
       };
       try {
         const result = await callback(tx as never);
-        if (local && lockedId !== null) rows.set(lockedId, local);
+        if (local && lockedId !== null) {
+          rows.set(lockedId, local);
+          if (!stateMissing) missingStates.delete(lockedId);
+        }
         return result;
       } finally {
         release();
@@ -233,6 +250,37 @@ function harness(initial: Row[], options: { unsignedAsBigInt?: boolean } = {}) {
     expireOnWrite() { expireAtNextWrite = true; },
   };
 }
+
+test("missing link-only state is initialized and claimed atomically against another worker", async () => {
+  const h = harness([row(1)], { missingStates: [1] });
+  const results = await Promise.all([
+    claimCustomerSync(h.db, 1, 1000, undefined, true),
+    claimCustomerSync(h.db, 1, 1000),
+  ]);
+  assert.equal(results[0]?.status, "claimed");
+  assert.equal(results[1]?.status, "unavailable");
+  assert.equal(h.rows.get(1)?.attemptCount, 1);
+  h.advance(1000);
+  assert.equal((await claimCustomerSync(h.db, 1, 1000)).status, "needs_reconciliation");
+});
+
+test("missing link-only state never becomes normal pending work when a fitting blocks", async () => {
+  const h = harness([row(1)], { missingStates: [1] });
+  h.sessions.set(10, { id: 10, clientId: 1, ghlSyncState: { version: 1, fittingClaim: { token: "interrupted" } } });
+  assert.equal((await claimCustomerSync(h.db, 1, 1000, undefined, true)).status, "fitting_blocked");
+  assert.equal((await claimCustomerSync(h.db, 1, 1000)).status, "unavailable");
+});
+
+test("a missing sync state with a legacy creation marker is not initialized", async () => {
+  const h = harness([row(1, { legacyClaim: { status: "creating" } })], { missingStates: [1] });
+  assert.equal((await claimCustomerSync(h.db, 1, 1000, undefined, true)).status, "unavailable");
+});
+
+test("link-only can verify a synced state without making it ordinary pending work", async () => {
+  const h = harness([row(1, { workStatus: "synced", syncedVersion: 1 })]);
+  assert.equal((await claimCustomerSync(h.db, 1, 1000)).status, "unavailable");
+  assert.equal((await claimCustomerSync(h.db, 1, 1000, undefined, true)).status, "claimed");
+});
 
 async function claimed(h: ReturnType<typeof harness>, id: number, leaseMs = 1000): Promise<CustomerSyncClaim> {
   const result = await claimCustomerSync(h.db, id, leaseMs);

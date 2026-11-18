@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 import { GhlApiError, GhlDuplicateContactError } from "../lib/ghl/client";
 import {
   processCustomerContactSync,
+  linkExistingCustomerContact,
   type CustomerContactRecord,
   type CustomerContactSyncServices,
 } from "../lib/ghl/customerContactSyncProcessor";
@@ -20,6 +21,7 @@ import { attemptCustomerSync } from "../lib/ghl/attemptCustomerSync";
 import { runCustomerContactSyncBatch } from "../lib/ghl/runCustomerContactSyncBatch";
 
 const originalFlag = process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
+const originalLinkFlag = process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED;
 const LOCATION = "loc-1";
 const CLAIM: CustomerSyncClaim = {
   golfClientId: 7,
@@ -33,6 +35,8 @@ const ATTEMPT: ContactCreationAttempt = {
 };
 
 afterEach(() => {
+  if (originalLinkFlag === undefined) delete process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED;
+  else process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = originalLinkFlag;
   if (originalFlag === undefined) {
     delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
   } else {
@@ -110,7 +114,7 @@ interface HarnessOptions {
   match?: (
     customer: CustomerContactRecord,
     savedContactId: string | null,
-    options?: { allowLinkedProfileDifferences?: boolean },
+    options?: { allowLinkedProfileDifferences?: boolean; allowUnlinkedProfileDifferences?: boolean },
   ) => Promise<GhlContactMatchResult> | GhlContactMatchResult;
   createError?: Error;
   updateError?: Error;
@@ -167,6 +171,14 @@ function harness(options: HarnessOptions = {}) {
       };
       return { status: "claimed", claim: CLAIM };
     },
+    async claimLink(id) {
+      if (!customer.syncState) {
+        customer.syncState = { workStatus: "pending", desiredVersion: 1, syncedVersion: 0 };
+      }
+      return services.claim(id);
+    },
+    async hasLocalIdentifierConflict() { return false; },
+    async getContact(id) { return contact(id); },
     async loadCustomer() {
       return {
         ...customer,
@@ -286,7 +298,112 @@ function configureRealMatching(
       { identity: customer, savedContactId, ownClientId: customer.id },
       options,
     );
+  h.services.getContact = (id) => api.getContact(id);
+  return api;
 }
+
+test("link-only verifies saved links and uniquely matched email or US phone without GHL writes", async () => {
+  process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = "true";
+  delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
+  for (const customer of [
+    { ghlContactId: "saved", syncState: null },
+    { phone: null },
+    { email: null },
+  ]) {
+    const h = harness({ customer });
+    const remote = { ...contact(customer.ghlContactId ?? "found") };
+    if ("phone" in customer) remote.phone = undefined;
+    if ("email" in customer) remote.email = undefined;
+    // Explicit nulls represent absent remote fields; omission cannot prove equality.
+    const fullRemote = { ...remote, phone: customer.phone === null ? null : remote.phone,
+      email: customer.email === null ? null : remote.email };
+    configureRealMatching(h, [fullRemote]);
+    const result = await linkExistingCustomerContact(7, h.services);
+    assert.equal(result.status, "synced");
+    assert.equal(h.customer.ghlContactId, fullRemote.id);
+    assert.equal(h.calls.complete, 1);
+    assert.equal(h.calls.reserve, 0);
+    assert.deepEqual(h.calls.create, []);
+    assert.deepEqual(h.calls.update, []);
+  }
+});
+
+test("link-only blocks conflicts, incomplete lookups, wrong locations, local duplicates and failures", async () => {
+  process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = "true";
+  for (const scenario of ["none", "ambiguous", "conflict", "incomplete", "location", "local", "error"] as const) {
+    const h = harness();
+    const contacts = scenario === "none" ? [] : scenario === "ambiguous"
+      ? [contact("one"), contact("two")]
+      : scenario === "conflict"
+        ? [{ ...contact("one"), phone: "+12105550199" }, { ...contact("two"), email: "other@example.com" }]
+        : scenario === "location" ? [{ ...contact("one"), locationId: "other-location" }]
+        : [contact("one")];
+    const api = configureRealMatching(h, contacts);
+    if (scenario === "incomplete") {
+      api.lookupByEmail = async () => ({ contacts: [contact("one")], hasMore: true });
+    }
+    if (scenario === "local") h.services.hasLocalIdentifierConflict = async () => true;
+    if (scenario === "error") h.services.match = async () => { throw new Error("offline"); };
+    assert.equal((await linkExistingCustomerContact(7, h.services)).status, "needs_review", scenario);
+    assert.equal(h.customer.syncState?.workStatus, "needs_review");
+    assert.equal(h.calls.link.length, 0);
+    assert.equal(h.calls.complete, 0);
+    assert.equal(h.calls.reserve, 0);
+    assert.deepEqual(h.calls.create, []);
+    assert.deepEqual(h.calls.update, []);
+  }
+});
+
+test("link-only never completes differing or incomplete profiles, or changed claims", async () => {
+  process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = "true";
+  for (const scenario of ["different", "missing", "changed"] as const) {
+    const h = harness({ customer: { ghlContactId: "saved" } });
+    configureRealMatching(h, [contact("saved")]);
+    if (scenario === "different") h.services.getContact = async () => ({ ...contact("saved"), firstName: "Anne" });
+    if (scenario === "missing") h.services.getContact = async () => {
+      const { phone: _phone, ...partial } = contact("saved");
+      void _phone;
+      return partial;
+    };
+    if (scenario === "changed") h.services.link = async () => ({ status: "version_changed" });
+    assert.equal((await linkExistingCustomerContact(7, h.services)).status, "needs_review");
+    assert.equal(h.calls.complete, 0);
+    assert.equal(h.customer.syncState?.workStatus, "needs_review");
+    assert.deepEqual(h.calls.create, []);
+    assert.deepEqual(h.calls.update, []);
+  }
+});
+
+test("link-only links a uniquely identified unlinked profile with differences but requires review", async () => {
+  process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = "true";
+  const h = harness();
+  configureRealMatching(h, [{ ...contact("found"), firstName: "Anne" }]);
+  assert.equal((await linkExistingCustomerContact(7, h.services)).status, "needs_review");
+  assert.equal(h.customer.ghlContactId, "found");
+  assert.equal(h.calls.complete, 0);
+  assert.deepEqual(h.calls.update, []);
+});
+
+test("link-only refuses an unlinked contact when the full contact no longer confirms the matched identifiers", async () => {
+  process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = "true";
+  const h = harness();
+  configureRealMatching(h, [contact("found")]);
+  h.services.getContact = async () => ({
+    ...contact("found"), email: "other@example.com", phone: "+12105550199",
+  });
+  assert.equal((await linkExistingCustomerContact(7, h.services)).status, "needs_review");
+  assert.equal(h.customer.ghlContactId, null);
+  assert.equal(h.calls.link.length, 0);
+});
+
+test("link-only is separately disabled by default and respects existing claims", async () => {
+  delete process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED;
+  const h = harness({ claimUnavailable: true });
+  assert.equal((await linkExistingCustomerContact(7, h.services)).status, "disabled");
+  process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = "true";
+  assert.equal((await linkExistingCustomerContact(7, h.services)).status, "unavailable");
+  assert.equal(h.calls.link.length, 0);
+});
 
 test("immediate processing and a recovery batch cannot create the same contact twice", async () => {
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";

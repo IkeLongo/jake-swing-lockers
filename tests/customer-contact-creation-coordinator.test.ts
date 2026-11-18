@@ -53,6 +53,7 @@ function harness(over: {
   sessions?: Session[];
   failSessionWrite?: boolean;
   otherOwners?: { id: number; ghlContactId: string }[];
+  otherIdentifiers?: { email: string | null; phone: string | null }[];
 } = {}) {
   let client: Client = {
     ghlContactId: null,
@@ -120,6 +121,7 @@ function harness(over: {
         },
         golfClient: {
           async findUniqueOrThrow() { return { ...currentClient }; },
+          async findMany() { return over.otherIdentifiers ?? []; },
           async findUnique(args: { where: { ghlContactId: string } }) {
             if (currentClient.ghlContactId === args.where.ghlContactId) {
               return { id: 1 };
@@ -633,6 +635,32 @@ test("verified existing contact linking persists verification without completing
   assert.equal(h.state.workStatus, "processing");
   assert.equal(h.state.claimToken, token);
   assert.equal(h.state.syncedVersion, 0);
+});
+
+test("link-only checks normalized local identifiers under the customer creation mutex", async () => {
+  const token = randomUUID();
+  const input = {
+    claim: { golfClientId: 1, token, version: 1 },
+    contactId: "contact-verified",
+    verifiedLocationId: "location-1",
+    expectedIdentity: { firstName: "Ann", lastName: "Lee", email: "ann@example.com", phone: "+12105550100" },
+    requireUniqueIdentifiers: true,
+  };
+  for (const otherIdentifiers of [
+    [{ email: " ANN@example.com ", phone: null }],
+    [{ email: null, phone: "(210) 555-0100" }],
+    [],
+  ]) {
+    const h = harness({
+      state: { workStatus: "processing", claimToken: token, claimedVersion: 1, leaseExpiresAt: 2000 },
+      otherIdentifiers,
+    });
+    const result = await linkVerifiedCustomerContact(h.db, input);
+    assert.equal(result.status, otherIdentifiers.length ? "contact_conflict" : "linked");
+    const locks = h.statements[0]!.filter((sql) => sql.includes("FOR UPDATE"));
+    assert.match(locks[0]!, /StagedCustomerCreationMutex/);
+    assert.match(locks[1]!, /GolfClient WHERE/);
+  }
 });
 
 test("verified contact linking rejects stale claims, changed identity, and newer versions", async () => {

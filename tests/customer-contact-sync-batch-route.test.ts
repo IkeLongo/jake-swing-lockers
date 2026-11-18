@@ -5,6 +5,7 @@ import { signStaffSessionToken } from "../lib/auth/session";
 
 const originalSessionSecret = process.env.SESSION_SECRET;
 const originalFlag = process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
+const originalLinkFlag = process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED;
 process.env.SESSION_SECRET = "test-only-session-secret-at-least-32-characters";
 
 after(() => {
@@ -12,6 +13,8 @@ after(() => {
   else process.env.SESSION_SECRET = originalSessionSecret;
   if (originalFlag === undefined) delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
   else process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = originalFlag;
+  if (originalLinkFlag === undefined) delete process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED;
+  else process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = originalLinkFlag;
 });
 
 test("manual endpoint enforces active admin authorization and validates options", async () => {
@@ -56,6 +59,20 @@ test("manual endpoint enforces active admin authorization and validates options"
   delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
   assert.equal((await POST(request("{}"))).status, 409);
 
+  process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
+  delete process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED;
+  assert.equal((await POST(request('{"mode":"link-only","golfClientId":1}'))).status, 409);
+  process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED = "true";
+  for (const body of [
+    '{"mode":"link-only"}',
+    '{"mode":"link-only","golfClientId":0}',
+    '{"mode":"link-only","golfClientId":"1"}',
+    '{"mode":"link-only","golfClientId":1,"limit":1}',
+  ]) {
+    assert.equal((await POST(request(body))).status, 400, body);
+  }
+  delete process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED;
+  assert.equal((await POST(request("{}"))).status, 409);
   process.env.GHL_CUSTOMER_CONTACT_SYNC_ENABLED = "true";
   assert.equal((await POST(request("{}", true, "text/plain"))).status, 415);
   for (const body of ["{", "null", "[]", '{"limit":0}', '{"limit":11}', '{"limit":"5"}', '{"golfClientId":1}']) {

@@ -6,6 +6,7 @@ import {
 } from "../lib/ghl/syncStagedFitting";
 import { ContactNeedsReviewError } from "../lib/ghl/resolveStagedContact";
 import { createPrismaStagedSyncDeps } from "../lib/ghl/syncStagedFittingStore";
+import { hasUnresolvedFittingSyncState } from "../lib/ghl/syncErrorMarker";
 
 interface FakeClient {
   id: number;
@@ -23,6 +24,7 @@ interface FakeSession {
   ghlSyncState: unknown;
   ghlSyncStatus: string | null;
   ghlSyncError: string | null;
+  ghlOpportunityId: string | null;
 }
 
 interface FakeSyncState {
@@ -53,8 +55,8 @@ function fakeDatabase() {
     ghlContactCreationState: null,
   };
   const sessions = new Map<number, FakeSession>([
-    [7, { id: 7, clientId: client.id, ghlSyncState: null, ghlSyncStatus: null, ghlSyncError: null }],
-    [8, { id: 8, clientId: client.id, ghlSyncState: null, ghlSyncStatus: null, ghlSyncError: null }],
+    [7, { id: 7, clientId: client.id, ghlSyncState: null, ghlSyncStatus: null, ghlSyncError: null, ghlOpportunityId: null }],
+    [8, { id: 8, clientId: client.id, ghlSyncState: null, ghlSyncStatus: null, ghlSyncError: null, ghlOpportunityId: null }],
   ]);
   let syncState: FakeSyncState = {
     golfClientId: client.id,
@@ -74,6 +76,7 @@ function fakeDatabase() {
   };
   let syncStateExists = true;
   let failNextContactLinkWrite = false;
+  let failNextNoteAcknowledgment = false;
   const sql: string[] = [];
   let tail: Promise<void> = Promise.resolve();
   let transactionDepth = 0;
@@ -182,6 +185,14 @@ function fakeDatabase() {
       }) {
         const session = sessions.get(args.where.id);
         if (!session) throw new Error("session not found");
+        const state = args.data.ghlSyncState;
+        if (failNextNoteAcknowledgment && state && typeof state === "object" &&
+            "fittingNote" in state && state.fittingNote &&
+            typeof state.fittingNote === "object" && "status" in state.fittingNote &&
+            state.fittingNote.status === "created") {
+          failNextNoteAcknowledgment = false;
+          throw new Error("note acknowledgment failed");
+        }
         Object.assign(session, args.data);
         if (args.data.ghlSyncState === Prisma.DbNull) session.ghlSyncState = null;
         return session;
@@ -258,11 +269,109 @@ function fakeDatabase() {
     failContactLinkWrite() {
       failNextContactLinkWrite = true;
     },
+    failNoteAcknowledgment() {
+      failNextNoteAcknowledgment = true;
+    },
     get transactionActive() {
       return transactionDepth > 0;
     },
   };
 }
+
+test("fitting notes persist per session and fail closed on uncertain creation", async () => {
+  const keys = ["GHL_SWINGLOCKER_LOCATION_ID", "GHL_SWINGLOCKER_PRIVATE_TOKEN",
+    "GHL_FITTING_NOTE_AUTHOR_USER_ID", "GHL_OPPORTUNITY_READ_ONLY"] as const;
+  const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  Object.assign(process.env, {
+    GHL_SWINGLOCKER_LOCATION_ID: "location",
+    GHL_SWINGLOCKER_PRIVATE_TOKEN: "test-token",
+    GHL_FITTING_NOTE_AUTHOR_USER_ID: "author",
+    GHL_OPPORTUNITY_READ_ONLY: "false",
+  });
+  let mode: "success" | "rejected" | "timeout" | "missing-id" = "success";
+  let posts = 0;
+  globalThis.fetch = async (input, init) => {
+    posts++;
+    const url = new URL(String(input));
+    assert.equal(url.pathname, "/notes/");
+    assert.equal(url.searchParams.get("locationId"), "location");
+    assert.equal(init?.method, "POST");
+    assert.equal(new Headers(init?.headers).get("Version"), "v3");
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      body: "summary",
+      relations: [{ objectKey: "opportunity", recordId: "shared-opp" }],
+      userId: "author",
+    });
+    if (mode === "rejected") return Response.json({ message: "rejected" }, { status: 422 });
+    if (mode === "timeout") throw new Error("response lost");
+    if (mode === "missing-id") return Response.json({ note: {} });
+    return Response.json({ note: { id: `note-${posts}` } });
+  };
+  try {
+    const fake = fakeDatabase();
+    const deps = createPrismaStagedSyncDeps(fake.db as never);
+    const first = fake.sessions.get(7)!;
+    const second = fake.sessions.get(8)!;
+    first.ghlOpportunityId = second.ghlOpportunityId = "shared-opp";
+    first.ghlSyncState = { version: 1, fittingClaim: { token: "claim", claimedAt: "now" } };
+    assert.equal(await deps.ensureFittingNote(7, "shared-opp", "summary"), "note-1");
+    assert.equal(await deps.ensureFittingNote(7, "shared-opp", "summary"), "note-1");
+    assert.equal(await deps.ensureFittingNote(8, "shared-opp", "summary"), "note-2");
+    assert.equal(posts, 2);
+    await assert.rejects(deps.ensureFittingNote(7, "other-opp", "summary"), CreationNeedsReconciliationError);
+    assert.equal(posts, 2);
+    await deps.markSynced({ sessionId: 7, clientId: 3, ghlContactId: "contact", ghlOpportunityId: "shared-opp", lockerUrl: "https://example.test" });
+    assert.deepEqual(first.ghlSyncState, {
+      version: 1,
+      fittingClaim: { token: "claim", claimedAt: "now" },
+      fittingNote: { status: "created", opportunityId: "shared-opp", noteId: "note-1" },
+    });
+    assert.equal(hasUnresolvedFittingSyncState({ version: 1, fittingNote: { status: "created" } }), true);
+
+    for (const failure of ["rejected", "timeout", "missing-id", "acknowledgment"] as const) {
+      const next = fakeDatabase();
+      next.sessions.get(7)!.ghlOpportunityId = "shared-opp";
+      const nextDeps = createPrismaStagedSyncDeps(next.db as never);
+      mode = failure === "acknowledgment" ? "success" : failure;
+      if (failure === "acknowledgment") next.failNoteAcknowledgment();
+      await assert.rejects(nextDeps.ensureFittingNote(7, "shared-opp", "summary"));
+      const state = next.sessions.get(7)!.ghlSyncState;
+      if (failure === "rejected") {
+        assert.equal(hasUnresolvedFittingSyncState(state), false);
+        mode = "success";
+        await nextDeps.ensureFittingNote(7, "shared-opp", "summary");
+      } else {
+        assert.equal(hasUnresolvedFittingSyncState(state), true);
+        const beforeRetry: number = posts;
+        await assert.rejects(nextDeps.ensureFittingNote(7, "shared-opp", "summary"), CreationNeedsReconciliationError);
+        assert.equal(posts, beforeRetry);
+      }
+    }
+
+    const guarded = fakeDatabase();
+    guarded.sessions.get(7)!.ghlOpportunityId = "shared-opp";
+    process.env.GHL_OPPORTUNITY_READ_ONLY = "true";
+    const beforeGuard = posts;
+    await assert.rejects(createPrismaStagedSyncDeps(guarded.db as never).ensureFittingNote(7, "shared-opp", "summary"), /read-only/);
+    assert.equal(posts, beforeGuard);
+    assert.equal(hasUnresolvedFittingSyncState(guarded.sessions.get(7)!.ghlSyncState), false);
+
+    process.env.GHL_OPPORTUNITY_READ_ONLY = "false";
+    delete process.env.GHL_FITTING_NOTE_AUTHOR_USER_ID;
+    const unconfigured = fakeDatabase();
+    unconfigured.sessions.get(7)!.ghlOpportunityId = "shared-opp";
+    await assert.rejects(createPrismaStagedSyncDeps(unconfigured.db as never).ensureFittingNote(7, "shared-opp", "summary"), /GHL_FITTING_NOTE_AUTHOR_USER_ID/);
+    assert.equal(posts, beforeGuard);
+    assert.equal(hasUnresolvedFittingSyncState(unconfigured.sessions.get(7)!.ghlSyncState), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of keys) {
+      if (original[key] === undefined) delete process.env[key];
+      else process.env[key] = original[key];
+    }
+  }
+});
 
 test("opportunity completion and sync retain the fitting claim until its owner releases it", async () => {
   const fake = fakeDatabase();

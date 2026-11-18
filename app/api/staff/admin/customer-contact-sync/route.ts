@@ -5,7 +5,10 @@ import {
   MAX_CUSTOMER_SYNC_BATCH_SIZE,
   runCustomerContactSyncBatch,
 } from "@/lib/ghl/runCustomerContactSyncBatch";
-import { isCustomerContactSyncEnabled } from "@/lib/ghl/customerContactSyncProcessor";
+import {
+  isCustomerContactSyncEnabled,
+  linkExistingCustomerContact,
+} from "@/lib/ghl/customerContactSyncProcessor";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireAdminStaffSession(req);
@@ -16,7 +19,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  if (!isCustomerContactSyncEnabled()) {
+  if (!isCustomerContactSyncEnabled() && process.env.GHL_CUSTOMER_LINK_ONLY_ENABLED !== "true") {
     return NextResponse.json(
       { error: "Customer contact synchronization is disabled." },
       { status: 409 },
@@ -34,6 +37,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+  if (
+    typeof body === "object" && body !== null && !Array.isArray(body) &&
+    "mode" in body && body.mode === "link-only"
+  ) {
+    if (
+      Object.keys(body).some((key) => key !== "mode" && key !== "golfClientId") ||
+      !("golfClientId" in body) ||
+      typeof body.golfClientId !== "number" ||
+      !Number.isSafeInteger(body.golfClientId) ||
+      body.golfClientId < 1
+    ) {
+      return NextResponse.json({ error: "Invalid link-only options." }, { status: 400 });
+    }
+    try {
+      const result = await linkExistingCustomerContact(body.golfClientId);
+      return NextResponse.json(result, { status: result.status === "disabled" ? 409 : 200 });
+    } catch {
+      console.error("[customer-contact-link] Failed to start verification.");
+      return NextResponse.json({ error: "Failed to verify customer contact." }, { status: 500 });
+    }
+  }
+  if (!isCustomerContactSyncEnabled()) {
+    return NextResponse.json(
+      { error: "Customer contact synchronization is disabled." },
+      { status: 409 },
+    );
   }
   if (
     typeof body !== "object" ||

@@ -317,7 +317,7 @@ test("listing opportunities returns the candidates without selecting one", async
   }
 });
 
-test("opportunity read-only mode permits opportunity GETs and blocks other GHL requests", async () => {
+test("read-only mode permits opportunity and contact GETs but blocks writes and other requests", async () => {
   const previousFetch = globalThis.fetch;
   const previousFlag = process.env.GHL_OPPORTUNITY_READ_ONLY;
   const previousToken = process.env.GHL_SWINGLOCKER_PRIVATE_TOKEN;
@@ -333,15 +333,16 @@ test("opportunity read-only mode permits opportunity GETs and blocks other GHL r
     const otherAccountFetch = makeGhlFetch("test-token");
     await ghlFetch("/opportunities/search?location_id=test", { redirect: "follow" });
     await otherAccountFetch("/opportunities/opp-123", { method: "get" });
-    assert.equal(calls.length, 2);
+    await ghlFetch("/contacts/lookup?locationId=test&email=test");
+    await otherAccountFetch("/contacts/contact-123");
+    assert.equal(calls.length, 4);
     assert.ok(calls.every((call) => call.redirect === "error"));
 
     for (const fetchGhl of [ghlFetch, otherAccountFetch]) {
       for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-        await assert.rejects(
-          fetchGhl("/opportunities/opp-123", { method }),
-          GhlConfigurationError,
-        );
+        for (const path of ["/opportunities/opp-123", "/contacts/contact-123", "/contacts", "/contacts/lookup?email=test"]) {
+          await assert.rejects(fetchGhl(path, { method }), GhlConfigurationError);
+        }
       }
       for (const path of ["/contacts/lookup", "/conversations/messages", "/opportunities/opp%2F123"]) {
         await assert.rejects(fetchGhl(path), GhlConfigurationError);
@@ -357,7 +358,7 @@ test("opportunity read-only mode permits opportunity GETs and blocks other GHL r
         GhlConfigurationError,
       );
     }
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 4);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousFlag === undefined) delete process.env.GHL_OPPORTUNITY_READ_ONLY;
