@@ -121,6 +121,29 @@ state are not automatically recovered; staff can use the existing fitting sync
 and customer reconciliation procedures. Matching an existing remote contact to
 an unlinked customer requires review; it is never linked automatically.
 
+### Opportunity values
+
+Purchase-request creation, item edits and status changes queue a recalculation
+for the linked opportunity. The value is the sum of stored item price snapshots
+for `new_request`, `reviewing`, `quote_sent`, `purchased`, and `fulfilled`
+requests across all linked sessions. Missing item prices count as zero; if no
+qualifying requests exist, the GHL value is left unchanged. Other status values,
+including legacy `cancelled`, are excluded. Fitting sync does not set the value.
+
+Value updates use opportunity-scoped `purchase_request_opportunity_value`
+`GhlSyncEvent` records. A queued event is committed with the request change;
+only one pending event for an opportunity can issue a GHL update. Later changes
+remain queued and are recalculated after that update. An interrupted or
+uncertain update remains pending and blocks further writes: do not clear it or
+retry blindly. Confirm the original process and request have stopped and the
+remote request can no longer apply, inspect the event's opportunity ID and
+attempted value and the GHL opportunity, and perform a case-specific
+reconciliation before releasing the pending event.
+Queued events have no automatic recovery worker; a process interruption or a
+request created before its session has an opportunity can require staff review.
+Stop older application workers during rollout so they cannot write tested-club
+totals over purchase-request values.
+
 ### Fitting notes
 
 Successful fitting sync creates one dated note per DemoSession on its GHL

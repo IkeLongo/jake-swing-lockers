@@ -39,13 +39,6 @@ export function isDuplicatePurchaseRequest(
   return existing != null;
 }
 
-export function shouldUpdateOpportunityMonetaryValue(
-  currentStageId: string,
-  consideringPurchaseStageId: string
-): boolean {
-  return currentStageId === consideringPurchaseStageId;
-}
-
 export function getPurchaseRequestEditSideEffectWarnings(
   emailResult: DeliverPurchaseRequestEmailsResult,
   extraWarnings: string[] = []

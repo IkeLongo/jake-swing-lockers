@@ -777,7 +777,6 @@ test("shared builders reproduce the legacy summary/field output", () => {
     recommendedClubSummary: "Ping G430",
     currentClubSummary: "7i",
     demoClubCount: 2,
-    monetaryValue: 300,
   });
   const fields = buildGolfDemoCustomFields(session, s, "https://x/l", "T", {
     GHL_SWINGLOCKER_CF_SWING_LOCKER_URL: "f1",
@@ -809,10 +808,10 @@ test("legacy upsertGolfDemoOpportunity still updates an existing ID and creates 
     return new Response(JSON.stringify({ opportunity: { id: "new-1" } }), { status: 200 });
   }) as typeof fetch;
   try {
-    const id = await upsertGolfDemoOpportunity({ name: "N", contactId: "c", monetaryValue: 5 }, "opp-1");
+    const id = await upsertGolfDemoOpportunity({ name: "N", contactId: "c" }, "opp-1");
     assert.equal(id, "opp-1");
     assert.equal(requests[0]!.method, "PUT");
-    assert.deepEqual(requests[0]!.body, { name: "N", pipelineStageId: "stage", monetaryValue: 5 });
+    assert.deepEqual(requests[0]!.body, { name: "N", pipelineStageId: "stage" });
 
     const created = await upsertGolfDemoOpportunity({ name: "N", contactId: "c" }, null);
     assert.equal(created, "new-1");
@@ -826,6 +825,7 @@ function recordCreateNames(h: ReturnType<typeof harness>): string[] {
   const names: string[] = [];
   const original = h.deps.createOpportunity;
   h.deps.createOpportunity = async (input) => {
+    assert.equal("monetaryValue" in input, false);
     names.push(input.name);
     return original(input);
   };

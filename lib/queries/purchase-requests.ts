@@ -5,6 +5,7 @@ import {
   buildPurchaseRequestClubSnapshots,
   getUniqueClubIdsPreservingOrder,
 } from "@/lib/purchase-request-workflow";
+import { enqueuePurchaseRequestOpportunityValue } from "@/lib/ghl/purchaseRequestOpportunityValue";
 
 // ── Return shapes ─────────────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ export type ReplacePurchaseRequestItemsResult =
       ok: true;
       id: number;
       status: string;
+      opportunityId: string | null;
     }
   | {
       ok: false;
@@ -225,7 +227,12 @@ export async function replacePurchaseRequestItems(
   return db.$transaction(async (tx) => {
     const existing = await tx.purchaseRequest.findUnique({
       where: { id },
-      select: { id: true, status: true, demoSessionId: true },
+      select: {
+        id: true,
+        status: true,
+        demoSessionId: true,
+        items: { select: { demoClubTestId: true } },
+      },
     });
 
     if (!existing) {
@@ -264,7 +271,9 @@ export async function replacePurchaseRequestItems(
       };
     }
 
-    const snapshots = buildPurchaseRequestClubSnapshots(uniqueIds, clubs);
+    const existingIds = new Set(existing.items.map((item) => item.demoClubTestId));
+    const newIds = uniqueIds.filter((clubId) => !existingIds.has(clubId));
+    const snapshots = buildPurchaseRequestClubSnapshots(newIds, clubs);
 
     const updated = await tx.purchaseRequest.update({
       where: { id },
@@ -272,17 +281,19 @@ export async function replacePurchaseRequestItems(
         notes: input.notes,
         ...(input.status ? { status: input.status } : {}),
         items: {
-          deleteMany: {},
+          deleteMany: { demoClubTestId: { notIn: uniqueIds } },
           create: snapshots,
         },
       },
       select: { id: true, status: true },
     });
+    const opportunityId = await enqueuePurchaseRequestOpportunityValue(tx, existing.demoSessionId);
 
     return {
       ok: true,
       id: updated.id,
       status: updated.status,
+      opportunityId,
     };
   });
 }
@@ -317,7 +328,7 @@ export async function createPurchaseRequest(
   demoSessionId: number,
   items: { demoClubTestId: number; clubType: string | null; estimatedPrice: number | null }[],
   notes?: string
-): Promise<{ id: number }> {
+): Promise<{ id: number; opportunityId: string | null }> {
   return db.$transaction(async (tx) => {
     const request = await tx.purchaseRequest.create({
       data: {
@@ -335,7 +346,8 @@ export async function createPurchaseRequest(
       },
       select: { id: true },
     });
-    return { id: request.id };
+    const opportunityId = await enqueuePurchaseRequestOpportunityValue(tx, demoSessionId);
+    return { id: request.id, opportunityId };
   });
 }
 
@@ -400,15 +412,19 @@ export async function listAllPurchaseRequests(): Promise<PurchaseRequestSummary[
 export async function updatePurchaseRequestStatus(
   id: number,
   status: PurchaseRequestStatus
-): Promise<{ id: number; status: string } | null> {
-  try {
-    const row = await db.purchaseRequest.update({
+): Promise<{ id: number; status: string; opportunityId: string | null } | null> {
+  return db.$transaction(async (tx) => {
+    const existing = await tx.purchaseRequest.findUnique({
+      where: { id },
+      select: { demoSessionId: true },
+    });
+    if (!existing) return null;
+    const row = await tx.purchaseRequest.update({
       where: { id },
       data: { status },
       select: { id: true, status: true },
     });
-    return row;
-  } catch {
-    return null;
-  }
+    const opportunityId = await enqueuePurchaseRequestOpportunityValue(tx, existing.demoSessionId);
+    return { ...row, opportunityId };
+  });
 }

@@ -10,7 +10,6 @@ import {
   getPurchaseRequestEditSideEffectWarnings,
   getUniqueClubIdsPreservingOrder,
   isDuplicatePurchaseRequest,
-  shouldUpdateOpportunityMonetaryValue,
 } from "@/lib/purchase-request-workflow";
 
 test("locked statuses are enforced", () => {
@@ -93,17 +92,6 @@ test("duplicate request prevention helper flags existing requests", () => {
   assert.equal(
     isDuplicatePurchaseRequest({ id: 22, status: "new_request", createdAt: new Date() }),
     true
-  );
-});
-
-test("GHL monetary value updates only in Considering Purchase stage", () => {
-  assert.equal(
-    shouldUpdateOpportunityMonetaryValue("considering", "considering"),
-    true
-  );
-  assert.equal(
-    shouldUpdateOpportunityMonetaryValue("purchased", "considering"),
-    false
   );
 });
 

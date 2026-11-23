@@ -4,16 +4,11 @@ import { db } from "@/lib/db";
 import {
   getOpportunityById,
   STAGE_CLOSED_NO_PURCHASE,
-  STAGE_CONSIDERING_PURCHASE,
   STAGE_PURCHASED,
   updateGolfDemoOpportunity,
 } from "@/lib/ghl/opportunities";
+import { getPurchaseRequestEditSideEffectWarnings } from "@/lib/purchase-request-workflow";
 import {
-  getPurchaseRequestEditSideEffectWarnings,
-  shouldUpdateOpportunityMonetaryValue,
-} from "@/lib/purchase-request-workflow";
-import {
-  getPurchaseRequestDetail,
   replacePurchaseRequestItems,
   updatePurchaseRequestStatus,
 } from "@/lib/queries/purchase-requests";
@@ -23,6 +18,27 @@ import {
   toCanonicalPurchaseRequestStatus,
 } from "@/lib/purchase-request-status";
 import { parsePurchaseRequestEditPayload } from "@/lib/validations/purchase-request-edit";
+import { drainPurchaseRequestOpportunityValue } from "@/lib/ghl/purchaseRequestOpportunityValue";
+
+async function syncOpportunityValue(id: number, opportunityId: string | null): Promise<string[]> {
+  try {
+    if (!opportunityId) {
+      throw new Error("The fitting has no linked GHL opportunity for value synchronization.");
+    }
+    if (await drainPurchaseRequestOpportunityValue(opportunityId) === "queued") {
+      return ["GHL opportunity value update is queued; reconciliation may be required if the earlier attempt does not finish."];
+    }
+    return [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[purchase-request] Opportunity value synchronization failed:", message);
+    await db.purchaseRequest.update({
+      where: { id },
+      data: { ghlSyncStatus: "failed", ghlSyncError: message },
+    });
+    return [`GHL monetary value update failed: ${message}`];
+  }
+}
 
 async function syncFinalStatusToGhl(id: number, canonicalStatus: "purchased" | "closed_lost") {
   try {
@@ -137,7 +153,8 @@ export async function PATCH(
       await syncFinalStatusToGhl(id, canonicalStatus);
     }
 
-    return NextResponse.json({ ...updated, warnings: [] });
+    const warnings = await syncOpportunityValue(id, updated.opportunityId);
+    return NextResponse.json({ id: updated.id, status: updated.status, warnings });
   }
 
   // Full edits (clubs/notes) are only allowed from editable statuses.
@@ -167,66 +184,20 @@ export async function PATCH(
   }
 
   // Best effort: email notifications should never fail the already-saved edit.
-  const emailResult = await deliverPurchaseRequestEmails(id, "updated");
-  const warnings = getPurchaseRequestEditSideEffectWarnings(emailResult);
-
-  // Best effort: update opportunity value only when currently in Considering Purchase.
+  const warnings: string[] = [];
   try {
-    const request = await db.purchaseRequest.findUnique({
-      where: { id },
-      select: {
-        demoSession: {
-          select: {
-            ghlOpportunityId: true,
-          },
-        },
-      },
-    });
-
-    const opportunityId = request?.demoSession.ghlOpportunityId;
-    if (opportunityId) {
-      const opportunity = await getOpportunityById(opportunityId);
-      if (!opportunity) {
-        warnings.push(`GHL opportunity not found for ID ${opportunityId}.`);
-      } else if (
-        shouldUpdateOpportunityMonetaryValue(
-          opportunity.pipelineStageId,
-          STAGE_CONSIDERING_PURCHASE()
-        )
-      ) {
-        const detail = await getPurchaseRequestDetail(id);
-        const monetaryValue = detail?.estimatedSubtotal ?? undefined;
-
-        await updateGolfDemoOpportunity(opportunityId, { monetaryValue });
-
-        await db.purchaseRequest.update({
-          where: { id },
-          data: {
-            ghlOpportunityId: opportunityId,
-            ghlSyncStatus: "synced",
-            ghlLastSyncedAt: new Date(),
-            ghlSyncError: null,
-          },
-        });
-      }
-    }
-  } catch (ghlErr) {
-    const message = ghlErr instanceof Error ? ghlErr.message : String(ghlErr);
-    warnings.push(`GHL monetary value update failed: ${message}`);
-
-    await db.purchaseRequest.update({
-      where: { id },
-      data: {
-        ghlSyncStatus: "failed",
-        ghlSyncError: message,
-      },
-    });
+    const emailResult = await deliverPurchaseRequestEmails(id, "updated");
+    warnings.push(...getPurchaseRequestEditSideEffectWarnings(emailResult));
+  } catch (error) {
+    console.error("[purchase-request] Failed to deliver updated request emails:", error);
+    warnings.push("Updated purchase request emails could not be delivered.");
   }
 
   const canonicalStatus = toCanonicalPurchaseRequestStatus(replacement.status);
   if (canonicalStatus === "purchased" || canonicalStatus === "closed_lost") {
     await syncFinalStatusToGhl(id, canonicalStatus);
   }
+  warnings.push(...await syncOpportunityValue(id, replacement.opportunityId));
 
   return NextResponse.json({
     id: replacement.id,

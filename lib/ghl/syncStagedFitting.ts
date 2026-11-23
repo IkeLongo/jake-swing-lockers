@@ -130,7 +130,6 @@ export interface StagedSyncDeps {
   createOpportunity(input: {
     name: string;
     contactId: string;
-    monetaryValue?: number;
   }): Promise<string>;
   ensureOpportunityId(
     sessionId: number,
@@ -372,7 +371,6 @@ export async function syncStagedFittingToGHL(
         deps.createOpportunity({
           name: batch.proposedOpportunityName?.trim() || golfDemoOpportunityName(client),
           contactId,
-          monetaryValue: summaries.monetaryValue,
         }),
       );
     }

@@ -171,7 +171,6 @@ async function syncGolfDemoClaimed(
 
     // ── 4. Build club summary strings ───────────────────────────────────────
     const summaries = buildGolfDemoSummaries(session);
-    const { monetaryValue } = summaries;
 
     // ── 5. Update GHL contact custom fields ─────────────────────────────────
     const customFields = buildGolfDemoCustomFields(
@@ -202,7 +201,6 @@ async function syncGolfDemoClaimed(
       {
         name: golfDemoOpportunityName(client),
         contactId: resolvedGhlContactId,
-        monetaryValue,
       },
       session.ghlOpportunityId
       );

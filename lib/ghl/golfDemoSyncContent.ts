@@ -21,7 +21,6 @@ export interface GolfDemoSummaries {
   recommendedClubSummary: string;
   currentClubSummary: string;
   demoClubCount: number;
-  monetaryValue: number | undefined;
 }
 
 function clubLabel(test: SyncClubTest): string {
@@ -88,15 +87,10 @@ export function buildGolfDemoSummaries(
       ? currentPairs.map(clubLabel).join(", ")
       : session.currentClub ?? "";
 
-  const priceSum = demoPairs
-    .filter((t) => t.estimatedPrice != null)
-    .reduce((acc, t) => acc + t.estimatedPrice!.toNumber(), 0);
-
   return {
     recommendedClubSummary,
     currentClubSummary,
     demoClubCount: demoPairs.length,
-    monetaryValue: priceSum > 0 ? Math.round(priceSum * 100) / 100 : undefined,
   };
 }
 

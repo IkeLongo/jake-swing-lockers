@@ -197,10 +197,12 @@ export async function createGolfDemoOpportunity(
 
 export async function updateGolfDemoOpportunity(
   opportunityId: string,
-  updates: Partial<OpportunityInput> & { pipelineStageId?: string }
+  updates: Partial<OpportunityInput> & { pipelineStageId?: string },
+  signal?: AbortSignal,
 ): Promise<void> {
   await ghlFetch<unknown>(`/opportunities/${opportunityId}`, {
     method: "PUT",
+    signal,
     body: JSON.stringify({
       ...(updates.name !== undefined ? { name: updates.name } : {}),
       ...(updates.pipelineStageId !== undefined
@@ -219,14 +221,13 @@ export async function updateGolfDemoOpportunity(
  * update that opportunity; otherwise create a new opportunity for this distinct sales pursuit.
  */
 export async function upsertGolfDemoOpportunity(
-  input: OpportunityInput,
+  input: Omit<OpportunityInput, "monetaryValue">,
   existingOpportunityId?: string | null
 ): Promise<string> {
   if (existingOpportunityId) {
     await updateGolfDemoOpportunity(existingOpportunityId, {
       name: input.name,
       pipelineStageId: STAGE_DEMO_SUBMITTED(),
-      monetaryValue: input.monetaryValue,
     });
     return existingOpportunityId;
   }
@@ -238,7 +239,6 @@ export async function upsertGolfDemoOpportunity(
   //   await updateGolfDemoOpportunity(existing.id, {
   //     name: input.name,
   //     pipelineStageId: STAGE_DEMO_SUBMITTED(),
-  //     monetaryValue: input.monetaryValue,
   //   });
   //   return existing.id;
   // }

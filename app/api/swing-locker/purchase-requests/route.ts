@@ -3,19 +3,16 @@ import { getSwingLockerSessionFromRequest } from "@/lib/auth/requireSwingLockerS
 import {
   getExistingPurchaseRequest,
   createPurchaseRequest,
-  getPurchaseRequestDetail,
 } from "@/lib/queries/purchase-requests";
 import { db } from "@/lib/db";
 import { deliverPurchaseRequestEmails } from "@/lib/ghl/deliverPurchaseRequestEmails";
 import {
   updateGolfDemoOpportunity,
   getOpportunityById,
-  STAGE_DEMO_SUBMITTED,
-  STAGE_SWING_LOCKER_SENT,
-  STAGE_LOCKER_OPENED,
   STAGE_CONSIDERING_PURCHASE,
 } from "@/lib/ghl/opportunities";
 import { isDuplicatePurchaseRequest } from "@/lib/purchase-request-workflow";
+import { drainPurchaseRequestOpportunityValue } from "@/lib/ghl/purchaseRequestOpportunityValue";
 
 export async function POST(req: NextRequest) {
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -111,14 +108,16 @@ export async function POST(req: NextRequest) {
   const result = await createPurchaseRequest(golfClientId, demoSessionId, items, notesStr);
 
   // ── Send confirmation emails ────────────────────────────────────────────────
-  // Failures are caught and logged inside the helper — purchase request creation
-  // always succeeds regardless of email delivery outcome.
-  await deliverPurchaseRequestEmails(result.id);
+  // Email failures must not prevent the saved request's value synchronization.
+  try {
+    await deliverPurchaseRequestEmails(result.id);
+  } catch (error) {
+    console.error("[purchase-request] Failed to deliver confirmation emails:", error);
+  }
 
   // ── Move GHL opportunity to Considering Purchase stage ─────────────────────────
   // After successful request creation and email delivery, check if the session has
-  // a linked GHL opportunity. If so, move it to Considering Purchase stage with the
-  // purchase request subtotal as the opportunity monetary value.
+  // a linked GHL opportunity. If so, move it to Considering Purchase stage.
   // Failure here does not block the purchase request.
   try {
     const sessionWithOpp = await db.demoSession.findUnique({
@@ -142,13 +141,10 @@ export async function POST(req: NextRequest) {
         if (!stagesToSkip.includes(opp.pipelineStageId)) {
           // Allowed: Demo Submitted, Swing Locker Sent, Locker Opened,
           // Engaged / In Conversation, or already Considering Purchase
-          const detail = await getPurchaseRequestDetail(result.id);
-          const monetaryValue = detail?.estimatedSubtotal ?? undefined;
           const consideringPurchaseId = STAGE_CONSIDERING_PURCHASE();
 
           await updateGolfDemoOpportunity(sessionWithOpp.ghlOpportunityId, {
             pipelineStageId: consideringPurchaseId,
-            monetaryValue,
           });
 
           // Update purchase request with GHL sync status
@@ -187,6 +183,26 @@ export async function POST(req: NextRequest) {
         "[POST /api/swing-locker/purchase-requests] Failed to log GHL error on purchase request:",
         updateErr
       );
+    }
+  }
+
+  try {
+    if (!result.opportunityId) {
+      throw new Error("The fitting has no linked GHL opportunity for value synchronization.");
+    }
+    if (await drainPurchaseRequestOpportunityValue(result.opportunityId) === "queued") {
+      console.warn("[purchase-request] Opportunity value update is queued behind another attempt.", { requestId: result.id });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[purchase-request] Opportunity value synchronization failed:", message);
+    try {
+      await db.purchaseRequest.update({
+        where: { id: result.id },
+        data: { ghlSyncStatus: "failed", ghlSyncError: message },
+      });
+    } catch (updateError) {
+      console.error("[purchase-request] Failed to record the opportunity value sync error:", updateError);
     }
   }
 

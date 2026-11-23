@@ -88,6 +88,7 @@ export function PurchaseRequestEditForm({
     setStatus(newStatus);
     setStatusUpdating(true);
     setStatusError(null);
+    setWarnings([]);
 
     try {
       const res = await fetch(`/api/staff/purchase-requests/${requestId}`, {
@@ -98,6 +99,7 @@ export function PurchaseRequestEditForm({
 
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
+        warnings?: string[];
       };
 
       if (!res.ok) {
@@ -107,6 +109,7 @@ export function PurchaseRequestEditForm({
       }
 
       setBackendStatus(newStatus);
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
       router.refresh();
     } catch {
       setStatus(previousStatus);
