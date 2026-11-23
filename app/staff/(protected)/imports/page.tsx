@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import DeleteBatchButton from "./_components/DeleteBatchButton";
-import SessionsByOpportunityTable from "./_components/SessionsByOpportunityTable";
+import OpportunityDrawerWrapper from "./_components/OpportunityDrawerWrapper";
 
 export const metadata: Metadata = {
   title: "Fitting History — Jake Swing Lockers Staff",
@@ -147,7 +147,7 @@ export default async function StaffImportsPage() {
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground font-subheading uppercase tracking-wide">
             Fittings by Opportunity
           </h2>
-          <SessionsByOpportunityTable sessions={finalizedSessions} />
+          <OpportunityDrawerWrapper sessions={finalizedSessions} />
         </div>
       )}
 

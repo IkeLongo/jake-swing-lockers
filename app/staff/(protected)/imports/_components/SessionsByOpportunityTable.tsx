@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react";
 import Link from "next/link";
 import DeleteSessionButton from "./DeleteSessionButton";
+import { IconEye } from "@tabler/icons-react";
 
 export interface SessionRow {
   id: number;
@@ -31,6 +32,7 @@ interface SessionGroup {
 
 interface Props {
   sessions: SessionRow[];
+  onSelectOpportunity?: (opportunityId: string) => void;
 }
 
 function getClientName(client: SessionRow["client"]): string {
@@ -100,10 +102,12 @@ function OpportunityGroupHeader({
   group,
   isExpanded,
   onToggle,
+  onSelectOpportunity,
 }: {
   group: SessionGroup;
   isExpanded: boolean;
   onToggle: () => void;
+  onSelectOpportunity?: (opportunityId: string) => void;
 }) {
   const isUnassigned = group.opportunityId === null;
   const displayId = isUnassigned
@@ -111,11 +115,12 @@ function OpportunityGroupHeader({
     : formatOpportunityLabel(group.opportunityId!);
 
   return (
-    <tr
-      className="cursor-pointer select-none bg-muted hover:bg-muted/80 transition-colors"
-      onClick={onToggle}
-    >
-      <td colSpan={6} className="px-4 py-3">
+    <tr className="select-none bg-muted hover:bg-muted/80 transition-colors">
+      <td
+        colSpan={5}
+        className="px-4 py-3 cursor-pointer"
+        onClick={onToggle}
+      >
         <div className="flex items-center gap-3">
           <span className="inline-block w-4 text-center font-semibold text-foreground">
             {isExpanded ? "▼" : "▶"}
@@ -139,6 +144,21 @@ function OpportunityGroupHeader({
             ({group.sessions.length} {group.sessions.length === 1 ? "session" : "sessions"})
           </span>
         </div>
+      </td>
+      <td className="px-4 py-3 text-right">
+        {!isUnassigned && onSelectOpportunity && group.opportunityId && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectOpportunity(group.opportunityId!);
+            }}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary-hover hover:underline transition-colors whitespace-nowrap"
+            title="View opportunity details"
+          >
+            <IconEye className="h-4 w-4" />
+            View
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -247,7 +267,7 @@ function SessionRow({ session }: { session: SessionRow }) {
   );
 }
 
-export default function SessionsByOpportunityTable({ sessions }: Props) {
+export default function SessionsByOpportunityTable({ sessions, onSelectOpportunity }: Props) {
   const groups = useMemo(() => groupSessions(sessions), [sessions]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string | null>>(
     new Set(groups.map((g) => g.opportunityId))
@@ -293,6 +313,7 @@ export default function SessionsByOpportunityTable({ sessions }: Props) {
                 group={group}
                 isExpanded={expandedGroups.has(group.opportunityId)}
                 onToggle={() => toggleGroup(group.opportunityId)}
+                onSelectOpportunity={onSelectOpportunity}
               />
               {expandedGroups.has(group.opportunityId) &&
                 group.sessions.map((session) => <SessionRow key={session.id} session={session} />)}
