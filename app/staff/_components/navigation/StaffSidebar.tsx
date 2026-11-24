@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
+import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarBody,
@@ -55,7 +56,7 @@ export default function StaffSidebar({ children, isAdmin }: StaffSidebarProps) {
       icon: <IconUpload className="h-5 w-5" />,
     },
     {
-      label: "Demo Sessions",
+      label: "Fitting History",
       href: "/staff/imports",
       icon: <IconFileSpreadsheet className="h-5 w-5" />,
     },
@@ -137,7 +138,7 @@ export default function StaffSidebar({ children, isAdmin }: StaffSidebarProps) {
         </SidebarBody>
 
         {/* ── Main content scrollable area ────────────────────────────────── */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 min-h-screen">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 min-h-screen md:ml-[68px]">
           {children}
         </main>
       </Sidebar>
@@ -188,23 +189,26 @@ function NavSection({
 }) {
   const { open, animate } = useSidebar();
   return (
-    <div className={className}>
+    <motion.div
+      animate={{
+        height: animate ? (open ? 24 : 4) : 24,
+      }}
+      className={cn("flex items-center overflow-hidden", className)}
+    >
       <motion.div
         animate={{
-          display: animate ? (open ? "block" : "none") : "block",
           opacity: animate ? (open ? 1 : 0) : 1,
         }}
-        className="px-2 pb-1 text-[10px] font-bold tracking-wider text-muted-foreground uppercase font-body"
+        className="px-2 pb-1 text-[10px] font-bold tracking-wider text-muted-foreground uppercase font-body whitespace-nowrap"
       >
         {title}
       </motion.div>
       <motion.div
         animate={{
-          display: animate ? (open ? "none" : "block") : "none",
           opacity: animate ? (open ? 0 : 1) : 0,
         }}
-        className="my-1 border-t border-border"
+        className="flex-1 border-t border-border"
       />
-    </div>
+    </motion.div>
   );
 }
