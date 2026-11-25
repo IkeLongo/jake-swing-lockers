@@ -8,7 +8,6 @@ import {
   PURCHASE_REQUEST_STATUS_STYLES,
   PURCHASE_REQUEST_STATUSES,
   PURCHASE_REQUEST_STATUS_LABELS,
-  getPurchaseRequestStatusLabel,
   toCanonicalPurchaseRequestStatus,
   type PurchaseRequestStatus,
 } from "@/lib/purchase-request-status";
@@ -162,8 +161,8 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
 
   if (requests.length === 0) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
-        <p className="font-body text-sm text-slate-400">
+      <div className="rounded-xl border border-border bg-card px-6 py-12 text-center shadow-sm">
+        <p className="font-body text-sm text-muted-foreground">
           No purchase requests yet.
         </p>
       </div>
@@ -173,49 +172,49 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
   return (
     <div className="flex flex-col gap-3">
       {statusError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5">
-          <p className="font-body text-xs text-red-600">{statusError}</p>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 dark:border-red-900/30 dark:bg-red-950/20">
+          <p className="font-body text-xs text-red-600 dark:text-red-400">{statusError}</p>
         </div>
       )}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full text-sm font-body">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <tr className="border-b border-border bg-muted/50">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Customer
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Session Date
               </th>
-              <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Clubs
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Status
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Submitted
               </th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-border">
             {requests.map((req) => {
               const rowDateDebug = dateDebugById[req.id];
 
               return (
                 <Fragment key={req.id}>
-                  <tr className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-900">
+                  <tr className="hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 font-medium text-foreground">
                       {req.clientName}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
+                    <td className="px-4 py-3 text-muted-foreground">
                       {formatSessionDateOnly(
                         req.dateDebug?.rawDemoDateFromDb ?? req.demoDate
                       )}
                     </td>
-                    <td className="px-4 py-3 text-center text-slate-600">
+                    <td className="px-4 py-3 text-center text-muted-foreground">
                       {req.itemCount}
                     </td>
                     <td className="px-4 py-3">
@@ -233,7 +232,7 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
                                 e.target.value as PurchaseRequestStatus
                               );
                             }}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold border border-transparent cursor-pointer focus:ring-2 focus:ring-emerald-400 focus:outline-none disabled:opacity-50 transition-colors font-body ${
+                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold border border-transparent cursor-pointer focus:ring-2 focus:ring-primary/30 focus:outline-none disabled:opacity-50 transition-colors font-body dark:focus:ring-primary/40 ${
                               PURCHASE_REQUEST_STATUS_STYLES[canonicalStatus]
                             }`}
                           >
@@ -246,26 +245,26 @@ export function PurchaseRequestsTable({ initialRequests }: Props) {
                         );
                       })()}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                       {fmtDate(req.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/staff/purchase-requests/${req.id}`}
-                        className="font-body text-xs font-semibold text-emerald-700 hover:text-emerald-900 whitespace-nowrap"
+                        className="font-body text-xs font-semibold text-primary hover:text-primary-hover hover:underline whitespace-nowrap"
                       >
                         View →
                       </Link>
                     </td>
                   </tr>
                   {debugDatesEnabled && rowDateDebug ? (
-                    <tr className="bg-amber-50/70">
+                    <tr className="bg-amber-50/70 dark:bg-amber-950/20">
                       <td colSpan={6} className="px-4 py-2">
                         <details>
-                          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
                             Date debug (request #{req.id})
                           </summary>
-                          <div className="mt-2 grid gap-1 text-[11px] text-amber-900">
+                          <div className="mt-2 grid gap-1 text-[11px] text-amber-900 dark:text-amber-100">
                             <div>
                               raw session date value from database/API: {rowDateDebug.rawSessionDateValueFromDb}
                             </div>

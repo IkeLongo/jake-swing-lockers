@@ -17,9 +17,55 @@ const BATCH_STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 };
 
+// Determine the next workflow step for an in-progress TrackMan batch
+function getInProgressContinueUrl(batch: {
+  id: number;
+  parserMode: string;
+  status: string;
+  selectedGolfClientId: number | null;
+}): string {
+  const base = `/staff/imports/${batch.id}`;
+  
+  // Non-TrackMan imports go to the generic review page
+  if (batch.parserMode !== "trackman-result") {
+    return base;
+  }
+  
+  // For TrackMan imports, default to map page (club review/filtering).
+  // The page will handle redirects to customer/opportunity if needed.
+  return `${base}/map`;
+}
+
+function calculateClubCountAndValue(
+  clubSummaries: Array<{ includeInReport: boolean | null; estimatedPrice: string | number | null }>
+): { clubCount: number; fittingValue: { total: number; hasAnyPrice: boolean; hasPartialPrice: boolean } } {
+  const includedClubs = clubSummaries.filter((club) => club.includeInReport !== false);
+  
+  const clubCount = includedClubs.length;
+
+  let totalPrice = 0;
+  let clubsWithPrice = 0;
+
+  for (const club of includedClubs) {
+    if (club.estimatedPrice !== null) {
+      const price = typeof club.estimatedPrice === 'string' 
+        ? parseFloat(club.estimatedPrice) 
+        : Number(club.estimatedPrice);
+      totalPrice += price;
+      clubsWithPrice++;
+    }
+  }
+
+  const hasAnyPrice = clubsWithPrice > 0;
+  const hasPartialPrice = hasAnyPrice && clubsWithPrice < includedClubs.length;
+  const fittingValue = { total: totalPrice, hasAnyPrice, hasPartialPrice };
+
+  return { clubCount, fittingValue };
+}
+
 export default async function StaffImportsPage() {
   // Fetch DemoSessions with linked client + import batch summary
-  const sessions = await db.demoSession.findMany({
+  const sessionsRaw = await db.demoSession.findMany({
     orderBy: { createdAt: "desc" },
     take: 50,
     select: {
@@ -43,20 +89,45 @@ export default async function StaffImportsPage() {
           status: true,
           rowCount: true,
           clubSummaries: {
-            select: { id: true },
+            select: { 
+              includeInReport: true,
+              estimatedPrice: true,
+            },
           },
         },
       },
     },
   });
 
-  // Separate finalized and unfinalized sessions
-  const finalizedSessions = sessions.filter((s) => s.status === "finalized");
-  const unfinalizedSessions = sessions.filter((s) => s.status !== "finalized");
+  // Transform raw sessions to include pre-calculated club count and fitting value
+  const sessions = sessionsRaw.map((session) => {
+    const latestBatch = session.importBatches[0] ?? null;
+    const { clubCount, fittingValue } = latestBatch
+      ? calculateClubCountAndValue(
+          latestBatch.clubSummaries.map((club) => ({
+            includeInReport: club.includeInReport,
+            estimatedPrice: club.estimatedPrice ? club.estimatedPrice.toString() : null,
+          }))
+        )
+      : { clubCount: 0, fittingValue: { total: 0, hasAnyPrice: false, hasPartialPrice: false } };
 
-  // Fetch unfinalized import batches (pending uploads/reviews)
-  // Note: pendingBatches filtered separately for future use; currently shows all via orphanBatches
-  await db.importBatch.findMany({
+    return {
+      ...session,
+      clubCount,
+      fittingValue,
+      importBatches: session.importBatches.map((batch) => ({
+        ...batch,
+        clubSummaries: undefined, // Remove raw club data to avoid serialization
+      })),
+    };
+  });
+
+  // Separate finalized sessions (unfinalized sessions are now in inProgressBatches)
+  const finalizedSessions = sessions.filter((s) => s.status === "finalized");
+
+  // Fetch unfinalized import batches (actively in progress)
+  // These are batches in active review/approval workflow with no linked DemoSession yet
+  const inProgressBatches = await db.importBatch.findMany({
     where: {
       demoSessionId: null,
       status: { in: ["uploaded", "parsed", "reviewing"] },
@@ -69,12 +140,26 @@ export default async function StaffImportsPage() {
       status: true,
       rowCount: true,
       createdAt: true,
+      parserMode: true,
+      selectedGolfClientId: true,
+      selectedGolfClient: {
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
     },
   });
 
-  // Also fetch orphan batches (no demoSession) for backward compat
-  const orphanBatches = await db.importBatch.findMany({
-    where: { demoSessionId: null },
+  // Fetch genuine legacy/abandoned batches (no demoSession)
+  // These are batches that reached "approved" but never transitioned to a DemoSession (old workflow),
+  // or batches that failed and were abandoned.
+  const legacyBatches = await db.importBatch.findMany({
+    where: {
+      demoSessionId: null,
+      status: { in: ["approved", "failed"] },
+    },
     orderBy: { createdAt: "desc" },
     take: 20,
     select: {
@@ -86,7 +171,7 @@ export default async function StaffImportsPage() {
     },
   });
 
-  const hasAny = sessions.length > 0 || orphanBatches.length > 0;
+  const hasAny = sessions.length > 0 || inProgressBatches.length > 0 || legacyBatches.length > 0;
 
   return (
     <>
@@ -141,31 +226,18 @@ export default async function StaffImportsPage() {
         </div>
       )}
 
-      {/* ── Finalized sessions (grouped by opportunity) ────────────────────── */}
-      {finalizedSessions.length > 0 && (
+      {/* ── Fittings in progress (unfinalized imports + pending sessions) ───── */}
+      {inProgressBatches.length > 0 && (
         <div className="mb-8">
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground font-subheading uppercase tracking-wide">
-            Fittings by Opportunity
-          </h2>
-          <OpportunityDrawerWrapper sessions={finalizedSessions} />
-        </div>
-      )}
-
-      {/* ── Pending imports (unfinalized sessions) ──────────────────────────── */}
-      {unfinalizedSessions.length > 0 && (
-        <div className="mb-8">
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground font-subheading uppercase tracking-wide">
-            Pending Imports
+            Fittings in Progress ({inProgressBatches.length})
           </h2>
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
             <table className="min-w-full text-sm font-body">
               <thead className="border-b border-border bg-muted">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                    Golfer
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                    Demo Date
+                    Customer / File
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
                     Status
@@ -174,76 +246,53 @@ export default async function StaffImportsPage() {
                     Clubs
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                    Access
+                    Uploaded
                   </th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {unfinalizedSessions.map((s) => {
-                  const clientName =
-                    [s.client.firstName, s.client.lastName]
-                      .filter(Boolean)
-                      .join(" ") || s.client.email || "Unknown Client";
-                  const latestBatch = s.importBatches[0] ?? null;
-                  const clubCount = latestBatch?.clubSummaries.length ?? 0;
-                  const demoDateStr = new Date(s.demoDate).toLocaleDateString(
+                {inProgressBatches.map((batch) => {
+                  const statusStyle =
+                    BATCH_STATUS_STYLES[batch.status] ?? "bg-muted text-muted-foreground";
+                  const clientName = batch.selectedGolfClient
+                    ? [batch.selectedGolfClient.firstName, batch.selectedGolfClient.lastName]
+                        .filter(Boolean)
+                        .join(" ") || batch.selectedGolfClient.email || "Unknown Client"
+                    : batch.originalFileName || "Unnamed Upload";
+                  const uploadedDateStr = new Date(batch.createdAt).toLocaleDateString(
                     "en-US",
-                    { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" },
+                    { month: "short", day: "numeric", year: "numeric" },
                   );
-
-                  const getStatusBadgeClass = (status: string): string => {
-                    switch (status) {
-                      case "draft":
-                        return "bg-muted text-muted-foreground";
-                      case "uploaded":
-                        return "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200";
-                      case "reviewing":
-                        return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200";
-                      case "finalized":
-                        return "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200";
-                      case "failed":
-                        return "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200";
-                      default:
-                        return "bg-muted text-muted-foreground";
-                    }
-                  };
-
-                  const actionHref = latestBatch
-                    ? `/staff/imports/${latestBatch.id}/map`
-                    : `/staff/demo-sessions/${s.id}/upload`;
-                  const actionLabel = latestBatch ? "Review →" : "Upload file →";
+                  const continueUrl = getInProgressContinueUrl(batch);
 
                   return (
-                    <tr key={s.id} className="border-t border-border hover:bg-card/50 transition-colors">
+                    <tr key={batch.id} className="border-t border-border hover:bg-card/50 transition-colors">
                       <td className="px-4 py-3">
                         <span className="font-medium text-foreground">
                           {clientName}
                         </span>
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-                        {demoDateStr}
-                      </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${getStatusBadgeClass(s.status)}`}
+                          className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${statusStyle}`}
                         >
-                          {s.status}
+                          {batch.status}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
-                        {clubCount > 0 ? clubCount : <span className="text-muted-foreground/50">—</span>}
+                        {batch.rowCount > 0 ? batch.rowCount : <span className="text-muted-foreground/50">—</span>}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="text-muted-foreground/50">—</span>
+                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
+                        {uploadedDateStr}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-5">
                           <Link
-                            href={actionHref}
+                            href={continueUrl}
                             className="text-sm font-medium text-primary hover:text-primary-hover hover:underline whitespace-nowrap transition-colors"
                           >
-                            {actionLabel}
+                            Continue →
                           </Link>
                         </div>
                       </td>
@@ -256,11 +305,24 @@ export default async function StaffImportsPage() {
         </div>
       )}
 
-      {/* ── Orphan batches (uploaded before session workflow) ─────────────── */}
-      {orphanBatches.length > 0 && (
-        <>
+      {/* ── Finalized sessions (grouped by opportunity) ────────────────────── */}
+      {finalizedSessions.length > 0 && (
+        <div className="mb-8">
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground font-subheading uppercase tracking-wide">
-            Legacy uploads (no session)
+            Fittings by Opportunity
+          </h2>
+          <OpportunityDrawerWrapper sessions={finalizedSessions} />
+        </div>
+      )}
+
+      {/* ── Pending imports (unfinalized sessions) ──────────────────────────── */}
+      {/* This section is now covered by "Fittings in Progress" above */}
+
+      {/* ── Legacy uploads (approved or failed batches with no session) ─────── */}
+      {legacyBatches.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-semibold text-muted-foreground font-subheading uppercase tracking-wide">
+            Legacy Uploads
           </h2>
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
             <table className="min-w-full text-sm font-body">
@@ -282,7 +344,7 @@ export default async function StaffImportsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {orphanBatches.map((batch) => {
+                {legacyBatches.map((batch) => {
                   const statusStyle =
                     BATCH_STATUS_STYLES[batch.status] ??
                     "bg-muted text-muted-foreground";
@@ -333,7 +395,7 @@ export default async function StaffImportsPage() {
               </tbody>
             </table>
           </div>
-        </>
+        </div>
       )}
     </>
   );

@@ -35,11 +35,11 @@ function fmtRole(role: StaffRow["role"]): string {
 function roleBadgeClass(role: StaffRow["role"]): string {
   switch (role) {
     case "admin":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200";
     case "sales_rep":
-      return "bg-emerald-100 text-emerald-800";
+      return "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200";
     case "support":
-      return "bg-sky-100 text-sky-800";
+      return "bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-200";
   }
 }
 
@@ -122,25 +122,25 @@ function ToggleActiveModal({ staff, onClose, onToggled }: ToggleActiveModalProps
       onClick={(e) => { if (e.target === overlayRef.current) close(); }}
     >
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-slate-200">
+      <div className="relative z-10 w-full max-w-md rounded-2xl bg-card shadow-xl ring-1 ring-border">
         {/* Header */}
-        <div className="flex items-start gap-3 border-b border-slate-100 px-6 py-5">
-          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${isDeactivating ? "bg-red-100" : "bg-emerald-100"}`}>
+        <div className="flex items-start gap-3 border-b border-border px-6 py-5">
+          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${isDeactivating ? "bg-red-100 dark:bg-red-950" : "bg-emerald-100 dark:bg-emerald-950"}`}>
             {isDeactivating ? (
-              <svg className="h-5 w-5 text-red-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <svg className="h-5 w-5 text-red-600 dark:text-red-200" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                 <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
               </svg>
             ) : (
-              <svg className="h-5 w-5 text-emerald-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-200" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
               </svg>
             )}
           </div>
           <div>
-            <h2 id="toggle-active-modal-title" className="text-base font-semibold text-slate-900 font-heading">
+            <h2 id="toggle-active-modal-title" className="text-base font-semibold text-foreground font-heading">
               {isDeactivating ? "Deactivate Staff Member?" : "Reactivate Staff Member?"}
             </h2>
-            <p className="mt-1 text-sm text-slate-500 font-body">
+            <p className="mt-1 text-sm text-muted-foreground font-body">
               {isDeactivating
                 ? "This staff member will lose access to the dashboard immediately."
                 : "This staff member will regain access to the dashboard."}
@@ -151,24 +151,24 @@ function ToggleActiveModal({ staff, onClose, onToggled }: ToggleActiveModalProps
         {/* Details */}
         <div className="px-6 py-5 space-y-4">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm font-body">
-            <dt className="font-semibold text-slate-500">Name</dt>
-            <dd className="text-slate-900">{name}</dd>
-            <dt className="font-semibold text-slate-500">Role</dt>
-            <dd className="text-slate-700">{fmtRole(staff.role)}</dd>
-            <dt className="font-semibold text-slate-500">Email</dt>
-            <dd className="text-slate-700">{staff.email ?? <span className="text-slate-400">—</span>}</dd>
+            <dt className="font-semibold text-muted-foreground">Name</dt>
+            <dd className="text-foreground">{name}</dd>
+            <dt className="font-semibold text-muted-foreground">Role</dt>
+            <dd className="text-foreground">{fmtRole(staff.role)}</dd>
+            <dt className="font-semibold text-muted-foreground">Email</dt>
+            <dd className="text-foreground">{staff.email ?? <span className="text-muted-foreground/50">—</span>}</dd>
           </dl>
 
           {isDeactivating && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-              <p className="text-xs font-semibold text-amber-800 font-body">
+            <div className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-4 py-3">
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-200 font-body">
                 The staff member will be blocked from logging in. Their records are preserved and this can be reversed.
               </p>
             </div>
           )}
 
           {error && (
-            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 font-body">
+            <p className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-xs text-red-700 dark:text-red-200 font-body">
               {error}
             </p>
           )}
@@ -178,7 +178,7 @@ function ToggleActiveModal({ staff, onClose, onToggled }: ToggleActiveModalProps
               type="button"
               onClick={close}
               disabled={loading}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors font-body disabled:opacity-50"
+              className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors font-body disabled:opacity-50"
             >
               Cancel
             </button>
@@ -188,8 +188,8 @@ function ToggleActiveModal({ staff, onClose, onToggled }: ToggleActiveModalProps
               disabled={loading}
               className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition-colors font-body disabled:opacity-50 ${
                 isDeactivating
-                  ? "bg-red-600 hover:bg-red-700"
-                  : "bg-emerald-600 hover:bg-emerald-700"
+                  ? "bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600"
+                  : "bg-primary hover:bg-primary-hover"
               }`}
             >
               {loading
@@ -240,11 +240,11 @@ export function StaffMembersTable({ initialStaff, currentStaffUserId }: Props) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name, email, phone, or role…"
-          className="w-full max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none font-body shadow-xs"
+          className="w-full max-w-sm rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 font-body shadow-xs transition-colors"
         />
         <Link
           href="/staff/admin/new-staff"
-          className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors font-body text-center"
+          className="shrink-0 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-primary-hover transition-colors font-body text-center"
         >
           Add Staff
         </Link>
@@ -252,23 +252,23 @@ export function StaffMembersTable({ initialStaff, currentStaffUserId }: Props) {
 
       {/* ── Empty state ───────────────────────────────────────────────────── */}
       {filtered.length === 0 && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-8 py-16 text-center">
+        <div className="rounded-xl border border-dashed border-border bg-card px-8 py-16 text-center">
           <div className="mb-3 text-4xl">👤</div>
           {search ? (
             <>
-              <h2 className="text-base font-semibold text-slate-700 font-subheading">
+              <h2 className="text-base font-semibold text-foreground font-subheading">
                 No staff match &ldquo;{search}&rdquo;
               </h2>
-              <p className="mt-1 text-sm text-slate-400 font-body">
+              <p className="mt-1 text-sm text-muted-foreground font-body">
                 Try a different search or add a new staff member.
               </p>
             </>
           ) : (
             <>
-              <h2 className="text-base font-semibold text-slate-700 font-subheading">
+              <h2 className="text-base font-semibold text-foreground font-subheading">
                 No staff members yet
               </h2>
-              <p className="mt-1 text-sm text-slate-400 font-body">
+              <p className="mt-1 text-sm text-muted-foreground font-body">
                 Add your first staff member to get started.
               </p>
             </>
@@ -278,39 +278,39 @@ export function StaffMembersTable({ initialStaff, currentStaffUserId }: Props) {
 
       {/* ── Table ─────────────────────────────────────────────────────────── */}
       {filtered.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
           <table className="min-w-full text-sm font-body">
-            <thead className="border-b border-slate-200 bg-slate-50">
+            <thead className="border-b border-border bg-muted">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
                   Name
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
                   Role
                 </th>
-                <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap sm:table-cell">
+                <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap sm:table-cell">
                   Email
                 </th>
-                <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap md:table-cell">
+                <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap md:table-cell">
                   Phone
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
                   Status
                 </th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border">
               {filtered.map((s) => {
                 const isSelf = s.id === currentStaffUserId;
                 return (
-                  <tr key={s.id} className={`hover:bg-slate-50 ${!s.isActive ? "opacity-60" : ""}`}>
+                  <tr key={s.id} className={`hover:bg-muted transition-colors ${!s.isActive ? "opacity-60" : ""}`}>
                     {/* Name */}
                     <td className="px-4 py-3">
-                      <span className="font-medium text-slate-800">
+                      <span className="font-medium text-foreground">
                         {displayName(s)}
                         {isSelf && (
-                          <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500 font-body">
+                          <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground font-body">
                             You
                           </span>
                         )}
@@ -323,23 +323,23 @@ export function StaffMembersTable({ initialStaff, currentStaffUserId }: Props) {
                       </span>
                     </td>
                     {/* Email */}
-                    <td className="hidden px-4 py-3 text-slate-500 sm:table-cell">
-                      {s.email ?? <span className="text-slate-300">—</span>}
+                    <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                      {s.email ?? <span className="text-muted-foreground/50">—</span>}
                     </td>
                     {/* Phone */}
-                    <td className="hidden px-4 py-3 text-slate-500 md:table-cell">
+                    <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
                       {fmtPhone(s.phone)}
                     </td>
                     {/* Status */}
                     <td className="px-4 py-3">
                       {s.isActive ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                           Active
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400">
-                          <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground">
+                          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
                           Inactive
                         </span>
                       )}
@@ -349,20 +349,20 @@ export function StaffMembersTable({ initialStaff, currentStaffUserId }: Props) {
                       <div className="flex items-center justify-end gap-3">
                         <Link
                           href={`/staff/admin/${s.id}`}
-                          className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                          className="text-xs font-semibold text-primary hover:text-primary-hover transition-colors"
                         >
                           View
                         </Link>
                         <Link
                           href={`/staff/admin/${s.id}/edit`}
-                          className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                          className="text-xs font-semibold text-primary hover:text-primary-hover transition-colors"
                         >
                           Edit
                         </Link>
                         {isSelf ? (
                           <span
                             title="You cannot deactivate your own account"
-                            className="text-xs font-semibold text-slate-300 cursor-not-allowed"
+                            className="text-xs font-semibold text-muted-foreground/50 cursor-not-allowed"
                           >
                             Deactivate
                           </span>
@@ -372,8 +372,8 @@ export function StaffMembersTable({ initialStaff, currentStaffUserId }: Props) {
                             onClick={() => setTogglingStaff(s)}
                             className={`text-xs font-semibold transition-colors ${
                               s.isActive
-                                ? "text-slate-400 hover:text-red-600"
-                                : "text-slate-400 hover:text-emerald-600"
+                                ? "text-muted-foreground/70 hover:text-red-600 dark:hover:text-red-400"
+                                : "text-muted-foreground/70 hover:text-emerald-600 dark:hover:text-emerald-400"
                             }`}
                           >
                             {s.isActive ? "Deactivate" : "Reactivate"}

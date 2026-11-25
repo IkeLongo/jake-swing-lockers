@@ -16,6 +16,8 @@ export type ClubResultSummary = Pick<
   | "avgBallSpeed"
   | "avgClubSpeed"
   | "avgSpinRate"
+  | "avgMaxHeight"
+  | "estimatedPrice"
   | "includeInReport"
 >;
 

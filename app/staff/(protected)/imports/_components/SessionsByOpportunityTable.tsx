@@ -16,11 +16,16 @@ export interface SessionRow {
     lastName: string | null;
     email: string | null;
   };
+  clubCount: number;
+  fittingValue: {
+    total: number;
+    hasAnyPrice: boolean;
+    hasPartialPrice: boolean;
+  };
   importBatches: Array<{
     id: number;
     status: string;
     rowCount: number;
-    clubSummaries: { id: number }[];
   }>;
 }
 
@@ -117,7 +122,7 @@ function OpportunityGroupHeader({
   return (
     <tr className="select-none bg-muted hover:bg-muted/80 transition-colors">
       <td
-        colSpan={5}
+        colSpan={6}
         className="px-4 py-3 cursor-pointer"
         onClick={onToggle}
       >
@@ -168,7 +173,8 @@ function SessionRow({ session }: { session: SessionRow }) {
   const fittingLabel = formatFittingSessionLabel(session.id);
   const demoDateStr = formatDate(session.demoDate);
   const latestBatch = session.importBatches[0] ?? null;
-  const clubCount = latestBatch?.clubSummaries.length ?? 0;
+  const clubCount = session.clubCount;
+  const fittingValue = session.fittingValue;
 
   const getStatusBadgeClass = (status: string): string => {
     switch (status) {
@@ -236,6 +242,27 @@ function SessionRow({ session }: { session: SessionRow }) {
       <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
         {clubCount > 0 ? clubCount : <span className="text-muted-foreground/50">—</span>}
       </td>
+      <td className="px-4 py-3 text-right tabular-nums">
+        {fittingValue.total > 0 ? (
+          <span className="text-foreground">
+            ${fittingValue.total.toFixed(2)}
+            {fittingValue.hasPartialPrice && (
+              <span 
+                className="ml-1 text-muted-foreground" 
+                title="Estimate is incomplete; some included clubs do not have assigned prices."
+              >
+                *
+              </span>
+            )}
+          </span>
+        ) : fittingValue.hasAnyPrice ? (
+          <span className="text-foreground">$0.00</span>
+        ) : clubCount > 0 ? (
+          <span className="text-muted-foreground/50">—</span>
+        ) : (
+          <span className="text-muted-foreground/50">—</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         {session.status === "finalized" ? (
           <span
@@ -299,6 +326,9 @@ export default function SessionsByOpportunityTable({ sessions, onSelectOpportuni
             </th>
             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
               Clubs
+            </th>
+            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+              Value
             </th>
             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
               Access

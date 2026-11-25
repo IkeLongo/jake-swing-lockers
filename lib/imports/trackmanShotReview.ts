@@ -14,6 +14,12 @@ export function isStagedTrackManBatch(
   return batch.parserMode === "trackman-result" && batch.demoSessionId === null;
 }
 
+export function isTrackManBatch(
+  batch: TrackManBatchReviewState,
+): boolean {
+  return batch.parserMode === "trackman-result";
+}
+
 export function isTrackManShotAssociatedWithSummary(
   batchId: number,
   summaryId: number,

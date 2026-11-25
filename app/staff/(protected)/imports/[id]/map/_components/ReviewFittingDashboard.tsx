@@ -22,6 +22,7 @@ interface ReviewFittingDashboardProps {
   summaries: readonly ClubResultSummary[];
   colorsBySummaryId: ReadonlyMap<number, string>;
   onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
+  onToggleInclude?: (summaryId: number, currentlyIncluded: boolean) => void;
   visualizationData: FittingVisualizationData | null;
   visualizationLoading: boolean;
   visualizationError: string | null;
@@ -32,6 +33,7 @@ export function ReviewFittingDashboard({
   summaries,
   colorsBySummaryId,
   onOpenSummary,
+  onToggleInclude,
   visualizationData,
   visualizationLoading,
   visualizationError,
@@ -178,6 +180,7 @@ export function ReviewFittingDashboard({
         summaries={summaries}
         selectedSummaryIds={normalizedSelection}
         onOpenSummary={onOpenSummary}
+        onToggleInclude={onToggleInclude}
       />
     </div>
   );
@@ -331,10 +334,12 @@ function ClubResults({
   summaries,
   selectedSummaryIds,
   onOpenSummary,
+  onToggleInclude,
 }: {
   summaries: readonly ClubResultSummary[];
   selectedSummaryIds: ClubFilterSelection;
   onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
+  onToggleInclude?: (summaryId: number, currentlyIncluded: boolean) => void;
 }) {
   return (
     <section aria-labelledby="club-results-heading" className="min-w-0">
@@ -394,84 +399,123 @@ function ClubResults({
               </th>
               <th
                 scope="col"
-                className="hidden px-3 py-3 text-right lg:table-cell xl:w-[11%]"
+                className="hidden px-3 py-3 text-right lg:table-cell xl:w-[10%]"
               >
-                Club Speed
+                Avg Height
               </th>
               <th
                 scope="col"
                 className="hidden px-3 py-3 text-right xl:table-cell xl:w-[10%]"
               >
-                Spin
+                Price
+              </th>
+              <th
+                scope="col"
+                className="hidden px-3 py-3 text-center xl:table-cell xl:w-[8%]"
+              >
+                Include
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {summaries.map((summary) => (
-              <tr
-                key={summary.id}
-                tabIndex={0}
-                aria-haspopup="dialog"
-                onClick={(event) =>
-                  onOpenSummary(summary.id, event.currentTarget)
-                }
-                onKeyDown={(event: KeyboardEvent<HTMLTableRowElement>) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  onOpenSummary(summary.id, event.currentTarget);
-                }}
-                className={`cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 ${
-                  selectedSummaryIds?.has(summary.id)
-                    ? "bg-primary/[0.035]"
-                    : ""
-                } ${summary.includeInReport === false ? "opacity-60" : ""}`}
-              >
-                <th
-                  scope="row"
-                  className="px-3 py-3 text-sm font-semibold text-foreground sm:px-4"
+            {summaries.map((summary) => {
+              const isIncluded = summary.includeInReport !== false;
+              const height = summary.avgMaxHeight
+                ? (summary.avgMaxHeight * 3.28084).toFixed(1)
+                : null;
+
+              return (
+                <tr
+                  key={summary.id}
+                  tabIndex={0}
+                  aria-haspopup="dialog"
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest("button")) return;
+                    onOpenSummary(summary.id, event.currentTarget);
+                  }}
+                  onKeyDown={(event: KeyboardEvent<HTMLTableRowElement>) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onOpenSummary(summary.id, event.currentTarget);
+                  }}
+                  className={`cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 ${
+                    selectedSummaryIds?.has(summary.id)
+                      ? "bg-primary/[0.035]"
+                      : ""
+                  } ${summary.includeInReport === false ? "opacity-60" : ""}`}
                 >
-                  <span className="block truncate">{summary.clubName}</span>
-                  {summary.includeInReport === false && (
-                    <span className="mt-0.5 block text-[10px] font-medium text-muted-foreground">
-                      Excluded
-                    </span>
-                  )}
-                  {summary.tags.length > 0 && (
-                    <span className="mt-0.5 block truncate text-[11px] font-normal text-muted-foreground lg:hidden">
-                      {summary.tags.join(", ")}
-                    </span>
-                  )}
-                </th>
-                <td
-                  className="hidden truncate px-3 py-3 text-xs text-muted-foreground lg:table-cell"
-                  title={summary.tags.join(", ")}
-                >
-                  {summary.tags.length > 0 ? summary.tags.join(", ") : "—"}
-                </td>
-                <td className="px-2 py-3 text-right text-sm tabular-nums text-muted-foreground sm:px-3">
-                  {summary.shotCount.toLocaleString()}
-                </td>
-                <td className="px-2 py-3 text-right text-sm font-semibold tabular-nums text-foreground sm:px-3">
-                  <ResultMetric value={summary.avgCarry} unit="yd" />
-                </td>
-                <td className="px-2 py-3 text-right text-sm font-semibold tabular-nums text-foreground sm:px-3">
-                  <ResultMetric value={summary.avgTotal} unit="yd" />
-                </td>
-                <td className="hidden px-3 py-3 text-right text-sm tabular-nums text-foreground md:table-cell">
-                  <ResultMetric value={summary.avgBallSpeed} unit="mph" />
-                </td>
-                <td className="hidden px-3 py-3 text-right text-sm tabular-nums text-foreground lg:table-cell">
-                  <ResultMetric value={summary.avgClubSpeed} unit="mph" />
-                </td>
-                <td className="hidden px-3 py-3 text-right text-sm tabular-nums text-foreground xl:table-cell">
-                  <ResultMetric
-                    value={summary.avgSpinRate}
-                    unit="rpm"
-                    decimals={0}
-                  />
-                </td>
-              </tr>
-            ))}
+                  <th
+                    scope="row"
+                    className="px-3 py-3 text-sm font-semibold text-foreground sm:px-4"
+                  >
+                    <span className="block truncate">{summary.clubName}</span>
+                    {summary.tags.length > 0 && (
+                      <span className="mt-0.5 block truncate text-[11px] font-normal text-muted-foreground lg:hidden">
+                        {summary.tags.join(", ")}
+                      </span>
+                    )}
+                  </th>
+                  <td
+                    className="hidden truncate px-3 py-3 text-xs text-muted-foreground lg:table-cell"
+                    title={summary.tags.join(", ")}
+                  >
+                    {summary.tags.length > 0 ? summary.tags.join(", ") : "—"}
+                  </td>
+                  <td className="px-2 py-3 text-right text-sm tabular-nums text-muted-foreground sm:px-3">
+                    {summary.shotCount.toLocaleString()}
+                  </td>
+                  <td className="px-2 py-3 text-right text-sm font-semibold tabular-nums text-foreground sm:px-3">
+                    <ResultMetric value={summary.avgCarry} unit="yd" />
+                  </td>
+                  <td className="px-2 py-3 text-right text-sm font-semibold tabular-nums text-foreground sm:px-3">
+                    <ResultMetric value={summary.avgTotal} unit="yd" />
+                  </td>
+                  <td className="hidden px-3 py-3 text-right text-sm tabular-nums text-foreground md:table-cell">
+                    <ResultMetric value={summary.avgBallSpeed} unit="mph" />
+                  </td>
+                  <td className="hidden px-3 py-3 text-right text-sm tabular-nums text-foreground lg:table-cell">
+                    {height ? (
+                      <>
+                        {height}
+                        <span className="ml-1 text-xs text-muted-foreground">ft</span>
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="hidden px-3 py-3 text-right text-sm font-mono tabular-nums text-foreground xl:table-cell">
+                    {summary.estimatedPrice !== null
+                      ? `$${summary.estimatedPrice.toFixed(2)}`
+                      : "—"}
+                  </td>
+                  <td className="hidden px-3 py-3 text-center xl:table-cell">
+                    {onToggleInclude && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleInclude(summary.id, isIncluded);
+                        }}
+                        aria-label={`${isIncluded ? "Exclude" : "Include"} ${summary.clubName}`}
+                        role="switch"
+                        aria-checked={isIncluded}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-150 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary/40 ${
+                          isIncluded
+                            ? "bg-primary-hover"
+                            : "bg-muted"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-150 ease-in-out ${
+                            isIncluded ? "translate-x-5" : "translate-x-0.5"
+                          }`}
+                        />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

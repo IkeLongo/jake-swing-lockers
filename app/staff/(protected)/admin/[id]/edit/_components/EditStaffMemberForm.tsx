@@ -119,17 +119,17 @@ export function EditStaffMemberForm({
   };
 
   return (
-    <div className="mb-8 rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
-      <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
+    <div className="mb-8 rounded-xl border border-border bg-card p-6 shadow-xs">
+      <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
         Edit Staff Member
       </h1>
-      <p className="mt-1 text-sm text-slate-500 font-body">
+      <p className="mt-1 text-sm text-muted-foreground font-body">
         Update account profile fields.
       </p>
 
       {error && (
-        <div className="mt-5 rounded-md bg-red-50 p-4 border border-red-200">
-          <p className="text-sm font-medium text-red-900 font-body">{error}</p>
+        <div className="mt-5 rounded-md bg-red-50 dark:bg-red-950/30 p-4 border border-red-200 dark:border-red-900">
+          <p className="text-sm font-medium text-red-900 dark:text-red-200 font-body">{error}</p>
         </div>
       )}
 
@@ -137,7 +137,7 @@ export function EditStaffMemberForm({
         <div>
           <label
             htmlFor="name"
-            className="block text-sm font-medium text-slate-700 font-body"
+            className="block text-sm font-medium text-foreground font-body"
           >
             Name
             <span className="text-red-500 ml-1">*</span>
@@ -148,22 +148,22 @@ export function EditStaffMemberForm({
             name="name"
             value={formData.name}
             onChange={handleChange}
-            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground placeholder-muted-foreground/60 bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
               fieldErrors.name
-                ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
             }`}
             required
           />
           {fieldErrors.name && (
-            <p className="mt-1 text-sm text-red-600 font-body">{fieldErrors.name[0]}</p>
+            <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">{fieldErrors.name[0]}</p>
           )}
         </div>
 
         <div>
           <label
             htmlFor="email"
-            className="block text-sm font-medium text-slate-700 font-body"
+            className="block text-sm font-medium text-foreground font-body"
           >
             Email
           </label>
@@ -173,21 +173,21 @@ export function EditStaffMemberForm({
             name="email"
             value={formData.email}
             onChange={handleChange}
-            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground placeholder-muted-foreground/60 bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
               fieldErrors.email
-                ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
             }`}
           />
           {fieldErrors.email && (
-            <p className="mt-1 text-sm text-red-600 font-body">{fieldErrors.email[0]}</p>
+            <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">{fieldErrors.email[0]}</p>
           )}
         </div>
 
         <div>
           <label
             htmlFor="phone"
-            className="block text-sm font-medium text-slate-700 font-body"
+            className="block text-sm font-medium text-foreground font-body"
           >
             Phone
           </label>
@@ -199,16 +199,16 @@ export function EditStaffMemberForm({
             onChange={handlePhoneChange}
             inputMode="numeric"
             placeholder="(555) 123-4567"
-            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground placeholder-muted-foreground/60 bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
               fieldErrors.phone
-                ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
             }`}
           />
           {fieldErrors.phone && (
-            <p className="mt-1 text-sm text-red-600 font-body">{fieldErrors.phone[0]}</p>
+            <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">{fieldErrors.phone[0]}</p>
           )}
-          <p className="mt-1 text-xs text-slate-500 font-body">
+          <p className="mt-1 text-xs text-muted-foreground font-body">
             Must provide either email or phone.
           </p>
         </div>
@@ -216,7 +216,7 @@ export function EditStaffMemberForm({
         <div>
           <label
             htmlFor="role"
-            className="block text-sm font-medium text-slate-700 font-body"
+            className="block text-sm font-medium text-foreground font-body"
           >
             Role
             <span className="text-red-500 ml-1">*</span>
@@ -226,10 +226,10 @@ export function EditStaffMemberForm({
             name="role"
             value={formData.role}
             onChange={handleChange}
-            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
               fieldErrors.role
-                ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
             }`}
             required
           >
@@ -238,21 +238,21 @@ export function EditStaffMemberForm({
             <option value="support">Support</option>
           </select>
           {fieldErrors.role && (
-            <p className="mt-1 text-sm text-red-600 font-body">{fieldErrors.role[0]}</p>
+            <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">{fieldErrors.role[0]}</p>
           )}
         </div>
 
         <div className="flex justify-end gap-2 pt-1">
           <Link
             href={`/staff/admin/${staffId}`}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors font-body"
+            className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors font-body"
           >
             Cancel
           </Link>
           <button
             type="submit"
             disabled={isLoading}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors font-body disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors font-body disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? "Saving..." : "Save Changes"}
           </button>

@@ -96,7 +96,7 @@ export default function DeleteClientButton({
       <button
         type="button"
         onClick={openModal}
-        className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-xs hover:bg-red-50 transition-colors font-body"
+        className="rounded-lg border border-destructive bg-card px-4 py-2 text-sm font-semibold text-destructive shadow-xs hover:bg-destructive/10 transition-colors font-body"
       >
         Delete Client
       </button>
@@ -111,19 +111,19 @@ export default function DeleteClientButton({
           onClick={(e) => { if (e.target === overlayRef.current) closeModal(); }}
         >
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-          <div className="relative z-10 w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-slate-200">
+          <div className="relative z-10 w-full max-w-md rounded-2xl bg-card shadow-xl ring-1 ring-border">
             {/* Header */}
-            <div className="flex items-start gap-3 border-b border-slate-100 px-6 py-5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100">
-                <svg className="h-5 w-5 text-red-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <div className="flex items-start gap-3 border-b border-border px-6 py-5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-950">
+                <svg className="h-5 w-5 text-red-600 dark:text-red-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                   <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                 </svg>
               </div>
               <div>
-                <h2 id="delete-client-modal-title" className="text-base font-semibold text-slate-900 font-heading">
+                <h2 id="delete-client-modal-title" className="text-base font-semibold text-foreground font-heading">
                   Delete Client?
                 </h2>
-                <p className="mt-1 text-sm text-slate-500 font-body">
+                <p className="mt-1 text-sm text-muted-foreground font-body">
                   You are about to permanently delete this client profile.
                 </p>
               </div>
@@ -132,24 +132,24 @@ export default function DeleteClientButton({
             {/* Details */}
             <div className="px-6 py-5 space-y-4">
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm font-body">
-                <dt className="font-semibold text-slate-500">Name</dt>
-                <dd className="text-slate-900">{clientName}</dd>
-                <dt className="font-semibold text-slate-500">Email</dt>
-                <dd className="text-slate-700">{email ?? <span className="text-slate-400">—</span>}</dd>
-                <dt className="font-semibold text-slate-500">Phone</dt>
-                <dd className="text-slate-700">{phoneFmt}</dd>
-                <dt className="font-semibold text-slate-500">Demo Sessions</dt>
-                <dd className="text-slate-700">{demoSessionCount}</dd>
+                <dt className="font-semibold text-muted-foreground">Name</dt>
+                <dd className="text-foreground">{clientName}</dd>
+                <dt className="font-semibold text-muted-foreground">Email</dt>
+                <dd className="text-foreground">{email ?? <span className="text-muted-foreground/50">—</span>}</dd>
+                <dt className="font-semibold text-muted-foreground">Phone</dt>
+                <dd className="text-foreground">{phoneFmt}</dd>
+                <dt className="font-semibold text-muted-foreground">Fittings</dt>
+                <dd className="text-foreground">{demoSessionCount}</dd>
               </dl>
 
               {/* Blocked: client has sessions */}
               {hasSessions && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                  <p className="text-sm font-semibold text-amber-800 font-body">
-                    This client cannot be deleted because they have {demoSessionCount} demo session{demoSessionCount === 1 ? "" : "s"} attached.
+                <div className="rounded-lg border border-amber-200/80 bg-amber-50/80 dark:border-amber-900/40 dark:bg-amber-950/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-200 font-body">
+                    This client cannot be deleted because they have {demoSessionCount} fitting{demoSessionCount === 1 ? "" : "s"} attached.
                   </p>
-                  <p className="mt-1 text-xs text-amber-700 font-body">
-                    Delete those sessions first, then you can delete this client.
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300 font-body">
+                    Delete those fittings first, then you can delete this client.
                   </p>
                 </div>
               )}
@@ -157,13 +157,13 @@ export default function DeleteClientButton({
               {/* Confirm input */}
               {!hasSessions && (
                 <>
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-                    <p className="text-xs font-semibold text-red-700 font-body">
+                  <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3">
+                    <p className="text-xs font-semibold text-destructive font-body">
                       This action cannot be undone.
                     </p>
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-xs font-semibold text-slate-600 font-subheading">
+                    <label className="block text-xs font-semibold text-muted-foreground font-subheading">
                       Type <span className="font-mono font-bold">DELETE</span> to confirm
                     </label>
                     <input
@@ -173,14 +173,14 @@ export default function DeleteClientButton({
                       onChange={(e) => setConfirmInput(e.target.value)}
                       placeholder="DELETE"
                       disabled={loading}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-red-400 focus:outline-none font-mono disabled:opacity-50"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-destructive focus:outline-none focus:ring-2 focus:ring-destructive/20 font-mono disabled:opacity-50 transition-colors"
                     />
                   </div>
                 </>
               )}
 
               {error && (
-                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 font-body">
+                <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive font-body">
                   {error}
                 </p>
               )}
@@ -190,7 +190,7 @@ export default function DeleteClientButton({
                   type="button"
                   onClick={closeModal}
                   disabled={loading}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors font-body disabled:opacity-50"
+                  className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors font-body disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -199,7 +199,7 @@ export default function DeleteClientButton({
                     type="button"
                     onClick={handleDelete}
                     disabled={!canConfirm}
-                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition-colors font-body disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="rounded-lg bg-destructive px-4 py-2 text-sm font-semibold text-white hover:bg-destructive/90 transition-colors font-body disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {loading ? "Deleting…" : "Delete Client"}
                   </button>

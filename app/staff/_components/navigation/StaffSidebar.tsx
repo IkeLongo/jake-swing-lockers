@@ -60,14 +60,6 @@ export default function StaffSidebar({ children, isAdmin }: StaffSidebarProps) {
       href: "/staff/imports",
       icon: <IconFileSpreadsheet className="h-5 w-5" />,
     },
-  ];
-
-  const salesLinks: Links[] = [
-    {
-      label: "Clients",
-      href: "/staff/clients",
-      icon: <IconUsers className="h-5 w-5" />,
-    },
     {
       label: "Purchase Requests",
       href: "/staff/purchase-requests",
@@ -75,15 +67,22 @@ export default function StaffSidebar({ children, isAdmin }: StaffSidebarProps) {
     },
   ];
 
-  const adminLinks: Links[] = isAdmin
-    ? [
-        {
-          label: "Staff Members",
-          href: "/staff/admin",
-          icon: <IconUserShield className="h-5 w-5" />,
-        },
-      ]
-    : [];
+  const managementLinks: Links[] = [
+    {
+      label: "Clients",
+      href: "/staff/clients",
+      icon: <IconUsers className="h-5 w-5" />,
+    },
+    ...(isAdmin
+      ? [
+          {
+            label: "Staff Members",
+            href: "/staff/admin",
+            icon: <IconUserShield className="h-5 w-5" />,
+          },
+        ]
+      : []),
+  ];
 
   const signOutLink: Links = {
     label: isLoggingOut ? "Signing out…" : "Sign out",
@@ -113,17 +112,11 @@ export default function StaffSidebar({ children, isAdmin }: StaffSidebarProps) {
                 <SidebarLink key={link.href} link={link} />
               ))}
 
-              {/* ── SALES ─────────────────────────────────────────────────── */}
-              <NavSection title="SALES" className="mt-3" />
-              {salesLinks.map((link) => (
-                <SidebarLink key={link.href} link={link} />
-              ))}
-
-              {/* ── ADMIN (if applicable) ─────────────────────────────────── */}
-              {adminLinks.length > 0 && (
+              {/* ── MANAGEMENT ────────────────────────────────────────────── */}
+              {managementLinks.length > 0 && (
                 <>
-                  <NavSection title="ADMIN" className="mt-3" />
-                  {adminLinks.map((link) => (
+                  <NavSection title="MANAGEMENT" className="mt-3" />
+                  {managementLinks.map((link) => (
                     <SidebarLink key={link.href} link={link} />
                   ))}
                 </>

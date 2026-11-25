@@ -10,6 +10,7 @@ import {
 } from "@/lib/imports/trackmanClubSummaryPersistence";
 import {
   isStagedTrackManBatch,
+  isTrackManBatch,
   isTrackManShotAssociatedWithSummary,
   parsePositiveRouteId,
 } from "@/lib/imports/trackmanShotReview";
@@ -205,6 +206,28 @@ test("staged TrackMan and shot-summary ownership checks reject invalid associati
       importBatchId: 3,
       clubSummaryId: 9,
     }),
+    false,
+  );
+});
+
+test("isTrackManBatch allows both staged and finalized TrackMan imports for read-only access", () => {
+  // Staged TrackMan import (unconfirmed)
+  assert.equal(
+    isTrackManBatch({ parserMode: "trackman-result", demoSessionId: null }),
+    true,
+  );
+  // Finalized TrackMan import (confirmed with DemoSession)
+  assert.equal(
+    isTrackManBatch({ parserMode: "trackman-result", demoSessionId: 4 }),
+    true,
+  );
+  // Generic (non-TrackMan) import - should still be rejected
+  assert.equal(
+    isTrackManBatch({ parserMode: "generic", demoSessionId: null }),
+    false,
+  );
+  assert.equal(
+    isTrackManBatch({ parserMode: "generic", demoSessionId: 5 }),
     false,
   );
 });

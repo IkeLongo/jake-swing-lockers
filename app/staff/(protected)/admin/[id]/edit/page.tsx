@@ -65,7 +65,7 @@ export default async function EditStaffMemberPage({
     <>
       <Link
         href={`/staff/admin/${staff.id}`}
-        className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+        className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-hover hover:underline font-body transition-colors"
       >
         ← Back to Staff Member
       </Link>

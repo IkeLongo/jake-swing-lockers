@@ -46,14 +46,14 @@ export default async function StaffClientsPage() {
         <div>
           <Link
             href="/staff/dashboard"
-            className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+            className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-hover font-body transition-colors"
           >
             ← Back to Dashboard
           </Link>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
             Clients
           </h1>
-          <p className="mt-1 text-sm text-slate-500 font-body">
+          <p className="mt-1 text-sm text-muted-foreground font-body">
             Manage golfer profiles and demo history.
           </p>
         </div>

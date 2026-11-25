@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { IconArrowLeft } from "@tabler/icons-react";
+import { IconArrowLeft, IconCheck } from "@tabler/icons-react";
 import { db } from "@/lib/db";
 import { getReviewPageRedirect } from "@/lib/imports/customer-workflow-routing";
 import {
@@ -13,11 +13,12 @@ import { StagedFittingHeader } from "../../_components/StagedFittingHeader";
 import { ClubSummarySection } from "./_components/ClubSummarySection";
 import type { SerializedClubSummary } from "./_components/clubSummaryTypes";
 import SessionDetailsCard from "./_components/SessionDetailsCard";
+import SwingLockerAccessCard from "./_components/SwingLockerAccessCard";
 import SendAccessButton from "../../_components/SendAccessButton";
 import PreviewLockerButton from "../../_components/PreviewLockerButton";
 
 export const metadata: Metadata = {
-  title: "Club Averages — Jake Swing Lockers Staff",
+  title: "Fitting Details — Jake Swing Lockers Staff",
   robots: { index: false, follow: false },
 };
 
@@ -129,9 +130,11 @@ export default async function ImportMapPage({
   }));
 
   const backHref = "/staff/imports";
-  const backLabel = batch.demoSession ? "Back to Sessions" : "Back to Imports";
+  const isFinalizedTrackMan =
+    !!(batch.demoSession && batch.demoSession.status === "finalized" && batch.parserMode === "trackman-result");
   const isTrackManReview =
     !batch.demoSession && batch.parserMode === "trackman-result";
+  const backLabel = isFinalizedTrackMan ? "Back to Fitting History" : batch.demoSession ? "Back to Sessions" : "Back to Imports";
 
   return (
     <div>
@@ -142,22 +145,80 @@ export default async function ImportMapPage({
           description="Review the recorded clubs and shots before continuing."
           customer={getStagedCustomerSummary(batch)}
         />
+      ) : isFinalizedTrackMan ? (
+        // ── Finalized TrackMan fitting header ──────────────────────────────────
+        <header className="mb-5">
+          <Link
+            href={backHref}
+            className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
+          >
+            <IconArrowLeft className="h-4 w-4" />
+            {backLabel}
+          </Link>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
+                TrackMan Fitting
+              </p>
+              <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground font-heading">
+                Fitting Details
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground font-body">
+                View the recorded clubs, shot data, and fitting results.
+              </p>
+            </div>
+            <span className="shrink-0 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 font-subheading dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-400">
+              <IconCheck className="h-3 w-3" />
+              Finalized
+            </span>
+          </div>
+        </header>
       ) : (
-      <div className="mb-6 max-w-3xl">
-        <Link
-          href={backHref}
-          className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
-        >
-          <IconArrowLeft className="h-4 w-4" />
-          {backLabel}
-        </Link>
+        // ── Legacy/unfinalized session header ───────────────────────────────────
+        <div className="mb-6 max-w-3xl">
+          <Link
+            href={backHref}
+            className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground font-body transition-colors"
+          >
+            <IconArrowLeft className="h-4 w-4" />
+            {backLabel}
+          </Link>
 
-        {/* Golfer context card (shown when linked to a DemoSession) */}
-        {batch.demoSession && (
+          {/* Golfer context card (shown when linked to a DemoSession) */}
+          {batch.demoSession && (
+            <SessionDetailsCard
+              sessionId={batch.demoSession.id}
+              sessionStatus={batch.demoSession.status}
+              uploadedAt={batch.createdAt.toISOString()}
+              initial={{
+                firstName: batch.demoSession.client.firstName ?? "",
+                lastName: batch.demoSession.client.lastName ?? "",
+                email: batch.demoSession.client.email ?? "",
+                phone: batch.demoSession.client.phone ?? "",
+                demoDate: batch.demoSession.demoDate.toISOString(),
+                notes: batch.demoSession.notes ?? "",
+              }}
+            />
+          )}
+
+          <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
+            Club Averages
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground font-body">
+            {batch.originalFileName}
+          </p>
+        </div>
+      )}
+
+      {/* ── Customer info + Swing Locker Access (two-column layout for finalized) ── */}
+      {isFinalizedTrackMan && batch.demoSession && (
+        <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+          {/* Customer Information */}
           <SessionDetailsCard
             sessionId={batch.demoSession.id}
             sessionStatus={batch.demoSession.status}
             uploadedAt={batch.createdAt.toISOString()}
+            noMargin
             initial={{
               firstName: batch.demoSession.client.firstName ?? "",
               lastName: batch.demoSession.client.lastName ?? "",
@@ -167,28 +228,30 @@ export default async function ImportMapPage({
               notes: batch.demoSession.notes ?? "",
             }}
           />
-        )}
 
-        <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
-          Club Averages
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground font-body">
-          {batch.originalFileName}
-        </p>
-      </div>
-      )}
-
-      {/* ── Batch summary cards ──────────────────────────────────────────────── */}
-      {!isTrackManReview && (
-        <div className="mb-6 flex flex-wrap gap-3">
-          <StatCard label="Total Shots" value={batch.rowCount.toLocaleString()} />
-          <StatusCard status={batch.status} />
-          <StatCard label="Clubs Found" value={summaries.length.toString()} />
+          {/* Swing Locker Access */}
+          <SwingLockerAccessCard
+            sessionId={batch.demoSession.id}
+            initialStatus={batch.demoSession.accessInviteStatus ?? null}
+            clientHasContact={
+              !!(batch.demoSession.client.email || batch.demoSession.client.phone)
+            }
+            returnHref={`/staff/imports/${batchId}/map`}
+          />
         </div>
       )}
 
-      {/* ── Swing Locker Access ──────────────────────────────────────────── */}
-      {batch.demoSession && (
+      {/* ── Statistics (compact for finalized, full for others) ─────────────── */}
+      {!isTrackManReview && (
+        <div className="mb-6 flex flex-wrap gap-3">
+          <StatCard label="Total Shots" value={batch.rowCount.toLocaleString()} />
+          {!isFinalizedTrackMan && <StatusCard status={batch.status} />}
+          <StatCard label="Clubs Tested" value={summaries.length.toString()} />
+        </div>
+      )}
+
+      {/* ── Swing Locker Access (legacy layout for non-finalized) ──────────── */}
+      {!isFinalizedTrackMan && batch.demoSession && (
         <div className="mb-6 rounded-xl border border-border bg-card p-4 shadow-xs">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground font-subheading">
             Swing Locker Access
@@ -226,8 +289,8 @@ export default async function ImportMapPage({
         sessionId={batch.demoSession?.id}
         sessionStatus={batch.demoSession?.status}
         needsRefinalization={batch.demoSession?.needsRefinalization ?? false}
-        hideHeading={isTrackManReview}
-        hideFinalize={isTrackManReview}
+        hideHeading={isTrackManReview || isFinalizedTrackMan}
+        hideFinalize={isTrackManReview || isFinalizedTrackMan}
       />
 
       {isTrackManReview && (

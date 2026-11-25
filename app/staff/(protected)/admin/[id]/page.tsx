@@ -105,15 +105,15 @@ export default async function StaffMemberDetailPage({
     <>
       <Link
         href="/staff/admin"
-        className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+        className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-hover hover:underline font-body transition-colors"
       >
         ← Back to Staff Members
       </Link>
 
-      <div className="mb-8 rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+      <div className="mb-8 rounded-xl border border-border bg-card p-6 shadow-xs">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
               {displayName(staff)}
             </h1>
             <dl className="mt-3 grid grid-cols-1 gap-y-1.5 text-sm font-body sm:grid-cols-2 sm:gap-x-6">
@@ -129,7 +129,7 @@ export default async function StaffMemberDetailPage({
           </div>
           <Link
             href={`/staff/admin/${staff.id}/edit`}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-emerald-700 transition-colors font-body"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-primary-hover transition-colors font-body"
           >
             Edit Staff Member
           </Link>
@@ -137,9 +137,9 @@ export default async function StaffMemberDetailPage({
       </div>
 
       {staff.ghlSyncError && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-xs font-semibold text-amber-800 font-body">GHL Sync Error</p>
-          <p className="mt-1 text-sm text-amber-700 font-body">{staff.ghlSyncError}</p>
+        <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-4 py-3">
+          <p className="text-xs font-semibold text-amber-800 dark:text-amber-200 font-body">GHL Sync Error</p>
+          <p className="mt-1 text-sm text-amber-700 dark:text-amber-200 font-body">{staff.ghlSyncError}</p>
         </div>
       )}
     </>
@@ -155,8 +155,8 @@ function ProfileField({
 }) {
   return (
     <div>
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="font-medium text-slate-800">{value ?? "—"}</dd>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-medium text-foreground">{value ?? "—"}</dd>
     </div>
   );
 }

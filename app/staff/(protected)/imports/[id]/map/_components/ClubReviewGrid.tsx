@@ -565,6 +565,7 @@ export function ClubReviewGrid({
           summaries={summaries}
           colorsBySummaryId={colorsBySummaryId}
           onOpenSummary={openSummary}
+          onToggleInclude={onToggleInclude}
           visualizationData={visualizationData}
           visualizationLoading={visualizationLoading}
           visualizationError={visualizationError}

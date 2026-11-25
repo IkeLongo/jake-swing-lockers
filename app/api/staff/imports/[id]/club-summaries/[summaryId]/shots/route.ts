@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
-import { isStagedTrackManBatch, parsePositiveRouteId } from "@/lib/imports/trackmanShotReview";
+import { isTrackManBatch, parsePositiveRouteId } from "@/lib/imports/trackmanShotReview";
 import { getShotReviewShotData } from "@/lib/imports/golfShotMeasurements";
 
 function numberValue(value: unknown): number | null {
@@ -33,9 +33,9 @@ export async function GET(
   if (!batch) {
     return NextResponse.json({ error: "Import batch not found." }, { status: 404 });
   }
-  if (!isStagedTrackManBatch(batch)) {
+  if (!isTrackManBatch(batch)) {
     return NextResponse.json(
-      { error: "Shot review is only available for unconfirmed TrackMan imports." },
+      { error: "Shot review is only available for TrackMan imports." },
       { status: 409 },
     );
   }

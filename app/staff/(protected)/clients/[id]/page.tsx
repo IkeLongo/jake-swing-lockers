@@ -37,13 +37,42 @@ function fmtPhone(phone: string | null): string {
   return phone;
 }
 
+// Match Fitting History status badge styling
 const SESSION_STATUS_STYLES: Record<string, string> = {
-  draft: "bg-slate-100 text-slate-500",
-  uploaded: "bg-blue-100 text-blue-700",
-  reviewing: "bg-yellow-100 text-yellow-700",
-  finalized: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
+  draft: "bg-muted text-muted-foreground",
+  uploaded: "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-200",
+  reviewing: "bg-yellow-100 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-200",
+  finalized: "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-200",
+  failed: "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-200",
 };
+
+// Reuse fitting value calculation logic from Fitting History page
+function calculateClubCountAndValue(
+  clubSummaries: Array<{ includeInReport: boolean | null; estimatedPrice: string | number | null }>
+): { clubCount: number; fittingValue: { total: number; hasAnyPrice: boolean; hasPartialPrice: boolean } } {
+  const includedClubs = clubSummaries.filter((club) => club.includeInReport !== false);
+  
+  const clubCount = includedClubs.length;
+
+  let totalPrice = 0;
+  let clubsWithPrice = 0;
+
+  for (const club of includedClubs) {
+    if (club.estimatedPrice !== null) {
+      const price = typeof club.estimatedPrice === 'string' 
+        ? parseFloat(club.estimatedPrice) 
+        : Number(club.estimatedPrice);
+      totalPrice += price;
+      clubsWithPrice++;
+    }
+  }
+
+  const hasAnyPrice = clubsWithPrice > 0;
+  const hasPartialPrice = hasAnyPrice && clubsWithPrice < includedClubs.length;
+  const fittingValue = { total: totalPrice, hasAnyPrice, hasPartialPrice };
+
+  return { clubCount, fittingValue };
+}
 
 export default async function ClientDetailPage({
   params,
@@ -99,16 +128,16 @@ export default async function ClientDetailPage({
       {/* ── Back link ──────────────────────────────────────────────────────── */}
       <Link
         href="/staff/clients"
-        className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+        className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-hover hover:underline font-body transition-colors"
       >
         ← Back to Clients
       </Link>
 
       {/* ── Profile card ───────────────────────────────────────────────────── */}
-      <div className="mb-8 rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+      <div className="mb-8 rounded-xl border border-border bg-card p-6 shadow-xs">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
               {clientName}
             </h1>
             <dl className="mt-3 grid grid-cols-1 gap-y-1.5 text-sm font-body sm:grid-cols-2 sm:gap-x-6">
@@ -123,7 +152,7 @@ export default async function ClientDetailPage({
                 })}
               />
               <ProfileField
-                label="Demo Sessions"
+                label="Fittings"
                 value={String(client.demoSessions.length)}
               />
             </dl>
@@ -140,58 +169,58 @@ export default async function ClientDetailPage({
         </div>
       </div>
 
-      {/* ── Demo sessions ──────────────────────────────────────────────────── */}
-      <h2 className="mb-4 text-base font-semibold text-slate-800 font-heading">
-        Demo Sessions
+      {/* ── Fitting History ─────────────────────────────────────────────────── */}
+      <h2 className="mb-4 text-base font-semibold text-foreground font-heading">
+        Fitting History
       </h2>
 
       {client.demoSessions.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-8 py-12 text-center">
-          <p className="text-sm text-slate-400 font-body">
-            No demo sessions for this client yet.
+        <div className="rounded-xl border border-dashed border-border bg-muted px-8 py-12 text-center">
+          <p className="text-sm text-muted-foreground/60 font-body">
+            No fittings for this client yet.
           </p>
           <Link
             href="/staff/demo-sessions/new"
-            className="mt-4 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors font-body"
+            className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-hover transition-colors font-body"
           >
-            Create Demo Session
+            Create Fitting
           </Link>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
           <table className="min-w-full text-sm font-body">
-            <thead className="border-b border-slate-200 bg-slate-50">
+            <thead className="border-b border-border bg-muted">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
-                  Demo Date
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                  Fitting Date
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
                   Status
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap">
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
                   Clubs
                 </th>
-                <th className="hidden px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap sm:table-cell">
-                  Est. Total
+                <th className="hidden px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap sm:table-cell">
+                  Value
                 </th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border">
               {client.demoSessions.map((s) => {
                 const batch = s.importBatches[0] ?? null;
-                const clubCount = batch?.clubSummaries.length ?? 0;
-                const estTotal = batch?.clubSummaries
-                  .filter((cs) => cs.includeInReport)
-                  .reduce(
-                    (sum, cs) =>
-                      sum + (cs.estimatedPrice ? Number(cs.estimatedPrice) : 0),
-                    0,
-                  ) ?? null;
+                const { clubCount, fittingValue } = batch
+                  ? calculateClubCountAndValue(
+                      batch.clubSummaries.map((cs) => ({
+                        includeInReport: cs.includeInReport,
+                        estimatedPrice: cs.estimatedPrice ? cs.estimatedPrice.toString() : null,
+                      }))
+                    )
+                  : { clubCount: 0, fittingValue: { total: 0, hasAnyPrice: false, hasPartialPrice: false } };
 
                 const statusStyle =
                   SESSION_STATUS_STYLES[s.status] ??
-                  "bg-slate-100 text-slate-500";
+                  "bg-muted text-muted-foreground";
 
                 const demoDateStr = new Date(s.demoDate).toLocaleDateString(
                   "en-US",
@@ -207,11 +236,11 @@ export default async function ClientDetailPage({
                 const actionHref = batch
                   ? `/staff/imports/${batch.id}/map`
                   : `/staff/demo-sessions/${s.id}/upload`;
-                const actionLabel = batch ? "View Review →" : "Upload file →";
+                const actionLabel = s.status === "finalized" ? "View Fitting →" : "View Review →";
 
                 return (
-                  <tr key={s.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-600">
+                  <tr key={s.id} className="border-t border-border hover:bg-muted/50 transition-colors">
+                    <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
                       {demoDateStr}
                     </td>
                     <td className="px-4 py-3">
@@ -221,24 +250,36 @@ export default async function ClientDetailPage({
                         {s.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                    <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
                       {clubCount > 0 ? (
                         clubCount
                       ) : (
-                        <span className="text-slate-300">—</span>
+                        <span className="text-muted-foreground/50">—</span>
                       )}
                     </td>
-                    <td className="hidden px-4 py-3 text-right text-slate-600 tabular-nums sm:table-cell">
-                      {estTotal && estTotal > 0 ? (
-                        `$${estTotal.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    <td className="hidden px-4 py-3 text-right text-muted-foreground tabular-nums sm:table-cell">
+                      {fittingValue.hasAnyPrice ? (
+                        <>
+                          <span className={fittingValue.hasPartialPrice ? "opacity-70" : ""}>
+                            ${fittingValue.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                          {fittingValue.hasPartialPrice && (
+                            <span
+                              title="Some included clubs don't have price estimates"
+                              className="ml-1 text-muted-foreground/50 cursor-help"
+                            >
+                              *
+                            </span>
+                          )}
+                        </>
                       ) : (
-                        <span className="text-slate-300">—</span>
+                        <span className="text-muted-foreground/50">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={actionHref}
-                        className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                        className="text-xs font-semibold text-primary hover:text-primary-hover hover:underline whitespace-nowrap transition-colors"
                       >
                         {actionLabel}
                       </Link>
@@ -265,11 +306,11 @@ function ProfileField({
 }) {
   return (
     <div className="flex gap-2">
-      <dt className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <dt className="w-24 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </dt>
-      <dd className="text-slate-700">
-        {value ?? <span className="text-slate-300">—</span>}
+      <dd className="text-foreground">
+        {value ?? <span className="text-muted-foreground/50">—</span>}
       </dd>
     </div>
   );

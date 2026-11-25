@@ -101,17 +101,27 @@ test("visualization endpoint access rejects unauthorized and ineligible requests
     })?.status,
     409,
   );
+  // Generic imports remain rejected even if finalized
   assert.equal(
     getFittingVisualizationAccessError(true, {
-      parserMode: "trackman-result",
+      parserMode: "generic",
       demoSessionId: 7,
     })?.status,
     409,
   );
+  // Staged TrackMan imports are allowed for visualization
   assert.equal(
     getFittingVisualizationAccessError(true, {
       parserMode: "trackman-result",
       demoSessionId: null,
+    }),
+    null,
+  );
+  // Finalized TrackMan imports are now allowed for read-only visualization access
+  assert.equal(
+    getFittingVisualizationAccessError(true, {
+      parserMode: "trackman-result",
+      demoSessionId: 7,
     }),
     null,
   );

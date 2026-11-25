@@ -111,14 +111,14 @@ export default function CreateStaffPage() {
         <div>
           <Link
             href="/staff/dashboard"
-            className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-700 font-body"
+            className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-hover hover:underline font-body transition-colors"
           >
             ← Back to Dashboard
           </Link>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
             Create Staff User
           </h1>
-          <p className="mt-1 text-sm text-slate-500 font-body">
+          <p className="mt-1 text-sm text-muted-foreground font-body">
             Add a new staff member to the dashboard with a role and contact
             details.
           </p>
@@ -126,11 +126,11 @@ export default function CreateStaffPage() {
       </div>
 
       {/* ── Form container ──────────────────────────────────────────────────── */}
-      <div className="max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="max-w-2xl rounded-lg border border-border bg-card p-6 shadow-sm">
         {/* ── Error alert ──────────────────────────────────────────────────── */}
         {error && (
-          <div className="mb-6 rounded-md bg-red-50 p-4 border border-red-200">
-            <p className="text-sm font-medium text-red-900 font-body">{error}</p>
+          <div className="mb-6 rounded-md bg-red-50 dark:bg-red-950/30 p-4 border border-red-200 dark:border-red-900">
+            <p className="text-sm font-medium text-red-900 dark:text-red-200 font-body">{error}</p>
           </div>
         )}
 
@@ -140,7 +140,7 @@ export default function CreateStaffPage() {
           <div>
             <label
               htmlFor="name"
-              className="block text-sm font-medium text-slate-700 font-body"
+              className="block text-sm font-medium text-foreground font-body"
             >
               Name
               <span className="text-red-500 ml-1">*</span>
@@ -152,15 +152,15 @@ export default function CreateStaffPage() {
               value={formData.name}
               onChange={handleChange}
               placeholder="John Doe"
-              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground placeholder-muted-foreground/60 bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
                 fieldErrors.name
-                  ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                  : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                  ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                  : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
               }`}
               required
             />
             {fieldErrors.name && (
-              <p className="mt-1 text-sm text-red-600 font-body">
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">
                 {fieldErrors.name[0]}
               </p>
             )}
@@ -170,7 +170,7 @@ export default function CreateStaffPage() {
           <div>
             <label
               htmlFor="email"
-              className="block text-sm font-medium text-slate-700 font-body"
+              className="block text-sm font-medium text-foreground font-body"
             >
               Email Address
             </label>
@@ -181,18 +181,18 @@ export default function CreateStaffPage() {
               value={formData.email}
               onChange={handleChange}
               placeholder="john@example.com"
-              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground placeholder-muted-foreground/60 bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
                 fieldErrors.email
-                  ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                  : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                  ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                  : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
               }`}
             />
             {fieldErrors.email && (
-              <p className="mt-1 text-sm text-red-600 font-body">
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">
                 {fieldErrors.email[0]}
               </p>
             )}
-            <p className="mt-1 text-xs text-slate-500 font-body">
+            <p className="mt-1 text-xs text-muted-foreground font-body">
               Optional — used for dashboard login.
             </p>
           </div>
@@ -201,7 +201,7 @@ export default function CreateStaffPage() {
           <div>
             <label
               htmlFor="phone"
-              className="block text-sm font-medium text-slate-700 font-body"
+              className="block text-sm font-medium text-foreground font-body"
             >
               Phone Number
             </label>
@@ -213,18 +213,18 @@ export default function CreateStaffPage() {
               onChange={handlePhoneChange}
               placeholder="(555) 123-4567"
               inputMode="numeric"
-              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground placeholder-muted-foreground/60 bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
                 fieldErrors.phone
-                  ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                  : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                  ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                  : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
               }`}
             />
             {fieldErrors.phone && (
-              <p className="mt-1 text-sm text-red-600 font-body">
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">
                 {fieldErrors.phone[0]}
               </p>
             )}
-            <p className="mt-1 text-xs text-slate-500 font-body">
+            <p className="mt-1 text-xs text-muted-foreground font-body">
               Optional — must provide email or phone.
             </p>
           </div>
@@ -233,7 +233,7 @@ export default function CreateStaffPage() {
           <div>
             <label
               htmlFor="role"
-              className="block text-sm font-medium text-slate-700 font-body"
+              className="block text-sm font-medium text-foreground font-body"
             >
               Role
               <span className="text-red-500 ml-1">*</span>
@@ -243,10 +243,10 @@ export default function CreateStaffPage() {
               name="role"
               value={formData.role}
               onChange={handleChange}
-              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-body text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-background ${
                 fieldErrors.role
-                  ? "border-red-300 focus:border-red-500 focus:ring-red-500"
-                  : "border-slate-300 focus:border-emerald-500 focus:ring-emerald-500"
+                  ? "border-red-300 dark:border-red-900 focus:border-red-500 focus:ring-red-500 dark:focus:ring-red-500"
+                  : "border-border focus:border-primary focus:ring-primary/20 dark:focus:ring-primary/30"
               }`}
               required
             >
@@ -255,11 +255,11 @@ export default function CreateStaffPage() {
               <option value="support">Support</option>
             </select>
             {fieldErrors.role && (
-              <p className="mt-1 text-sm text-red-600 font-body">
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400 font-body">
                 {fieldErrors.role[0]}
               </p>
             )}
-            <p className="mt-1 text-xs text-slate-500 font-body">
+            <p className="mt-1 text-xs text-muted-foreground font-body">
               Controls dashboard permissions and available features.
             </p>
           </div>
@@ -269,13 +269,13 @@ export default function CreateStaffPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="rounded-md bg-emerald-600 px-4 py-2 font-medium text-white font-body hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="rounded-md bg-primary px-4 py-2 font-medium text-white font-body hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? "Creating..." : "Create Staff User"}
             </button>
             <Link
               href="/staff/dashboard"
-              className="rounded-md border border-slate-300 px-4 py-2 font-medium text-slate-700 font-body hover:bg-slate-50 transition-colors"
+              className="rounded-md border border-border px-4 py-2 font-medium text-muted-foreground font-body hover:bg-muted transition-colors"
             >
               Cancel
             </Link>

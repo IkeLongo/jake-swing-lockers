@@ -40,12 +40,12 @@ export const PURCHASE_REQUEST_STATUS_LABELS: Record<PurchaseRequestStatus, strin
 };
 
 export const PURCHASE_REQUEST_STATUS_STYLES: Record<PurchaseRequestStatus, string> = {
-  new_request: "bg-yellow-100 text-yellow-700",
-  reviewing: "bg-blue-100 text-blue-700",
-  quote_sent: "bg-violet-100 text-violet-700",
-  purchased: "bg-emerald-100 text-emerald-700",
-  fulfilled: "bg-teal-100 text-teal-700",
-  closed_lost: "bg-slate-100 text-slate-500",
+  new_request: "bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 dark:border-amber-800/30",
+  reviewing: "bg-blue-100 text-blue-900 dark:bg-blue-950/50 dark:text-blue-200 dark:border-blue-800/30",
+  quote_sent: "bg-purple-100 text-purple-900 dark:bg-purple-950/50 dark:text-purple-200 dark:border-purple-800/30",
+  purchased: "bg-green-100 text-green-900 dark:bg-green-950/50 dark:text-green-200 dark:border-green-800/30",
+  fulfilled: "bg-teal-100 text-teal-900 dark:bg-teal-950/50 dark:text-teal-200 dark:border-teal-800/30",
+  closed_lost: "bg-muted text-muted-foreground dark:bg-muted/50 dark:text-muted-foreground dark:border-muted/30",
 };
 
 export function toCanonicalPurchaseRequestStatus(

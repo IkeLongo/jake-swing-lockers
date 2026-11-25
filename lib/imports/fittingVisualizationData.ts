@@ -1,5 +1,5 @@
 import type { ShotReviewMeasurements } from "./golfShotMeasurements";
-import { isStagedTrackManBatch } from "./trackmanShotReview";
+import { isTrackManBatch } from "./trackmanShotReview";
 
 export interface FittingVisualizationClub {
   id: number;
@@ -38,11 +38,11 @@ export function getFittingVisualizationAccessError(
   if (!authorized) return { status: 401, error: "Unauthorized." };
   if (batch === undefined) return null;
   if (batch === null) return { status: 404, error: "Import batch not found." };
-  if (!isStagedTrackManBatch(batch)) {
+  if (!isTrackManBatch(batch)) {
     return {
       status: 409,
       error:
-        "Shot review is only available for unconfirmed TrackMan imports.",
+        "Shot review is only available for TrackMan imports.",
     };
   }
   return null;

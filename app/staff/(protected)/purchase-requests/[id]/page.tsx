@@ -51,20 +51,20 @@ function fmtPhone(phone: string | null | undefined): string {
 }
 
 const SESSION_STATUS_STYLES: Record<string, string> = {
-  draft: "bg-slate-100 text-slate-500",
-  uploaded: "bg-blue-100 text-blue-700",
-  reviewing: "bg-yellow-100 text-yellow-700",
-  finalized: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
+  draft: "bg-slate-100 text-slate-600 dark:bg-slate-900/30 dark:text-slate-300",
+  uploaded: "bg-blue-100 text-blue-900 dark:bg-blue-950/50 dark:text-blue-200",
+  reviewing: "bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200",
+  finalized: "bg-green-100 text-green-900 dark:bg-green-950/50 dark:text-green-200",
+  failed: "bg-red-100 text-red-900 dark:bg-red-950/50 dark:text-red-200",
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50">
-        <h2 className="font-subheading text-sm font-semibold uppercase tracking-wider text-slate-500">
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-border bg-muted/50">
+        <h2 className="font-subheading text-sm font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </h2>
       </div>
@@ -76,22 +76,22 @@ function SectionCard({ title, children }: { title: string; children: React.React
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-4">
-      <span className="font-body text-xs font-semibold uppercase tracking-wider text-slate-400 w-28 shrink-0">
+      <span className="font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground w-28 shrink-0">
         {label}
       </span>
-      <span className="font-body text-sm text-slate-800">{value ?? <span className="text-slate-400">—</span>}</span>
+      <span className="font-body text-sm text-foreground">{value ?? <span className="text-muted-foreground">—</span>}</span>
     </div>
   );
 }
 
 function MetricPill({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
-    <div className="flex flex-col items-center rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 min-w-[72px]">
-      <span className="font-body text-base font-bold text-slate-900 tabular-nums leading-none">
+    <div className="flex flex-col items-center rounded-lg bg-muted border border-border px-3 py-2 min-w-[72px]">
+      <span className="font-body text-base font-bold text-foreground tabular-nums leading-none">
         {value}
-        {unit && <span className="text-xs font-normal text-slate-400 ml-0.5">{unit}</span>}
+        {unit && <span className="text-xs font-normal text-muted-foreground ml-0.5">{unit}</span>}
       </span>
-      <span className="mt-1 font-body text-[10px] uppercase tracking-widest text-slate-400">
+      <span className="mt-1 font-body text-[10px] uppercase tracking-widest text-muted-foreground">
         {label}
       </span>
     </div>
@@ -110,13 +110,13 @@ function ClubCard({ item }: { item: PurchaseRequestDetailItem }) {
     item.totalDistance != null;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
-        <h3 className="font-heading text-sm font-semibold text-slate-900">
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3">
+        <h3 className="font-heading text-sm font-semibold text-foreground">
           {displayName}
         </h3>
         {item.estimatedPrice != null && (
-          <span className="shrink-0 font-body text-sm font-semibold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1">
+          <span className="shrink-0 font-body text-sm font-semibold text-green-900 bg-green-100 dark:bg-green-950/50 dark:text-green-200 rounded-lg px-3 py-1">
             {fmtPrice(item.estimatedPrice)}
           </span>
         )}
@@ -136,7 +136,7 @@ function ClubCard({ item }: { item: PurchaseRequestDetailItem }) {
             <MetricPill label="Total" value={fmtNum(item.totalDistance, 0)} unit="yds" />
           </div>
         ) : (
-          <p className="font-body text-sm text-slate-400">No metrics recorded.</p>
+          <p className="font-body text-sm text-muted-foreground">No metrics recorded.</p>
         )}
       </div>
     </div>
@@ -170,7 +170,7 @@ export default async function PurchaseRequestDetailPage({
       <div className="mb-6">
         <Link
           href="/staff/purchase-requests"
-          className="font-body text-sm text-emerald-600 hover:text-emerald-800 underline underline-offset-2"
+          className="font-body text-sm text-primary hover:text-primary-hover underline underline-offset-2"
         >
           ← Back to Purchase Requests
         </Link>
@@ -179,10 +179,10 @@ export default async function PurchaseRequestDetailPage({
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-heading">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground font-heading">
             Purchase Request
           </h1>
-          <p className="mt-1 font-body text-sm text-slate-500">
+          <p className="mt-1 font-body text-sm text-muted-foreground">
             Submitted {fmtDate(request.createdAt)}
           </p>
         </div>
@@ -191,7 +191,7 @@ export default async function PurchaseRequestDetailPage({
             className={`rounded-lg px-3 py-1 text-xs font-semibold font-body ${
               canonicalStatus
                 ? PURCHASE_REQUEST_STATUS_STYLES[canonicalStatus]
-                : "bg-slate-100 text-slate-500"
+                : "bg-muted text-muted-foreground"
             }`}
           >
             {getPurchaseRequestStatusLabel(request.status)}
@@ -209,8 +209,8 @@ export default async function PurchaseRequestDetailPage({
           </div>
         </SectionCard>
 
-        {/* ── Demo Session ──────────────────────────────────────────────────── */}
-        <SectionCard title="Demo Session">
+        {/* ── Fitting Session ──────────────────────────────────────────────── */}
+        <SectionCard title="Fitting Session">
           <div className="flex flex-col gap-2.5">
             <DetailRow label="Date" value={fmtDate(demoSession.demoDate)} />
             <DetailRow
@@ -218,7 +218,7 @@ export default async function PurchaseRequestDetailPage({
               value={
                 <span
                   className={`inline-block rounded-md px-2 py-0.5 text-xs font-semibold font-body ${
-                    SESSION_STATUS_STYLES[demoSession.status] ?? "bg-slate-100 text-slate-500"
+                    SESSION_STATUS_STYLES[demoSession.status] ?? "bg-muted text-muted-foreground"
                   }`}
                 >
                   {demoSession.status}
@@ -226,13 +226,13 @@ export default async function PurchaseRequestDetailPage({
               }
             />
             <DetailRow
-              label="Session"
+              label="Fitting"
               value={
                 <Link
                   href={`/staff/imports`}
-                  className="font-body text-sm text-emerald-700 hover:text-emerald-900 underline underline-offset-2"
+                  className="font-body text-sm text-primary hover:text-primary-hover underline underline-offset-2"
                 >
-                  View in Demo Sessions →
+                  View Fitting →
                 </Link>
               }
             />
@@ -242,15 +242,15 @@ export default async function PurchaseRequestDetailPage({
         {/* ── Requested Clubs ───────────────────────────────────────────────── */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <span className="h-3.5 w-0.5 rounded-full bg-emerald-500 shrink-0" />
-            <h2 className="font-subheading text-base font-semibold text-slate-800">
+            <span className="h-3.5 w-0.5 rounded-full bg-primary shrink-0" />
+            <h2 className="font-subheading text-base font-semibold text-foreground">
               Requested Clubs
             </h2>
           </div>
 
           {items.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white px-6 py-8 text-center shadow-sm">
-              <p className="font-body text-sm text-slate-400">No clubs recorded.</p>
+            <div className="rounded-xl border border-border bg-card px-6 py-8 text-center shadow-sm">
+              <p className="font-body text-sm text-muted-foreground">No clubs recorded.</p>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
@@ -263,11 +263,11 @@ export default async function PurchaseRequestDetailPage({
 
         {/* ── Pricing summary ───────────────────────────────────────────────── */}
         {estimatedSubtotal != null && (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 flex items-center justify-between shadow-sm">
-            <p className="font-body text-sm font-semibold text-emerald-800">
+          <div className="rounded-xl border border-green-200 bg-green-100 dark:border-green-900/30 dark:bg-green-950/20 px-5 py-4 flex items-center justify-between shadow-sm">
+            <p className="font-body text-sm font-semibold text-green-900 dark:text-green-200">
               Estimated Subtotal
             </p>
-            <p className="font-heading text-xl font-bold text-emerald-900 tabular-nums">
+            <p className="font-heading text-xl font-bold text-green-900 dark:text-green-200 tabular-nums">
               {fmtPrice(estimatedSubtotal)}
             </p>
           </div>
@@ -276,17 +276,17 @@ export default async function PurchaseRequestDetailPage({
         {/* ── Customer Notes ────────────────────────────────────────────────── */}
         <SectionCard title="Customer Notes">
           {request.notes ? (
-            <p className="font-body text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+            <p className="font-body text-sm text-foreground leading-relaxed whitespace-pre-wrap">
               {request.notes}
             </p>
           ) : (
-            <p className="font-body text-sm text-slate-400">No notes provided.</p>
+            <p className="font-body text-sm text-muted-foreground">No notes provided.</p>
           )}
         </SectionCard>
 
         {/* ── Edit request ──────────────────────────────────────────────────── */}
         <SectionCard title="Edit Request">
-          <p className="font-body text-xs text-slate-500 mb-3">
+          <p className="font-body text-xs text-muted-foreground mb-3">
             Update requested clubs, notes, and status from this detail view.
           </p>
           <PurchaseRequestEditForm

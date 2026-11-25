@@ -13,6 +13,8 @@ interface Props {
   initial: SessionEditData;
   /** ISO date string — the batch upload timestamp */
   uploadedAt?: string;
+  /** If true, removes the bottom margin for use in grid layouts */
+  noMargin?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -22,6 +24,7 @@ export default function SessionDetailsCard({
   sessionStatus,
   initial,
   uploadedAt,
+  noMargin = false,
 }: Props) {
   const [details, setDetails] = useState<SessionEditData>(initial);
   const [editOpen, setEditOpen] = useState(false);
@@ -48,7 +51,7 @@ export default function SessionDetailsCard({
 
   return (
     <>
-      <div className="mb-4 flex items-start justify-between gap-4 rounded-xl border border-border bg-card px-5 py-3.5 shadow-xs">
+      <div className={`flex items-start justify-between gap-4 rounded-xl border border-border bg-card px-5 py-3.5 shadow-xs ${noMargin ? "" : "mb-4"}`}>
         <div>
           <p className="text-base font-bold text-foreground font-heading">
             {clientName}

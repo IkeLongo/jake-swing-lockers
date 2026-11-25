@@ -164,8 +164,8 @@ export function PurchaseRequestEditForm({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       {isLocked && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
-          <p className="font-body text-xs text-amber-800">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 dark:border-amber-900/30 dark:bg-amber-950/20">
+          <p className="font-body text-xs text-amber-900 dark:text-amber-200">
             Club and request note edits are locked in final statuses. You can still update the
             request status if needed.
           </p>
@@ -173,7 +173,7 @@ export function PurchaseRequestEditForm({
       )}
 
       <div>
-        <label className="block font-body text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+        <label className="block font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
           Status
         </label>
         <div className="flex items-center gap-2 max-w-3xs">
@@ -183,7 +183,7 @@ export function PurchaseRequestEditForm({
             onChange={(e) => {
               handleStatusChange(e.target.value as PurchaseRequestStatus);
             }}
-            className={`rounded-lg px-3 py-2 text-sm font-semibold font-body border border-transparent cursor-pointer focus:ring-2 focus:ring-emerald-400 focus:outline-none disabled:opacity-50 transition-colors flex-1 ${
+            className={`rounded-lg px-3 py-2 text-sm font-semibold font-body border border-transparent cursor-pointer focus:ring-2 focus:ring-primary/30 focus:outline-none disabled:opacity-50 transition-colors flex-1 dark:focus:ring-primary/40 ${
               PURCHASE_REQUEST_STATUS_STYLES[status]
             }`}
           >
@@ -194,18 +194,18 @@ export function PurchaseRequestEditForm({
             ))}
           </select>
           {statusUpdating && (
-            <span className="font-body text-xs text-slate-500">Updating…</span>
+            <span className="font-body text-xs text-muted-foreground">Updating…</span>
           )}
         </div>
-        {statusError && <p className="font-body text-xs text-red-600 mt-1">{statusError}</p>}
+        {statusError && <p className="font-body text-xs text-red-600 dark:text-red-400 mt-1">{statusError}</p>}
       </div>
 
       <div>
-        <p className="block font-body text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+        <p className="block font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
           Requested Clubs
         </p>
         {availableClubs.length === 0 ? (
-          <p className="font-body text-sm text-slate-400">No clubs available for this session.</p>
+          <p className="font-body text-sm text-muted-foreground">No clubs available for this session.</p>
         ) : (
           <div className="flex flex-col gap-2">
             {availableClubs.map((club) => (
@@ -213,22 +213,22 @@ export function PurchaseRequestEditForm({
                 key={club.id}
                 className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
                   selectedClubIds.has(club.id)
-                    ? "border-emerald-300 bg-emerald-50"
-                    : "border-slate-200 bg-white"
-                } ${isLocked || saving ? "opacity-70 cursor-not-allowed" : "cursor-pointer hover:bg-slate-50"}`}
+                    ? "border-primary/30 bg-primary/5 dark:border-primary/40 dark:bg-primary/10"
+                    : "border-border bg-card dark:border-border"
+                } ${isLocked || saving ? "opacity-70 cursor-not-allowed" : "cursor-pointer hover:bg-muted/30"}`}
               >
                 <input
                   type="checkbox"
                   checked={selectedClubIds.has(club.id)}
                   onChange={() => toggleClub(club.id)}
                   disabled={isLocked || saving}
-                  className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary/50"
                 />
-                <span className="flex-1 font-body text-sm text-slate-800 leading-snug">
+                <span className="flex-1 font-body text-sm text-foreground leading-snug">
                   {clubLabel(club)}
                 </span>
                 {club.estimatedPrice != null && (
-                  <span className="font-body text-sm font-semibold text-emerald-700 shrink-0">
+                  <span className="font-body text-sm font-semibold text-green-900 dark:text-green-200 shrink-0">
                     {fmtPrice(club.estimatedPrice)}
                   </span>
                 )}
@@ -239,7 +239,7 @@ export function PurchaseRequestEditForm({
       </div>
 
       <div>
-        <label className="block font-body text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+        <label className="block font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
           Request Notes
         </label>
         <textarea
@@ -251,17 +251,17 @@ export function PurchaseRequestEditForm({
           disabled={isLocked || saving}
           rows={4}
           placeholder="Add or revise request notes"
-          className="w-full rounded-xl border border-slate-200 px-4 py-2.5 font-body text-sm text-slate-800 placeholder-slate-400 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:outline-none resize-none disabled:opacity-50"
+          className="w-full rounded-xl border border-border bg-card px-4 py-2.5 font-body text-sm text-foreground placeholder-muted-foreground/50 focus:border-primary focus:ring-1 focus:ring-primary/30 focus:outline-none resize-none disabled:opacity-50 dark:focus:ring-primary/40"
         />
       </div>
 
-      {error && <p className="font-body text-xs text-red-600">{error}</p>}
+      {error && <p className="font-body text-xs text-red-600 dark:text-red-400">{error}</p>}
       {warnings.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
-          <p className="font-body text-xs font-semibold text-amber-900 mb-1">Saved with warnings</p>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 dark:border-amber-900/30 dark:bg-amber-950/20">
+          <p className="font-body text-xs font-semibold text-amber-900 dark:text-amber-200 mb-1">Saved with warnings</p>
           <ul className="list-disc pl-5 space-y-1">
             {warnings.map((warning, idx) => (
-              <li key={idx} className="font-body text-xs text-amber-800">
+              <li key={idx} className="font-body text-xs text-amber-800 dark:text-amber-200">
                 {warning}
               </li>
             ))}
@@ -279,11 +279,11 @@ export function PurchaseRequestEditForm({
             (isLocked && (clubsChanged || notesChanged)) ||
             (clubsChanged && selectedClubIds.size === 0)
           }
-          className="rounded-lg bg-emerald-600 px-4 py-2 font-body text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="rounded-lg bg-primary px-4 py-2 font-body text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {saving ? "Saving…" : "Save Changes"}
         </button>
-        {saved && !saving && <span className="font-body text-xs text-emerald-600">Saved</span>}
+        {saved && !saving && <span className="font-body text-xs text-primary">Saved</span>}
       </div>
     </form>
   );
