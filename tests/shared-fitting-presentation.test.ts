@@ -1,0 +1,239 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
+import { test } from "node:test";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NextRequest } from "next/server";
+import { NextFetchEvent } from "next/dist/server/web/spec-extension/fetch-event";
+import { RequestCookiesAdapter } from "next/dist/server/web/spec-extension/adapters/request-cookies";
+import { Prisma } from "../app/generated/prisma/client";
+import { signStaffSessionToken } from "../lib/auth/session";
+import { signSwingLockerSessionToken } from "../lib/auth/swing-locker-session";
+import { flattenPlan, planComparisonGroups } from "../lib/imports/finalizationPlan";
+
+const nextHeaders: typeof import("next/headers") =
+  createRequire(resolve("tests", "shared-fitting-presentation.test.ts"))("next/headers");
+
+test("customer and staff share finalized fitting data without preview mutations", async (t) => {
+  const originalPrisma = Object.getOwnPropertyDescriptor(globalThis, "prisma");
+  const originalSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "test-only-session-secret-at-least-32-characters";
+  t.after(() => {
+    if (originalPrisma) Object.defineProperty(globalThis, "prisma", originalPrisma);
+    else Reflect.deleteProperty(globalThis, "prisma");
+    if (originalSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = originalSecret;
+  });
+
+  const decimal = (value: string) => new Prisma.Decimal(value);
+  const club = (id: number, clubRole: string, clubType: string, pairIndex: number) => ({
+    id, clubRole, clubType, pairIndex, currentClubTestId: null as number | null,
+    brand: null as string | null, model: null as string | null,
+    shaft: null as string | null, loft: null as string | null,
+    estimatedPrice: null as Prisma.Decimal | null,
+    metrics: {
+      clubSpeed: decimal("90"), ballSpeed: decimal("130"),
+      smashFactor: decimal("1.44"), spinRate: 2500,
+      carryDistance: decimal("210"), totalDistance: decimal("230"),
+      launchAngle: decimal("12"), dispersion: decimal("8"),
+    },
+  });
+  const current = { ...club(10, "current", "Current Driver", 0), brand: "Current Brand" };
+  const demo = {
+    ...club(11, "demo", "Included Driver", 0),
+    currentClubTestId: current.id,
+    shaft: "Regular",
+    estimatedPrice: decimal("299.75"),
+  };
+  const otherCurrent = club(12, "current", "Unrelated Current", 1);
+  const finalizedPlan = flattenPlan(planComparisonGroups([
+    { id: 10, clubName: "Current Driver", tags: [], includeInReport: false, currentSummaryId: null },
+    { id: 11, clubName: "Included Driver", tags: [], includeInReport: true, currentSummaryId: 10 },
+    { id: 13, clubName: "Excluded Driver", tags: [], includeInReport: false, currentSummaryId: 10 },
+  ]));
+  assert.deepEqual(finalizedPlan.map((row) => row.summary.id), [10, 11]);
+  const finalizedClubs = new Map<number, ReturnType<typeof club>>([[10, current], [11, demo]]);
+  const session = {
+    id: 31, clientId: 7, status: "finalized",
+    demoDate: new Date("2026-04-15T00:00:00.000Z"),
+    client: { firstName: "Alex", lastName: "Golfer" },
+    notes: "Existing session note",
+    clubTests: [...finalizedPlan.map((row) => finalizedClubs.get(row.summary.id)!), otherCurrent],
+  };
+  const otherSession = { ...session, id: 32, clubTests: [demo] };
+  const draft = { ...session, id: 33, status: "draft" };
+  const otherCustomer = { ...session, id: 34, clientId: 8 };
+  const sessions = [session, otherSession, draft, otherCustomer];
+  let hasRequest = false;
+  let cookieReads = 0;
+  let cookie = "";
+  let networkCalls = 0;
+  const queries: Array<{ id: number; clientId?: number; status?: string }> = [];
+  Object.defineProperty(globalThis, "prisma", {
+    configurable: true,
+    writable: true,
+    value: {
+      demoSession: {
+        async findFirst(args: {
+          where: { id: number; clientId?: number; status?: string };
+          select: { clientId?: boolean; clubTests?: unknown };
+        }) {
+          queries.push(args.where);
+          const found = sessions.find((row) =>
+            row.id === args.where.id &&
+            (args.where.clientId === undefined || row.clientId === args.where.clientId) &&
+            (args.where.status === undefined || row.status === args.where.status),
+          );
+          if (!found) return null;
+          if (args.select.clientId) return { clientId: found.clientId };
+          assert.ok(args.select.clubTests);
+          return found;
+        },
+        async findMany(args: { where: { clientId: number; status: string } }) {
+          return sessions
+            .filter((row) => row.clientId === args.where.clientId && row.status === args.where.status)
+            .map((row) => ({
+              id: row.id, demoDate: row.demoDate, status: row.status,
+              clubTests: row.clubTests.filter((item) => item.clubRole === "demo"),
+            }));
+        },
+      },
+      golfClient: {
+        async findUnique() { return { firstName: "Alex", lastName: "Golfer", email: null }; },
+      },
+      purchaseRequest: {
+        async findFirst(args: { where: { golfClientId: number; demoSessionId: number } }) {
+          assert.equal(args.where.golfClientId, 7);
+          return hasRequest && args.where.demoSessionId === 31
+            ? { id: 50, status: "new_request", createdAt: new Date() }
+            : null;
+        },
+      },
+    },
+  });
+  t.mock.method(nextHeaders, "cookies", async () => {
+    cookieReads++;
+    const request = new NextRequest("http://localhost", { headers: { cookie } });
+    return RequestCookiesAdapter.seal(request.cookies);
+  });
+  t.mock.method(globalThis, "fetch", async () => {
+    networkCalls++;
+    throw new Error("Unexpected external request");
+  });
+
+  const { getCustomerSession } = await import("../lib/queries/customer-sessions");
+  const { default: CustomerPage } = await import("../app/swing-locker/dashboard/sessions/[id]/page");
+  const { default: Dashboard } = await import("../app/swing-locker/dashboard/page");
+  const { default: PreviewPage } = await import("../app/staff/(protected)/demo-sessions/[id]/preview-locker/page");
+  const { FittingPresentation } = await import("../app/swing-locker/_components/FittingPresentation");
+  const { PurchaseRequestTrigger } = await import("../app/swing-locker/dashboard/sessions/[id]/_components/PurchaseRequestTrigger");
+  const { proxy } = await import("../proxy");
+
+  const fitting = await getCustomerSession(7, 31);
+  assert.ok(fitting);
+  assert.equal(fitting.customerName, "Alex Golfer");
+  assert.equal(fitting.demoDate, "2026-04-15T00:00:00.000Z");
+  assert.equal(fitting.estimatedTotal, 299.75);
+  assert.equal(fitting.clubs.length, 1);
+  assert.equal(fitting.clubs[0]?.shaft, "Regular");
+  assert.equal(fitting.clubs[0]?.launchAngle, 12);
+  assert.equal(fitting.clubs[0]?.comparisonClub?.clubType, "Current Driver");
+  assert.doesNotMatch(JSON.stringify(fitting), /Unrelated Current|Excluded|clientId|lockerToken|ghl|rawData/i);
+  assert.deepEqual(JSON.parse(JSON.stringify(fitting)), fitting);
+  assert.equal(await getCustomerSession(8, 31), null);
+  assert.equal(await getCustomerSession(7, 33), null);
+  assert.ok(queries.some((where) => where.id === 31 && where.clientId === 7 && where.status === "finalized"));
+
+  const staffToken = signStaffSessionToken({ staffUserId: 1, expiresAt: Date.now() + 60_000 });
+  async function runProxy(request: NextRequest) {
+    const response = await proxy(request, new NextFetchEvent({
+      request, page: "/staff/demo-sessions/[id]/preview-locker", context: undefined,
+    }));
+    assert.ok(response instanceof Response);
+    return response;
+  }
+  const unauthenticated = await runProxy(new NextRequest("http://localhost/staff/demo-sessions/31/preview-locker"));
+  assert.equal(unauthenticated.status, 307);
+  assert.match(unauthenticated.headers.get("location") ?? "", /\/staff\/login/);
+  const staffRequest = new NextRequest("http://localhost/staff/demo-sessions/31/preview-locker", {
+    headers: { cookie: `staff_session=${staffToken}` },
+  });
+  assert.equal((await runProxy(staffRequest)).headers.get("x-middleware-next"), "1");
+
+  const previewProps = {
+    params: Promise.resolve({ id: "31" }),
+    searchParams: Promise.resolve({ from: "/staff/imports/56/map" }),
+  };
+  const beforePreview = cookieReads;
+  const preview = renderToStaticMarkup(await PreviewPage(previewProps));
+  assert.equal(cookieReads, beforePreview);
+  assert.match(preview, /href="\/staff\/imports\/56\/map"/);
+  assert.match(preview, /Staff Preview/);
+  assert.match(preview, /Included Driver/);
+  assert.match(preview, /Current Brand Current Driver/);
+  assert.doesNotMatch(preview, /Unrelated Current|Excluded|mailto:|<form/);
+  assert.match(preview, /<button[^>]*disabled[^>]*>Request Purchase<\/button>/);
+
+  const customerToken = signSwingLockerSessionToken({ golfClientId: 7, expiresAt: Date.now() + 60_000 });
+  cookie = `staff_session=${staffToken}; swing_locker_session=${customerToken}`;
+  assert.equal((await runProxy(new NextRequest(staffRequest.url, {
+    headers: { cookie },
+  }))).headers.get("x-middleware-next"), "1");
+  const previewWithCustomerCookie = renderToStaticMarkup(await PreviewPage(previewProps));
+  assert.equal(cookieReads, beforePreview);
+  assert.match(previewWithCustomerCookie, /<button[^>]*disabled[^>]*>Request Purchase<\/button>/);
+
+  const fallbackPreview = renderToStaticMarkup(await PreviewPage({
+    params: Promise.resolve({ id: "31" }),
+    searchParams: Promise.resolve({ from: "https://example.test/" }),
+  }));
+  assert.match(fallbackPreview, /href="\/staff\/imports"/);
+  const draftPreview = renderToStaticMarkup(await PreviewPage({
+    params: Promise.resolve({ id: "33" }),
+    searchParams: Promise.resolve({}),
+  }));
+  assert.match(draftPreview, /not yet finalized/);
+
+  const customerPage = await CustomerPage({ params: Promise.resolve({ id: "31" }) });
+  const fittingElement = customerPage.props.children.props.children[1];
+  assert.equal(fittingElement.type, FittingPresentation);
+  assert.equal(fittingElement.props.purchaseAction.type, PurchaseRequestTrigger);
+  assert.deepEqual(fittingElement.props.purchaseAction.props, {
+    sessionId: 31,
+    clubs: [{ id: 11, clubType: "Included Driver", brand: null, model: null, estimatedPrice: 299.75 }],
+  });
+  const customer = renderToStaticMarkup(customerPage);
+  assert.match(customer, /href="\/swing-locker\/dashboard"/);
+  assert.match(customer, /Included Driver/);
+  assert.match(customer, /Current Brand Current Driver/);
+  assert.match(customer, /Estimated Total/);
+  assert.match(customer, /<button(?![^>]*disabled)[^>]*>Request Purchase<\/button>/);
+  assert.doesNotMatch(customer, /Staff Preview|Unrelated Current|Excluded/);
+  await assert.rejects(
+    CustomerPage({ params: Promise.resolve({ id: "33" }) }),
+    /NEXT_HTTP_ERROR_FALLBACK/,
+  );
+  await assert.rejects(
+    CustomerPage({ params: Promise.resolve({ id: "34" }) }),
+    /NEXT_HTTP_ERROR_FALLBACK/,
+  );
+
+  const dashboard = renderToStaticMarkup(await Dashboard());
+  assert.match(dashboard, /href="\/swing-locker\/dashboard\/sessions\/31"/);
+  assert.match(dashboard, /href="\/swing-locker\/dashboard\/sessions\/32"/);
+  assert.doesNotMatch(dashboard, /sessions\/33|sessions\/34/);
+
+  hasRequest = true;
+  const submittedCustomer = renderToStaticMarkup(await CustomerPage({ params: Promise.resolve({ id: "31" }) }));
+  const submittedPreview = renderToStaticMarkup(await PreviewPage(previewProps));
+  assert.match(submittedCustomer, /Purchase request submitted/);
+  assert.match(submittedPreview, /Purchase request submitted/);
+  assert.doesNotMatch(submittedCustomer, /Request Purchase<\/button>/);
+  assert.doesNotMatch(submittedPreview, /Request Purchase<\/button>/);
+  cookie = "";
+  await assert.rejects(
+    CustomerPage({ params: Promise.resolve({ id: "31" }) }),
+    /NEXT_REDIRECT/,
+  );
+  assert.equal(networkCalls, 0);
+});

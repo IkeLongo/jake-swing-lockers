@@ -1,4 +1,6 @@
 import { db } from "@/lib/db";
+import { groupFinalizedClubs } from "@/lib/comparison/groupFinalizedClubs";
+import { sumPrices } from "@/lib/fitting-value";
 
 // ── Return shapes ─────────────────────────────────────────────────────────────
 
@@ -16,41 +18,34 @@ export interface CustomerClub {
   clubType: string | null;
   brand: string | null;
   model: string | null;
+  shaft: string | null;
+  loft: string | null;
   clubSpeed: number | null;
   ballSpeed: number | null;
+  smashFactor: number | null;
   spinRate: number | null;
   carryDistance: number | null;
   totalDistance: number | null;
+  launchAngle: number | null;
+  dispersion: number | null;
   estimatedPrice: number | null;
-  clubRole: string;
-  pairIndex: number;
-  currentClubTestId: number | null;
+}
+
+export interface CustomerDemoClub extends CustomerClub {
+  comparisonClub: CustomerClub | null;
 }
 
 export interface CustomerSessionDetail {
   id: number;
-  demoDate: Date;
+  demoDate: string;
+  customerName: string;
   notes: string | null;
-  clubs: CustomerClub[];
-  /** Sum of estimatedPrice across clubs. Null if no prices are set. */
+  clubs: CustomerDemoClub[];
+  /** Sum of estimatedPrice across demo clubs. Null if no prices are set. */
   estimatedTotal: number | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function sumPrices(
-  prices: ({ valueOf(): string } | null | undefined)[]
-): number | null {
-  let total = 0;
-  let hasAny = false;
-  for (const p of prices) {
-    if (p != null) {
-      total += Number(p);
-      hasAny = true;
-    }
-  }
-  return hasAny ? total : null;
-}
 
 function toNum(v: { valueOf(): string } | null | undefined): number | null {
   return v != null ? Number(v) : null;
@@ -88,7 +83,9 @@ export async function getCustomerSessions(
     demoDate: row.demoDate,
     status: row.status,
     clubsTestedCount: row.clubTests.length,
-    estimatedTotal: sumPrices(row.clubTests.map((c) => c.estimatedPrice)),
+    estimatedTotal: row.clubTests.some((c) => c.estimatedPrice !== null)
+      ? sumPrices(row.clubTests.map((c) => c.estimatedPrice))
+      : null,
   }));
 }
 
@@ -116,6 +113,7 @@ export async function getCustomerSession(
       id: true,
       demoDate: true,
       notes: true,
+      client: { select: { firstName: true, lastName: true } },
       clubTests: {
         orderBy: { sortOrder: "asc" },
         select: {
@@ -123,6 +121,8 @@ export async function getCustomerSession(
           clubType: true,
           brand: true,
           model: true,
+          shaft: true,
+          loft: true,
           estimatedPrice: true,
           clubRole: true,
           pairIndex: true,
@@ -131,9 +131,12 @@ export async function getCustomerSession(
             select: {
               clubSpeed: true,
               ballSpeed: true,
+              smashFactor: true,
               spinRate: true,
               carryDistance: true,
               totalDistance: true,
+              launchAngle: true,
+              dispersion: true,
             },
           },
         },
@@ -143,31 +146,48 @@ export async function getCustomerSession(
 
   if (!row) return null;
 
-  const clubs: CustomerClub[] = row.clubTests.map((ct) => ({
+  const toCustomerClub = (ct: (typeof row.clubTests)[number]): CustomerClub => ({
     id: ct.id,
     clubType: ct.clubType,
     brand: ct.brand,
     model: ct.model,
+    shaft: ct.shaft,
+    loft: ct.loft,
     estimatedPrice: toNum(ct.estimatedPrice),
     clubSpeed: toNum(ct.metrics?.clubSpeed),
     ballSpeed: toNum(ct.metrics?.ballSpeed),
+    smashFactor: toNum(ct.metrics?.smashFactor),
     spinRate: ct.metrics?.spinRate ?? null,
     carryDistance: toNum(ct.metrics?.carryDistance),
     totalDistance: toNum(ct.metrics?.totalDistance),
-    clubRole: ct.clubRole,
-    pairIndex: ct.pairIndex,
-    currentClubTestId: ct.currentClubTestId,
-  }));
+    launchAngle: toNum(ct.metrics?.launchAngle),
+    dispersion: toNum(ct.metrics?.dispersion),
+  });
+  const currentByTestId = new Map(
+    groupFinalizedClubs(row.clubTests).flatMap((group) =>
+      group.current
+        ? group.tests.map((test) => [test.id, group.current!] as const)
+        : [],
+    ),
+  );
+  const demoClubs = row.clubTests.filter((club) => club.clubRole === "demo");
+  const clubs: CustomerDemoClub[] = demoClubs.map((club) => {
+    const current = currentByTestId.get(club.id);
+    return {
+      ...toCustomerClub(club),
+      comparisonClub: current ? toCustomerClub(current) : null,
+    };
+  });
 
   return {
     id: row.id,
-    demoDate: row.demoDate,
+    demoDate: row.demoDate.toISOString(),
+    customerName:
+      [row.client.firstName, row.client.lastName].filter(Boolean).join(" ") || "Golfer",
     notes: row.notes,
     clubs,
-    estimatedTotal: sumPrices(
-      row.clubTests
-        .filter((c) => c.clubRole === "demo")
-        .map((c) => c.estimatedPrice)
-    ),
+    estimatedTotal: demoClubs.some((club) => club.estimatedPrice !== null)
+      ? sumPrices(demoClubs.map((club) => club.estimatedPrice))
+      : null,
   };
 }

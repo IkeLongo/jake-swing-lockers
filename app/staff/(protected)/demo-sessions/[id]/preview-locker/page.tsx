@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getLockerBySessionId } from "@/lib/queries/locker";
-import { LockerView } from "@/app/swing-locker/_components/LockerView";
+import { IconArrowLeft } from "@tabler/icons-react";
+import { db } from "@/lib/db";
+import { getCustomerSession } from "@/lib/queries/customer-sessions";
+import { getExistingPurchaseRequest } from "@/lib/queries/purchase-requests";
+import {
+  FittingPresentation,
+  PurchaseRequestSubmitted,
+} from "@/app/swing-locker/_components/FittingPresentation";
 
 export const metadata: Metadata = {
   title: "Locker Preview — Staff",
@@ -26,8 +33,11 @@ export default async function PreviewLockerPage({
   const sessionId = parseInt(id, 10);
   if (isNaN(sessionId)) notFound();
 
-  const lockerData = await getLockerBySessionId(sessionId);
-  if (!lockerData) {
+  const owner = await db.demoSession.findFirst({
+    where: { id: sessionId, status: "finalized" },
+    select: { clientId: true },
+  });
+  if (!owner) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-8">
         <p className="text-slate-500 font-body text-sm">
@@ -37,7 +47,46 @@ export default async function PreviewLockerPage({
     );
   }
 
+  const [session, existingRequest] = await Promise.all([
+    getCustomerSession(owner.clientId, sessionId),
+    getExistingPurchaseRequest(owner.clientId, sessionId),
+  ]);
+  if (!session) notFound();
+
   return (
-    <LockerView data={lockerData} previewMode backHref={safeBackHref(from)} />
+    <div className="min-h-screen bg-slate-50 px-4 py-10">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <Link
+            href={safeBackHref(from)}
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-900 font-body transition-colors"
+          >
+            <IconArrowLeft aria-hidden="true" className="h-4 w-4" />
+            Back
+          </Link>
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 font-body">
+            Staff Preview
+          </span>
+        </div>
+        <FittingPresentation
+          session={session}
+          purchaseAction={
+            existingRequest ? (
+              <PurchaseRequestSubmitted />
+            ) : (
+              <div className="mt-6">
+                <button
+                  type="button"
+                  disabled
+                  className="w-full cursor-not-allowed rounded-xl bg-emerald-600 px-5 py-3.5 font-body text-sm font-semibold text-white shadow-sm opacity-50"
+                >
+                  Request Purchase
+                </button>
+              </div>
+            )
+          }
+        />
+      </div>
+    </div>
   );
 }
