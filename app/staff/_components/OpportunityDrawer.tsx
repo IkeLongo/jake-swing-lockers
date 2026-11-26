@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Drawer from "@/app/_components/ui/Drawer";
+import { formatCurrency } from "@/lib/format-currency";
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -18,6 +19,9 @@ interface OpportunityData {
     email: string | null;
     phone: string | null;
   };
+  estimatedOpportunityValue: number;
+  estimatedOpportunityHasMissingPrices: boolean;
+  purchaseRequestValue: number;
   ghl: {
     stage: string | null;
     monetaryValue: number | null;
@@ -31,6 +35,14 @@ interface OpportunityData {
     clientGoal: string | null;
     notes: string | null;
     clubCount: number;
+    fittingValue: {
+      includedClubCount: number;
+      totalClubCount: number;
+      total: number;
+      hasAnyPrice: boolean;
+      hasPartialPrice: boolean;
+      hasMissingPrices: boolean;
+    };
     importBatchId: number | null;
     importBatchStatus: string | null;
     purchaseRequestIds: number[];
@@ -74,14 +86,6 @@ function formatDate(date: Date | string): string {
     year: "numeric",
     timeZone: "UTC",
   });
-}
-
-function formatPrice(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 function getStatusBadgeClasses(status: string): string {
@@ -231,7 +235,7 @@ export default function OpportunityDrawer({
           )}
 
           {/* ── Stage & Value ─────────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div className="rounded-lg bg-muted p-3">
               <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1 font-heading">
                 Stage
@@ -242,14 +246,22 @@ export default function OpportunityDrawer({
                   : "Unknown"}
               </div>
             </div>
-            <div className="rounded-lg bg-muted p-3">
-              <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1 font-heading">
-                Value
+            <div className="grid auto-rows-fr grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col rounded-lg bg-muted p-3">
+                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1 font-heading">
+                  Estimated Value
+                </div>
+                <div className="mt-auto text-sm font-bold text-accent font-body">
+                  {formatCurrency(data.estimatedOpportunityValue)}
+                </div>
               </div>
-              <div className="text-sm font-bold text-accent font-body">
-                {data.ghl.monetaryValue !== null && data.ghl.monetaryValue !== undefined
-                  ? formatPrice(data.ghl.monetaryValue)
-                  : "—"}
+              <div className="flex flex-col rounded-lg bg-muted p-3">
+                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1 font-heading">
+                  Purchase Request Value
+                </div>
+                <div className="mt-auto text-sm font-bold text-foreground font-body">
+                  {formatCurrency(data.purchaseRequestValue)}
+                </div>
               </div>
             </div>
           </div>
@@ -330,9 +342,11 @@ export default function OpportunityDrawer({
                     )}
 
                     <div className="text-xs text-muted-foreground font-body">
-                      {session.clubCount > 0
-                        ? `${session.clubCount} club${session.clubCount === 1 ? "" : "s"} tested`
-                        : "No clubs tested"}
+                      {session.fittingValue.includedClubCount} of {session.fittingValue.totalClubCount} clubs included
+                    </div>
+                    <div className="text-xs text-muted-foreground font-body">
+                      <span className="font-semibold">Estimated value:</span>{" "}
+                      {session.fittingValue.hasAnyPrice ? formatCurrency(session.fittingValue.total) : "—"}
                     </div>
 
                     {session.importBatchId && (
@@ -382,7 +396,7 @@ export default function OpportunityDrawer({
 
                     <div className="flex items-center justify-between pt-1">
                       <div className="text-sm font-bold text-foreground font-body">
-                        {formatPrice(req.subtotal)}
+                        {formatCurrency(req.subtotal)}
                       </div>
                       <Link
                         href={`/staff/purchase-requests/${req.id}`}

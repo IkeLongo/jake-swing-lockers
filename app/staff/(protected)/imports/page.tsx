@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { db } from "@/lib/db";
+import { calculateFittingValue } from "@/lib/fitting-value";
 import DeleteBatchButton from "./_components/DeleteBatchButton";
 import OpportunityDrawerWrapper from "./_components/OpportunityDrawerWrapper";
 
@@ -34,33 +35,6 @@ function getInProgressContinueUrl(batch: {
   // For TrackMan imports, default to map page (club review/filtering).
   // The page will handle redirects to customer/opportunity if needed.
   return `${base}/map`;
-}
-
-function calculateClubCountAndValue(
-  clubSummaries: Array<{ includeInReport: boolean | null; estimatedPrice: string | number | null }>
-): { clubCount: number; fittingValue: { total: number; hasAnyPrice: boolean; hasPartialPrice: boolean } } {
-  const includedClubs = clubSummaries.filter((club) => club.includeInReport !== false);
-  
-  const clubCount = includedClubs.length;
-
-  let totalPrice = 0;
-  let clubsWithPrice = 0;
-
-  for (const club of includedClubs) {
-    if (club.estimatedPrice !== null) {
-      const price = typeof club.estimatedPrice === 'string' 
-        ? parseFloat(club.estimatedPrice) 
-        : Number(club.estimatedPrice);
-      totalPrice += price;
-      clubsWithPrice++;
-    }
-  }
-
-  const hasAnyPrice = clubsWithPrice > 0;
-  const hasPartialPrice = hasAnyPrice && clubsWithPrice < includedClubs.length;
-  const fittingValue = { total: totalPrice, hasAnyPrice, hasPartialPrice };
-
-  return { clubCount, fittingValue };
 }
 
 export default async function StaffImportsPage() {
@@ -102,18 +76,11 @@ export default async function StaffImportsPage() {
   // Transform raw sessions to include pre-calculated club count and fitting value
   const sessions = sessionsRaw.map((session) => {
     const latestBatch = session.importBatches[0] ?? null;
-    const { clubCount, fittingValue } = latestBatch
-      ? calculateClubCountAndValue(
-          latestBatch.clubSummaries.map((club) => ({
-            includeInReport: club.includeInReport,
-            estimatedPrice: club.estimatedPrice ? club.estimatedPrice.toString() : null,
-          }))
-        )
-      : { clubCount: 0, fittingValue: { total: 0, hasAnyPrice: false, hasPartialPrice: false } };
+    const fittingValue = calculateFittingValue(latestBatch?.clubSummaries ?? []);
 
     return {
       ...session,
-      clubCount,
+      clubCount: fittingValue.includedClubCount,
       fittingValue,
       importBatches: session.importBatches.map((batch) => ({
         ...batch,

@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CustomerSyncAttempt } from "@/lib/ghl/attemptCustomerSync";
+import { formatCurrency } from "@/lib/format-currency";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -13,9 +14,9 @@ export interface ClientRow {
   lastName: string | null;
   email: string | null;
   phone: string | null;
-  createdAt: string; // ISO string (serialized from server)
   demoSessionCount: number;
   lastDemoDate: string | null; // ISO string or null
+  purchaseRequestValue: number;
 }
 
 interface Props {
@@ -87,7 +88,7 @@ function AddClientModal({ onClose, onCreated }: AddModalProps) {
         body: JSON.stringify({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phone: phone.trim() }),
       });
       const data = (await res.json()) as
-        | { success: true; client: ClientRow; customerSync: CustomerSyncAttempt }
+        | { success: true; client: Pick<ClientRow, "id" | "firstName" | "lastName" | "email" | "phone">; customerSync: CustomerSyncAttempt }
         | { error: string };
 
       if (!res.ok || !("success" in data)) {
@@ -98,9 +99,7 @@ function AddClientModal({ onClose, onCreated }: AddModalProps) {
         ...data.client,
         demoSessionCount: 0,
         lastDemoDate: null,
-        createdAt: typeof data.client.createdAt === "string"
-          ? data.client.createdAt
-          : new Date((data.client.createdAt as unknown as Date)).toISOString(),
+        purchaseRequestValue: 0,
       }, data.customerSync);
     } catch {
       setError("Network error. Please try again.");
@@ -546,7 +545,7 @@ export function ClientsTable({ initialClients }: Props) {
 
       {/* ── Table ─────────────────────────────────────────────────────────── */}
       {filtered.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+        <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-xs">
           <table className="min-w-full text-sm font-body">
             <thead className="border-b border-border bg-muted">
               <tr>
@@ -560,13 +559,13 @@ export function ClientsTable({ initialClients }: Props) {
                   Phone
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
-                  Sessions
+                  Fittings
                 </th>
                 <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap lg:table-cell">
-                  Last Demo
+                  Last Fitting
                 </th>
-                <th className="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap lg:table-cell">
-                  Created
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                  <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-2" title="Total qualifying purchase request value across all fittings.">Value</span>
                 </th>
                 <th className="px-4 py-3" />
               </tr>
@@ -595,8 +594,8 @@ export function ClientsTable({ initialClients }: Props) {
                   <td className="hidden px-4 py-3 text-muted-foreground whitespace-nowrap lg:table-cell">
                     {fmtDate(c.lastDemoDate)}
                   </td>
-                  <td className="hidden px-4 py-3 text-muted-foreground whitespace-nowrap lg:table-cell">
-                    {fmtDate(c.createdAt)}
+                  <td className="px-4 py-3 text-right text-muted-foreground whitespace-nowrap tabular-nums">
+                    {formatCurrency(c.purchaseRequestValue)}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-3">

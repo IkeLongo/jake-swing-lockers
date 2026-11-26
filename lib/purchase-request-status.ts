@@ -7,6 +7,14 @@ export const PURCHASE_REQUEST_STATUSES = [
   "closed_lost",
 ] as const;
 
+export const PURCHASE_REQUEST_VALUE_STATUSES = [
+  "new_request",
+  "reviewing",
+  "quote_sent",
+  "purchased",
+  "fulfilled",
+] as const;
+
 export type PurchaseRequestStatus = (typeof PURCHASE_REQUEST_STATUSES)[number];
 
 export const PURCHASE_REQUEST_EDITABLE_STATUSES = [

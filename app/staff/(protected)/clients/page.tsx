@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
+import { getClientPurchaseRequestValues } from "@/lib/queries/client-values";
 import { ClientsTable } from "./_components/ClientsTable";
 import type { ClientRow } from "./_components/ClientsTable";
 import Link from "next/link";
@@ -10,23 +11,25 @@ export const metadata: Metadata = {
 };
 
 export default async function StaffClientsPage() {
-  const raw = await db.golfClient.findMany({
-    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-      createdAt: true,
-      _count: { select: { demoSessions: true } },
-      demoSessions: {
-        orderBy: { demoDate: "desc" },
-        take: 1,
-        select: { demoDate: true },
+  const [raw, purchaseRequestValues] = await Promise.all([
+    db.golfClient.findMany({
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        _count: { select: { demoSessions: true } },
+        demoSessions: {
+          orderBy: { demoDate: "desc" },
+          take: 1,
+          select: { demoDate: true },
+        },
       },
-    },
-  });
+    }),
+    getClientPurchaseRequestValues(),
+  ]);
 
   const clients: ClientRow[] = raw.map((c) => ({
     id: c.id,
@@ -34,9 +37,9 @@ export default async function StaffClientsPage() {
     lastName: c.lastName,
     email: c.email,
     phone: c.phone,
-    createdAt: c.createdAt.toISOString(),
     demoSessionCount: c._count.demoSessions,
     lastDemoDate: c.demoSessions[0]?.demoDate?.toISOString() ?? null,
+    purchaseRequestValue: purchaseRequestValues.get(c.id) ?? 0,
   }));
 
   return (

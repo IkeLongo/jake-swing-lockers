@@ -153,11 +153,13 @@ export async function validateOpportunitySelection(
  * Used to check current stage before deciding whether to move stages.
  */
 export async function getOpportunityById(
-  opportunityId: string
+  opportunityId: string,
+  signal?: AbortSignal,
 ): Promise<GhlOpportunity | null> {
   try {
     const res = await ghlFetch<{ opportunity: GhlOpportunity }>(
-      `/opportunities/${opportunityId}`
+      `/opportunities/${opportunityId}`,
+      { signal },
     );
     return res.opportunity ?? null;
   } catch {

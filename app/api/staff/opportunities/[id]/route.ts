@@ -2,6 +2,8 @@ import { db } from "@/lib/db";
 import { getOpportunityById } from "@/lib/ghl/opportunities";
 import { mapGhlStageToJlStage } from "@/lib/pipeline/stages";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
+import { calculateFittingValue, sumPrices } from "@/lib/fitting-value";
+import { PURCHASE_REQUEST_VALUE_STATUSES } from "@/lib/purchase-request-status";
 import type { NextRequest } from "next/server";
 
 /**
@@ -66,7 +68,7 @@ export async function GET(
           status: true,
           rowCount: true,
           clubSummaries: {
-            select: { id: true, estimatedPrice: true },
+            select: { id: true, includeInReport: true, estimatedPrice: true },
           },
         },
       },
@@ -127,7 +129,7 @@ export async function GET(
   let ghlUnavailable = false;
 
   try {
-    const opp = await getOpportunityById(opportunityId);
+    const opp = await getOpportunityById(opportunityId, AbortSignal.timeout(10_000));
     if (opp) {
       ghlStage = mapGhlStageToJlStage(opp.pipelineStageId);
       const monetaryValue = (opp as Record<string, unknown>).monetaryValue;
@@ -145,16 +147,19 @@ export async function GET(
     });
   }
 
-  // ── Calculate purchase request subtotals ───────────────────────────────
+  // ── Calculate local values ────────────────────────────────────────────
 
-  const requestSubtotals = new Map<number, number>();
-  for (const req of purchaseRequests) {
-    const subtotal = req.items.reduce(
-      (sum, item) => sum + (item.estimatedPrice ? Number(item.estimatedPrice) : 0),
-      0
-    );
-    requestSubtotals.set(req.id, subtotal);
-  }
+  const qualifyingStatuses = new Set<string>(PURCHASE_REQUEST_VALUE_STATUSES);
+  const estimatedValue = calculateFittingValue(
+    sessions.flatMap((session) =>
+      session.status === "finalized" ? session.importBatches[0]?.clubSummaries ?? [] : [],
+    ),
+  );
+  const purchaseRequestValue = sumPrices(
+    purchaseRequests.flatMap((req) =>
+      qualifyingStatuses.has(req.status) ? req.items.map((item) => item.estimatedPrice) : [],
+    ),
+  );
 
   // ── Build response ─────────────────────────────────────────────────────
 
@@ -165,6 +170,9 @@ export async function GET(
       email: primarySession.client.email,
       phone: primarySession.client.phone,
     },
+    estimatedOpportunityValue: estimatedValue.total,
+    estimatedOpportunityHasMissingPrices: estimatedValue.hasMissingPrices,
+    purchaseRequestValue,
     ghl: {
       stage: ghlStage,
       monetaryValue: ghlMonetaryValue,
@@ -178,6 +186,7 @@ export async function GET(
       clientGoal: session.clientGoal,
       notes: session.notes,
       clubCount: session.importBatches[0]?.clubSummaries.length ?? 0,
+      fittingValue: calculateFittingValue(session.importBatches[0]?.clubSummaries ?? []),
       importBatchId: session.importBatches[0]?.id ?? null,
       importBatchStatus: session.importBatches[0]?.status ?? null,
       purchaseRequestIds: session.purchaseRequests.map((pr) => pr.id),
@@ -187,7 +196,7 @@ export async function GET(
       status: req.status,
       createdAt: req.createdAt,
       demoSessionId: req.demoSessionId,
-      subtotal: requestSubtotals.get(req.id) ?? 0,
+      subtotal: sumPrices(req.items.map((item) => item.estimatedPrice)),
     })),
   });
 }

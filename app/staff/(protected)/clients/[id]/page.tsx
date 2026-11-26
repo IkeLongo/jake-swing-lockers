@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
+import { calculateFittingValue } from "@/lib/fitting-value";
+import { formatCurrency } from "@/lib/format-currency";
+import { getClientPurchaseRequestValues } from "@/lib/queries/client-values";
 import DeleteClientButton from "../_components/DeleteClientButton";
 
 // TODO: customer OTP login — when built, link the swing locker token from here
@@ -46,34 +49,6 @@ const SESSION_STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-200",
 };
 
-// Reuse fitting value calculation logic from Fitting History page
-function calculateClubCountAndValue(
-  clubSummaries: Array<{ includeInReport: boolean | null; estimatedPrice: string | number | null }>
-): { clubCount: number; fittingValue: { total: number; hasAnyPrice: boolean; hasPartialPrice: boolean } } {
-  const includedClubs = clubSummaries.filter((club) => club.includeInReport !== false);
-  
-  const clubCount = includedClubs.length;
-
-  let totalPrice = 0;
-  let clubsWithPrice = 0;
-
-  for (const club of includedClubs) {
-    if (club.estimatedPrice !== null) {
-      const price = typeof club.estimatedPrice === 'string' 
-        ? parseFloat(club.estimatedPrice) 
-        : Number(club.estimatedPrice);
-      totalPrice += price;
-      clubsWithPrice++;
-    }
-  }
-
-  const hasAnyPrice = clubsWithPrice > 0;
-  const hasPartialPrice = hasAnyPrice && clubsWithPrice < includedClubs.length;
-  const fittingValue = { total: totalPrice, hasAnyPrice, hasPartialPrice };
-
-  return { clubCount, fittingValue };
-}
-
 export default async function ClientDetailPage({
   params,
 }: {
@@ -117,6 +92,13 @@ export default async function ClientDetailPage({
   });
 
   if (!client) notFound();
+
+  const estimatedValue = calculateFittingValue(
+    client.demoSessions.flatMap((session) =>
+      session.status === "finalized" ? session.importBatches[0]?.clubSummaries ?? [] : [],
+    ),
+  ).total;
+  const purchaseRequestValue = (await getClientPurchaseRequestValues(client.id)).get(client.id) ?? 0;
 
   const clientName =
     [client.firstName, client.lastName].filter(Boolean).join(" ") ||
@@ -169,6 +151,25 @@ export default async function ClientDetailPage({
         </div>
       </div>
 
+      <div className="mb-8 grid auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex flex-col rounded-lg bg-muted p-3">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">
+            Total Estimated Value
+          </div>
+          <div className="mt-auto text-sm font-bold text-accent font-body">
+            {formatCurrency(estimatedValue)}
+          </div>
+        </div>
+        <div className="flex flex-col rounded-lg bg-muted p-3">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">
+            Total Purchase Request Value
+          </div>
+          <div className="mt-auto text-sm font-bold text-foreground font-body">
+            {formatCurrency(purchaseRequestValue)}
+          </div>
+        </div>
+      </div>
+
       {/* ── Fitting History ─────────────────────────────────────────────────── */}
       <h2 className="mb-4 text-base font-semibold text-foreground font-heading">
         Fitting History
@@ -209,14 +210,8 @@ export default async function ClientDetailPage({
             <tbody className="divide-y divide-border">
               {client.demoSessions.map((s) => {
                 const batch = s.importBatches[0] ?? null;
-                const { clubCount, fittingValue } = batch
-                  ? calculateClubCountAndValue(
-                      batch.clubSummaries.map((cs) => ({
-                        includeInReport: cs.includeInReport,
-                        estimatedPrice: cs.estimatedPrice ? cs.estimatedPrice.toString() : null,
-                      }))
-                    )
-                  : { clubCount: 0, fittingValue: { total: 0, hasAnyPrice: false, hasPartialPrice: false } };
+                const fittingValue = calculateFittingValue(batch?.clubSummaries ?? []);
+                const clubCount = fittingValue.includedClubCount;
 
                 const statusStyle =
                   SESSION_STATUS_STYLES[s.status] ??
@@ -261,7 +256,7 @@ export default async function ClientDetailPage({
                       {fittingValue.hasAnyPrice ? (
                         <>
                           <span className={fittingValue.hasPartialPrice ? "opacity-70" : ""}>
-                            ${fittingValue.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatCurrency(fittingValue.total)}
                           </span>
                           {fittingValue.hasPartialPrice && (
                             <span

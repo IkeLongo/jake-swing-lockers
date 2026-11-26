@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import Link from "next/link";
+import { formatCurrency } from "@/lib/format-currency";
 import DeleteSessionButton from "./DeleteSessionButton";
 import { IconEye } from "@tabler/icons-react";
 
@@ -243,9 +244,9 @@ function SessionRow({ session }: { session: SessionRow }) {
         {clubCount > 0 ? clubCount : <span className="text-muted-foreground/50">—</span>}
       </td>
       <td className="px-4 py-3 text-right tabular-nums">
-        {fittingValue.total > 0 ? (
+        {fittingValue.hasAnyPrice ? (
           <span className="text-foreground">
-            ${fittingValue.total.toFixed(2)}
+            {formatCurrency(fittingValue.total)}
             {fittingValue.hasPartialPrice && (
               <span 
                 className="ml-1 text-muted-foreground" 
@@ -255,10 +256,6 @@ function SessionRow({ session }: { session: SessionRow }) {
               </span>
             )}
           </span>
-        ) : fittingValue.hasAnyPrice ? (
-          <span className="text-foreground">$0.00</span>
-        ) : clubCount > 0 ? (
-          <span className="text-muted-foreground/50">—</span>
         ) : (
           <span className="text-muted-foreground/50">—</span>
         )}
