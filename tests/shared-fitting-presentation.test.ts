@@ -29,11 +29,28 @@ test("customer and staff share finalized fitting data without preview mutations"
   });
 
   const decimal = (value: string) => new Prisma.Decimal(value);
+  const measurements = {
+    carryYd: 210, carrySideYd: -3, apexDistanceYd: 100, apexHeightYd: 25,
+    apexSideYd: null, launchAngleDeg: 0, launchDirectionDeg: -2,
+    landingAngleDeg: 40, totalYd: 230, totalSideYd: 0,
+  };
+  const snapshot = (rowId: number, carryYd = 210) => ({
+    version: 1,
+    sourceBatchId: 99,
+    sourceSummaryId: 98,
+    shots: [{
+      sourceRowId: rowId,
+      rawData: "not customer-visible",
+      lateralSignConvention: "unknown",
+      measurements: { ...measurements, carryYd, rawData: "not customer-visible" },
+    }],
+  });
   const club = (id: number, clubRole: string, clubType: string, pairIndex: number) => ({
     id, clubRole, clubType, pairIndex, currentClubTestId: null as number | null,
     brand: null as string | null, model: null as string | null,
     shaft: null as string | null, loft: null as string | null,
     estimatedPrice: null as Prisma.Decimal | null,
+    approvedShotSnapshot: null as Prisma.JsonValue,
     metrics: {
       clubSpeed: decimal("90"), ballSpeed: decimal("130"),
       smashFactor: decimal("1.44"), spinRate: 2500,
@@ -41,14 +58,22 @@ test("customer and staff share finalized fitting data without preview mutations"
       launchAngle: decimal("12"), dispersion: decimal("8"),
     },
   });
-  const current = { ...club(10, "current", "Current Driver", 0), brand: "Current Brand" };
+  const current = {
+    ...club(10, "current", "Current Driver", 0),
+    brand: "Current Brand",
+    approvedShotSnapshot: snapshot(100, 190) as Prisma.JsonValue,
+  };
   const demo = {
     ...club(11, "demo", "Included Driver", 0),
     currentClubTestId: current.id,
     shaft: "Regular",
     estimatedPrice: decimal("299.75"),
+    approvedShotSnapshot: snapshot(101) as Prisma.JsonValue,
   };
-  const otherCurrent = club(12, "current", "Unrelated Current", 1);
+  const otherCurrent = {
+    ...club(12, "current", "Unrelated Current", 1),
+    approvedShotSnapshot: snapshot(102) as Prisma.JsonValue,
+  };
   const finalizedPlan = flattenPlan(planComparisonGroups([
     { id: 10, clubName: "Current Driver", tags: [], includeInReport: false, currentSummaryId: null },
     { id: 11, clubName: "Included Driver", tags: [], includeInReport: true, currentSummaryId: 10 },
@@ -79,7 +104,7 @@ test("customer and staff share finalized fitting data without preview mutations"
       demoSession: {
         async findFirst(args: {
           where: { id: number; clientId?: number; status?: string };
-          select: { clientId?: boolean; clubTests?: unknown };
+          select: { clientId?: boolean; clubTests?: { select: { approvedShotSnapshot?: boolean } } };
         }) {
           queries.push(args.where);
           const found = sessions.find((row) =>
@@ -89,7 +114,7 @@ test("customer and staff share finalized fitting data without preview mutations"
           );
           if (!found) return null;
           if (args.select.clientId) return { clientId: found.clientId };
-          assert.ok(args.select.clubTests);
+          assert.equal(args.select.clubTests?.select.approvedShotSnapshot, true);
           return found;
         },
         async findMany(args: { where: { clientId: number; status: string } }) {
@@ -141,11 +166,41 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.equal(fitting.clubs[0]?.shaft, "Regular");
   assert.equal(fitting.clubs[0]?.launchAngle, 12);
   assert.equal(fitting.clubs[0]?.comparisonClub?.clubType, "Current Driver");
-  assert.doesNotMatch(JSON.stringify(fitting), /Unrelated Current|Excluded|clientId|lockerToken|ghl|rawData/i);
+  const expectedSnapshot = {
+    version: 1,
+    shots: [{ lateralSignConvention: "unknown", measurements }],
+  };
+  assert.deepEqual(fitting.clubs[0]?.approvedShotSnapshot, expectedSnapshot);
+  assert.deepEqual(fitting.clubs[0]?.comparisonClub?.approvedShotSnapshot, {
+    version: 1,
+    shots: [{ lateralSignConvention: "unknown", measurements: { ...measurements, carryYd: 190 } }],
+  });
+  assert.doesNotMatch(
+    JSON.stringify(fitting),
+    /Unrelated Current|Excluded|clientId|lockerToken|ghl|rawData|sourceBatchId|sourceSummaryId|sourceRowId/i,
+  );
   assert.deepEqual(JSON.parse(JSON.stringify(fitting)), fitting);
   assert.equal(await getCustomerSession(8, 31), null);
   assert.equal(await getCustomerSession(7, 33), null);
   assert.ok(queries.some((where) => where.id === 31 && where.clientId === 7 && where.status === "finalized"));
+
+  demo.approvedShotSnapshot = { version: 1, shots: [] };
+  current.approvedShotSnapshot = null;
+  const legacy = await getCustomerSession(7, 31);
+  assert.deepEqual(legacy?.clubs[0]?.approvedShotSnapshot, { version: 1, shots: [] });
+  assert.equal(legacy?.clubs[0]?.comparisonClub?.approvedShotSnapshot, null);
+  const warnings: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => { warnings.push(args); });
+  demo.approvedShotSnapshot = { version: 2, shots: [] };
+  assert.equal((await getCustomerSession(7, 31))?.clubs[0]?.approvedShotSnapshot, null);
+  demo.approvedShotSnapshot = {
+    ...snapshot(101),
+    shots: [{ ...snapshot(101).shots[0], measurements: { ...measurements, carryYd: "bad" } }],
+  };
+  assert.equal((await getCustomerSession(7, 31))?.clubs[0]?.approvedShotSnapshot, null);
+  assert.equal(warnings.length, 2);
+  demo.approvedShotSnapshot = snapshot(101);
+  current.approvedShotSnapshot = snapshot(100, 190);
 
   const staffToken = signStaffSessionToken({ staffUserId: 1, expiresAt: Date.now() + 60_000 });
   async function runProxy(request: NextRequest) {
@@ -256,7 +311,7 @@ test("results, comparisons, and pricing display finalized clubs in order", () =>
     id: 1, clubType: "Current Driver", brand: "Current Brand", model: null,
     shaft: null, loft: null, clubSpeed: 88, ballSpeed: 120, smashFactor: null,
     spinRate: 2200, carryDistance: 190, totalDistance: 210, launchAngle: null,
-    dispersion: null, estimatedPrice: null,
+    dispersion: null, estimatedPrice: null, approvedShotSnapshot: null,
   };
   const driver: CustomerDemoClub = {
     ...current, id: 2, clubType: "Demo Driver", brand: "Demo Brand", shaft: "Regular",
@@ -307,7 +362,7 @@ test("single and empty fittings handle missing prices and results", () => {
     id: 1, clubType: "Iron", brand: null, model: null, shaft: null, loft: null,
     clubSpeed: null, ballSpeed: null, smashFactor: null, spinRate: null,
     carryDistance: null, totalDistance: null, launchAngle: null, dispersion: null,
-    estimatedPrice: null, comparisonClub: null,
+    estimatedPrice: null, approvedShotSnapshot: null, comparisonClub: null,
   };
   const session: CustomerSessionDetail = {
     id: 31, demoDate: "2026-04-15T00:00:00.000Z", customerName: "Alex Golfer",

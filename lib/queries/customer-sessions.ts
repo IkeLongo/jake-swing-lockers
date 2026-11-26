@@ -1,6 +1,33 @@
 import { db } from "@/lib/db";
 import { groupFinalizedClubs } from "@/lib/comparison/groupFinalizedClubs";
 import { sumPrices } from "@/lib/fitting-value";
+import type { ApprovedShotSnapshotV1 } from "@/lib/imports/approvedShotSnapshot";
+import { z } from "zod";
+
+export type CustomerShotSnapshot = {
+  version: ApprovedShotSnapshotV1["version"];
+  shots: Omit<ApprovedShotSnapshotV1["shots"][number], "sourceRowId">[];
+};
+
+const nullableMeasurement = z.number().finite().nullable();
+const customerShotSnapshotSchema: z.ZodType<CustomerShotSnapshot> = z.object({
+  version: z.literal(1),
+  shots: z.array(z.object({
+    lateralSignConvention: z.literal("unknown").nullable(),
+    measurements: z.object({
+      carryYd: nullableMeasurement,
+      carrySideYd: nullableMeasurement,
+      apexDistanceYd: nullableMeasurement,
+      apexHeightYd: nullableMeasurement,
+      apexSideYd: nullableMeasurement,
+      launchAngleDeg: nullableMeasurement,
+      launchDirectionDeg: nullableMeasurement,
+      landingAngleDeg: nullableMeasurement,
+      totalYd: nullableMeasurement,
+      totalSideYd: nullableMeasurement,
+    }),
+  })),
+});
 
 // ── Return shapes ─────────────────────────────────────────────────────────────
 
@@ -29,6 +56,7 @@ export interface CustomerClub {
   launchAngle: number | null;
   dispersion: number | null;
   estimatedPrice: number | null;
+  approvedShotSnapshot: CustomerShotSnapshot | null;
 }
 
 export interface CustomerDemoClub extends CustomerClub {
@@ -127,6 +155,7 @@ export async function getCustomerSession(
           clubRole: true,
           pairIndex: true,
           currentClubTestId: true,
+          approvedShotSnapshot: true,
           metrics: {
             select: {
               clubSpeed: true,
@@ -146,23 +175,36 @@ export async function getCustomerSession(
 
   if (!row) return null;
 
-  const toCustomerClub = (ct: (typeof row.clubTests)[number]): CustomerClub => ({
-    id: ct.id,
-    clubType: ct.clubType,
-    brand: ct.brand,
-    model: ct.model,
-    shaft: ct.shaft,
-    loft: ct.loft,
-    estimatedPrice: toNum(ct.estimatedPrice),
-    clubSpeed: toNum(ct.metrics?.clubSpeed),
-    ballSpeed: toNum(ct.metrics?.ballSpeed),
-    smashFactor: toNum(ct.metrics?.smashFactor),
-    spinRate: ct.metrics?.spinRate ?? null,
-    carryDistance: toNum(ct.metrics?.carryDistance),
-    totalDistance: toNum(ct.metrics?.totalDistance),
-    launchAngle: toNum(ct.metrics?.launchAngle),
-    dispersion: toNum(ct.metrics?.dispersion),
-  });
+  const toCustomerClub = (ct: (typeof row.clubTests)[number]): CustomerClub => {
+    let approvedShotSnapshot: CustomerShotSnapshot | null = null;
+    if (ct.approvedShotSnapshot !== null) {
+      const parsed = customerShotSnapshotSchema.safeParse(ct.approvedShotSnapshot);
+      if (parsed.success) {
+        approvedShotSnapshot = parsed.data;
+      } else {
+        console.warn("[getCustomerSession] Invalid approved shot snapshot for club", ct.id);
+      }
+    }
+
+    return {
+      id: ct.id,
+      clubType: ct.clubType,
+      brand: ct.brand,
+      model: ct.model,
+      shaft: ct.shaft,
+      loft: ct.loft,
+      estimatedPrice: toNum(ct.estimatedPrice),
+      clubSpeed: toNum(ct.metrics?.clubSpeed),
+      ballSpeed: toNum(ct.metrics?.ballSpeed),
+      smashFactor: toNum(ct.metrics?.smashFactor),
+      spinRate: ct.metrics?.spinRate ?? null,
+      carryDistance: toNum(ct.metrics?.carryDistance),
+      totalDistance: toNum(ct.metrics?.totalDistance),
+      launchAngle: toNum(ct.metrics?.launchAngle),
+      dispersion: toNum(ct.metrics?.dispersion),
+      approvedShotSnapshot,
+    };
+  };
   const currentByTestId = new Map(
     groupFinalizedClubs(row.clubTests).flatMap((group) =>
       group.current
