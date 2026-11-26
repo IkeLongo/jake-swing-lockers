@@ -130,6 +130,7 @@ model DemoClubTest {
   // Target model (Test -> Current): a finalized Test points at its single Current row.
   // Null for legacy/manual rows, which are grouped via pairIndex + clubRole.
   currentClubTestId Int?
+  approvedShotSnapshot Json?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
