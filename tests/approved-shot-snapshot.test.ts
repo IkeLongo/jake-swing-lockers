@@ -112,7 +112,7 @@ test("preserves missing measurements and does not infer a lateral direction", ()
   assert.equal(snapshot?.shots[0]?.lateralSignConvention, "unknown");
 });
 
-test("malformed, non-finite and legacy measurements are unavailable rather than guessed", () => {
+test("malformed, non-finite and legacy shots are omitted rather than guessed", () => {
   const invalid = measuredShot();
   invalid.measurements.carryYd = Number.POSITIVE_INFINITY;
   const missing = measuredShot();
@@ -123,12 +123,9 @@ test("malformed, non-finite and legacy measurements are unavailable rather than 
     row({ id: 2, rawData: { measuredShot: { ...missing, measurements: incompleteMeasurements } } }),
     row({ id: 3, rawData: { measuredShot: "malformed" } }),
     row({ id: 4, rawData: { "Measurement.Carry": "200" } }),
+    row({ id: 5 }),
   ]));
-  assert.equal(snapshot?.shots.length, 4);
-  for (const shot of snapshot?.shots ?? []) {
-    assert.equal(shot.lateralSignConvention, null);
-    assert.ok(Object.values(shot.measurements).every((value) => value === null));
-  }
+  assert.deepEqual(snapshot?.shots.map((shot) => shot.sourceRowId), [5]);
 });
 
 test("distinguishes verified empty snapshots from unavailable provenance", () => {

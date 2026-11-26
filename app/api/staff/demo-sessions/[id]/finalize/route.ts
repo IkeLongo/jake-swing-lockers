@@ -118,54 +118,26 @@ export async function POST(
     );
   }
 
-  // ── Plan comparison groups from currentSummaryId (Test → Current) ───────────
-  const batchSummaries = await db.importClubSummary.findMany({
-    where: { importBatchId: batchId },
-    orderBy: { id: "asc" },
-  });
-  const groups = planComparisonGroups(batchSummaries);
-  const plannedRows = flattenPlan(groups);
-  const includedTestCount = plannedRows.filter((r) => r.clubRole === "demo").length;
-
-  if (includedTestCount === 0) {
-    return NextResponse.json(
-      {
-        error:
-          "No clubs are included in the report. Enable at least one club before finalizing.",
-      },
-      { status: 400 },
-    );
-  }
-
   // ── Transactional write ──────────────────────────────────────────────────────
   const isRefinalize = session.status === "finalized";
-
-  // ── Re-finalization guard: block if purchase requests reference club tests ────
-  //
-  // Re-finalization deletes and recreates DemoClubTest rows. If PurchaseRequestItem
-  // rows reference those rows via demoClubTestId (no cascade), Prisma throws P2003.
-  // Block early with a 409 rather than letting the transaction fail mid-way.
-  //
-  // TODO (future): implement versioned/soft-deactivated club tests so re-finalization
-  // can coexist with historical purchase requests without blocking.
-  if (isRefinalize) {
-    const purchaseRequestCount = await db.purchaseRequest.count({
-      where: { demoSessionId: sessionId },
-    });
-    if (purchaseRequestCount > 0) {
-      return NextResponse.json(
-        {
-          error:
-            "This session already has purchase requests tied to finalized club tests. " +
-            "Re-finalization is blocked to preserve purchase request history.",
-        },
-        { status: 409 },
-      );
-    }
-  }
-
+  let includedTestCount: number;
   try {
-    await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
+      const batchSummaries = await tx.importClubSummary.findMany({
+        where: { importBatchId: batchId },
+        orderBy: { id: "asc" },
+      });
+      const plannedRows = flattenPlan(planComparisonGroups(batchSummaries));
+      const clubCount = plannedRows.filter((r) => r.clubRole === "demo").length;
+      if (clubCount === 0) return { status: "no_clubs" as const };
+
+      if (isRefinalize) {
+        const purchaseRequestCount = await tx.purchaseRequest.count({
+          where: { demoSessionId: sessionId },
+        });
+        if (purchaseRequestCount > 0) return { status: "purchase_requests" as const };
+      }
+
       const store = createPrismaFinalizeStore(tx);
       // Re-finalization: delete existing DemoClubTest rows (Tests before
       // Currents because of the currentClubTestId self-FK) and their metrics.
@@ -187,7 +159,25 @@ export async function POST(
         where: { id: batchId },
         data: { status: "finalized" },
       });
+      return { status: "success" as const, clubCount };
     });
+    if (result.status === "no_clubs") {
+      return NextResponse.json(
+        { error: "No clubs are included in the report. Enable at least one club before finalizing." },
+        { status: 400 },
+      );
+    }
+    if (result.status === "purchase_requests") {
+      return NextResponse.json(
+        {
+          error:
+            "This session already has purchase requests tied to finalized club tests. " +
+            "Re-finalization is blocked to preserve purchase request history.",
+        },
+        { status: 409 },
+      );
+    }
+    includedTestCount = result.clubCount;
   } catch (err) {
     console.error("[POST /api/staff/demo-sessions/[id]/finalize]", err);
     return NextResponse.json(

@@ -59,8 +59,9 @@ export function buildApprovedShotSnapshot(
         row.includedInSummary !== false,
     )
     .sort((a, b) => a.rowIndex - b.rowIndex || a.id - b.id)
-    .map((row) => {
+    .flatMap((row) => {
       const shot = readGolfShotMeasurements(row.rawData);
+      if (!shot.hasNormalizedMeasurements) return [];
       const {
         carryYd,
         carrySideYd,
@@ -74,7 +75,7 @@ export function buildApprovedShotSnapshot(
         totalSideYd,
       } = shot.measurements;
 
-      return {
+      return [{
         sourceRowId: row.id,
         lateralSignConvention:
           shot.lateralSignConvention === "unknown" ? "unknown" as const : null,
@@ -90,7 +91,7 @@ export function buildApprovedShotSnapshot(
           totalYd,
           totalSideYd,
         },
-      };
+      }];
     });
 
   return {
