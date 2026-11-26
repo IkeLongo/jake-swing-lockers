@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { test } from "node:test";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { NextFetchEvent } from "next/dist/server/web/spec-extension/fetch-event";
@@ -10,6 +11,8 @@ import { Prisma } from "../app/generated/prisma/client";
 import { signStaffSessionToken } from "../lib/auth/session";
 import { signSwingLockerSessionToken } from "../lib/auth/swing-locker-session";
 import { flattenPlan, planComparisonGroups } from "../lib/imports/finalizationPlan";
+import type { CustomerDemoClub, CustomerSessionDetail } from "../lib/queries/customer-sessions";
+import { FittingPresentation } from "../app/swing-locker/_components/FittingPresentation";
 
 const nextHeaders: typeof import("next/headers") =
   createRequire(resolve("tests", "shared-fitting-presentation.test.ts"))("next/headers");
@@ -168,7 +171,12 @@ test("customer and staff share finalized fitting data without preview mutations"
   const preview = renderToStaticMarkup(await PreviewPage(previewProps));
   assert.equal(cookieReads, beforePreview);
   assert.match(preview, /href="\/staff\/imports\/56\/map"/);
+  assert.match(preview, /Back to Fitting Details/);
   assert.match(preview, /Staff Preview/);
+  assert.match(preview, /Your Personal Fitting Experience/);
+  assert.match(preview, /Your Swing Locker/);
+  assert.match(preview, /Prepared for Alex Golfer/);
+  assert.match(preview, /April 15, 2026/);
   assert.match(preview, /Included Driver/);
   assert.match(preview, /Current Brand Current Driver/);
   assert.doesNotMatch(preview, /Unrelated Current|Excluded|mailto:|<form/);
@@ -204,9 +212,14 @@ test("customer and staff share finalized fitting data without preview mutations"
   });
   const customer = renderToStaticMarkup(customerPage);
   assert.match(customer, /href="\/swing-locker\/dashboard"/);
+  assert.match(customer, /Back to My Swing Locker/);
+  assert.match(customer, /Your Personal Fitting Experience/);
+  assert.match(customer, /Your Swing Locker/);
+  assert.match(customer, /Prepared for Alex Golfer/);
+  assert.match(customer, /April 15, 2026/);
   assert.match(customer, /Included Driver/);
   assert.match(customer, /Current Brand Current Driver/);
-  assert.match(customer, /Estimated Total/);
+  assert.match(customer, /Total estimated price/);
   assert.match(customer, /<button(?![^>]*disabled)[^>]*>Request Purchase<\/button>/);
   assert.doesNotMatch(customer, /Staff Preview|Unrelated Current|Excluded/);
   await assert.rejects(
@@ -236,4 +249,82 @@ test("customer and staff share finalized fitting data without preview mutations"
     /NEXT_REDIRECT/,
   );
   assert.equal(networkCalls, 0);
+});
+
+test("results, comparisons, and pricing display finalized clubs in order", () => {
+  const current = {
+    id: 1, clubType: "Current Driver", brand: "Current Brand", model: null,
+    shaft: null, loft: null, clubSpeed: 88, ballSpeed: 120, smashFactor: null,
+    spinRate: 2200, carryDistance: 190, totalDistance: 210, launchAngle: null,
+    dispersion: null, estimatedPrice: null,
+  };
+  const driver: CustomerDemoClub = {
+    ...current, id: 2, clubType: "Demo Driver", brand: "Demo Brand", shaft: "Regular",
+    clubSpeed: 95.46, ballSpeed: 0, carryDistance: null, totalDistance: 213.6,
+    spinRate: null, estimatedPrice: 49.75, comparisonClub: current,
+  };
+  const iron: CustomerDemoClub = {
+    ...driver, id: 3, clubType: "Demo Iron", brand: null, shaft: null,
+    clubSpeed: null, ballSpeed: null, carryDistance: null, totalDistance: null,
+    spinRate: null, estimatedPrice: null, comparisonClub: null,
+  };
+  const session: CustomerSessionDetail = {
+    id: 31, demoDate: "2026-04-15T00:00:00.000Z", customerName: "Alex Golfer",
+    notes: null, clubs: [driver, iron], estimatedTotal: 49.75,
+  };
+  const html = renderToStaticMarkup(createElement(FittingPresentation, {
+    session, purchaseAction: createElement("button", null, "Purchase action"),
+  }));
+  const results = html.match(/<section aria-labelledby="club-results-heading"[\s\S]*?<\/section>/)?.[0];
+  const comparisons = html.match(/<section aria-labelledby="club-comparisons-heading"[\s\S]*?<\/section>/)?.[0];
+  const pricing = html.match(/<section aria-labelledby="equipment-pricing-heading"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(results);
+  assert.ok(comparisons);
+  assert.ok(pricing);
+  assert.ok(html.indexOf(results) < html.indexOf(comparisons));
+  assert.ok(html.indexOf(comparisons) < html.indexOf(pricing));
+  assert.ok(html.indexOf(pricing) < html.indexOf("Purchase action"));
+  assert.match(results, /Demo Driver/);
+  assert.match(results, /Demo Brand · Regular/);
+  assert.match(results, /Demo Iron/);
+  assert.match(results, /95\.5/);
+  assert.match(results, />0\.0<\/td>/);
+  assert.match(results, />214<\/td>/);
+  assert.match(results, /Club speed[\s\S]*Ball speed[\s\S]*Carry[\s\S]*Total[\s\S]*Spin rate/);
+  assert.doesNotMatch(results, /Current Driver|\$50|Estimated price/);
+  const rows = results.match(/<tr class="border-t border-border">[\s\S]*?<\/tr>/g);
+  assert.equal(rows?.length, 2);
+  assert.equal(rows?.[1].match(/>—<\/td>/g)?.length, 5);
+  assert.match(comparisons, /Demo Driver[\s\S]*Current Brand Current Driver[\s\S]*88\.0/);
+  assert.doesNotMatch(comparisons, /Demo Iron/);
+  assert.match(pricing, /Demo Driver · Demo Brand[\s\S]*\$50[\s\S]*Demo Iron[\s\S]*—/);
+  assert.match(pricing, /Total estimated price[\s\S]*\$50/);
+  assert.match(pricing, /Total includes available estimates only/);
+});
+
+test("single and empty fittings handle missing prices and results", () => {
+  const club: CustomerDemoClub = {
+    id: 1, clubType: "Iron", brand: null, model: null, shaft: null, loft: null,
+    clubSpeed: null, ballSpeed: null, smashFactor: null, spinRate: null,
+    carryDistance: null, totalDistance: null, launchAngle: null, dispersion: null,
+    estimatedPrice: null, comparisonClub: null,
+  };
+  const session: CustomerSessionDetail = {
+    id: 31, demoDate: "2026-04-15T00:00:00.000Z", customerName: "Alex Golfer",
+    notes: null, clubs: [club], estimatedTotal: null,
+  };
+  const render = (data: CustomerSessionDetail) => renderToStaticMarkup(
+    createElement(FittingPresentation, {
+      session: data, purchaseAction: createElement("button", null, "Purchase action"),
+    }),
+  );
+  const single = render(session);
+  assert.match(single, /Club Results/);
+  assert.match(single, /Equipment Pricing[\s\S]*Iron[\s\S]*—/);
+  assert.doesNotMatch(single, /Total estimated price|Current vs\. Demo Club Comparisons/);
+  assert.match(single, /Purchase action/);
+
+  const empty = render({ ...session, clubs: [] });
+  assert.match(empty, /No club data recorded for this session/);
+  assert.doesNotMatch(empty, /Equipment Pricing|Purchase action|Current vs\. Demo Club Comparisons/);
 });

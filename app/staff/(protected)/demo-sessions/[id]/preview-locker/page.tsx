@@ -54,17 +54,17 @@ export default async function PreviewLockerPage({
   if (!session) notFound();
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-10">
-      <div className="mx-auto max-w-3xl">
+    <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6 sm:py-10 lg:px-8">
+      <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex items-center justify-between gap-3">
           <Link
             href={safeBackHref(from)}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-900 font-body transition-colors"
+            className="inline-flex min-w-0 items-center gap-1.5 font-body text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
-            <IconArrowLeft aria-hidden="true" className="h-4 w-4" />
-            Back
+            <IconArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
+            Back to Fitting Details
           </Link>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 font-body">
+          <span className="shrink-0 rounded-full border border-border bg-card px-3 py-1 font-body text-xs font-semibold text-muted-foreground">
             Staff Preview
           </span>
         </div>

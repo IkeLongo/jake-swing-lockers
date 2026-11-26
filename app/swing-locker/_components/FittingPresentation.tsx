@@ -1,34 +1,8 @@
 import type { ReactNode } from "react";
-import type { CustomerClub, CustomerSessionDetail } from "@/lib/queries/customer-sessions";
+import type { CustomerClub, CustomerDemoClub, CustomerSessionDetail } from "@/lib/queries/customer-sessions";
+import { SwingLockerHero } from "./SwingLockerHero";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const ISO_DATE_PREFIX = /^(\d{4})-(\d{2})-(\d{2})/;
-
-function formatSessionDateOnly(date: string): string {
-  const match = ISO_DATE_PREFIX.exec(date);
-
-  if (!match) {
-    return new Date(date).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    });
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-
-  // Parse explicit Y/M/D parts so calendar dates don't shift across browser timezones.
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
-}
 
 function fmtPrice(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -43,35 +17,9 @@ function fmtNum(value: number | null, decimals = 1): string {
   return value.toFixed(decimals);
 }
 
-// ── Club metric cell ──────────────────────────────────────────────────────────
-
-function MetricCell({
-  label,
-  value,
-  unit,
-}: {
-  label: string;
-  value: string;
-  unit?: string;
-}) {
-  return (
-    <div className="bg-white px-4 py-5 text-center">
-      <p className="font-body text-2xl font-bold text-slate-900 tabular-nums leading-none">
-        {value}
-        {unit && (
-          <span className="ml-0.5 text-sm font-normal text-slate-400">
-            {unit}
-          </span>
-        )}
-      </p>
-      <p className="mt-1 font-body text-xs text-slate-400 uppercase tracking-widest">
-        {label}
-      </p>
-    </div>
-  );
+function clubName(club: CustomerClub): string {
+  return [club.clubType, club.brand, club.model].filter(Boolean).join(" · ") || "Club";
 }
-
-// ── Compact metric cell (used inside comparison section) ─────────────────────
 
 function CompactMetricCell({
   label,
@@ -83,147 +31,160 @@ function CompactMetricCell({
   unit?: string;
 }) {
   return (
-    <div className="bg-slate-50 px-3 py-3 text-center">
-      <p className="font-body text-base font-semibold text-slate-600 tabular-nums leading-none">
+    <div className="bg-card px-3 py-3 text-center">
+      <p className="font-body text-base font-semibold text-card-foreground tabular-nums leading-none">
         {value}
         {unit && (
-          <span className="ml-0.5 text-xs font-normal text-slate-400">
+          <span className="ml-0.5 text-xs font-normal text-muted-foreground">
             {unit}
           </span>
         )}
       </p>
-      <p className="mt-1 font-body text-[10px] text-slate-400 uppercase tracking-widest">
+      <p className="mt-1 font-body text-[10px] text-muted-foreground uppercase tracking-widest">
         {label}
       </p>
     </div>
   );
 }
 
-// ── Club card ─────────────────────────────────────────────────────────────────
-
-function ClubCard({
-  club,
-  comparisonClub,
-}: {
-  club: CustomerClub;
-  comparisonClub?: CustomerClub;
-}) {
-  const hasMetrics =
-    club.clubSpeed != null ||
-    club.ballSpeed != null ||
-    club.spinRate != null ||
-    club.carryDistance != null ||
-    club.totalDistance != null;
-
+function ClubResults({ clubs }: { clubs: CustomerDemoClub[] }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      {/* Card header */}
-      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <h3 className="font-heading text-base font-semibold text-slate-900">
-            {club.clubType ?? "Club"}
-          </h3>
-          {[club.brand, club.model, club.shaft, club.loft].filter(Boolean).length > 0 && (
-            <p className="mt-1 font-body text-xs text-slate-500">
-              {[club.brand, club.model, club.shaft, club.loft].filter(Boolean).join(" · ")}
-            </p>
-          )}
-        </div>
-        {club.estimatedPrice != null && (
-          <span className="font-body text-sm font-semibold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1">
-            {fmtPrice(club.estimatedPrice)}
-          </span>
-        )}
-      </div>
-
-      {/* Metrics grid */}
-      {hasMetrics ? (
-        <div className="grid grid-cols-2 gap-px bg-slate-100 sm:grid-cols-5">
-          <MetricCell
-            label="Club Speed"
-            value={fmtNum(club.clubSpeed)}
-            unit="mph"
-          />
-          <MetricCell
-            label="Ball Speed"
-            value={fmtNum(club.ballSpeed)}
-            unit="mph"
-          />
-          <MetricCell
-            label="Spin Rate"
-            value={club.spinRate != null ? String(club.spinRate) : "—"}
-            unit="rpm"
-          />
-          <MetricCell
-            label="Carry"
-            value={fmtNum(club.carryDistance, 0)}
-            unit="yds"
-          />
-          <MetricCell
-            label="Total"
-            value={fmtNum(club.totalDistance, 0)}
-            unit="yds"
-          />
-        </div>
-      ) : (
-        <div className="px-5 py-6 text-center">
-          <p className="font-body text-sm text-slate-400">
-            No metrics recorded for this club.
+    <section aria-labelledby="club-results-heading" className="mb-8">
+      <h2 id="club-results-heading" className="mb-4 font-subheading text-xl font-semibold text-foreground">
+        Club Results
+      </h2>
+      {clubs.length > 0 && (
+        <p className="mb-3 font-body text-xs text-muted-foreground lg:hidden">
+          Scroll to see all results.
+        </p>
+      )}
+      {clubs.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card px-6 py-10 text-center shadow-sm">
+          <p className="font-body text-sm text-muted-foreground">
+            No club data recorded for this session.
           </p>
         </div>
-      )}
-
-      {/* Comparison section — attached inside the same card */}
-      {comparisonClub && (
-        <div className="border-t border-slate-200 bg-slate-50">
-          <div className="px-5 pt-3 pb-2">
-            <p className="font-body text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
-              Compared with
-            </p>
-            <p className="font-heading text-sm font-semibold text-slate-600 mt-0.5">
-              {[
-                comparisonClub.brand,
-                comparisonClub.model,
-                comparisonClub.clubType,
-              ]
-                .filter(Boolean)
-                .join(" ") || "Current Club"}
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-px bg-slate-200 sm:grid-cols-5">
-            <CompactMetricCell
-              label="Club Speed"
-              value={fmtNum(comparisonClub.clubSpeed)}
-              unit="mph"
-            />
-            <CompactMetricCell
-              label="Ball Speed"
-              value={fmtNum(comparisonClub.ballSpeed)}
-              unit="mph"
-            />
-            <CompactMetricCell
-              label="Spin Rate"
-              value={
-                comparisonClub.spinRate != null
-                  ? String(comparisonClub.spinRate)
-                  : "—"
-              }
-              unit="rpm"
-            />
-            <CompactMetricCell
-              label="Carry"
-              value={fmtNum(comparisonClub.carryDistance, 0)}
-              unit="yds"
-            />
-            <CompactMetricCell
-              label="Total"
-              value={fmtNum(comparisonClub.totalDistance, 0)}
-              unit="yds"
-            />
-          </div>
+      ) : (
+        <div className="max-w-full overflow-x-auto rounded-xl border border-border bg-card shadow-sm" role="region" aria-label="Club results" tabIndex={0}>
+          <table className="w-full min-w-[760px] text-left font-body text-sm">
+            <thead className="bg-muted text-xs text-muted-foreground">
+              <tr>
+                <th scope="col" className="px-5 py-4 font-semibold">Club</th>
+                <th scope="col" className="px-4 py-4 text-right font-semibold">Club speed <span className="block font-normal">(mph)</span></th>
+                <th scope="col" className="px-4 py-4 text-right font-semibold">Ball speed <span className="block font-normal">(mph)</span></th>
+                <th scope="col" className="px-4 py-4 text-right font-semibold">Carry <span className="block font-normal">(yds)</span></th>
+                <th scope="col" className="px-4 py-4 text-right font-semibold">Total <span className="block font-normal">(yds)</span></th>
+                <th scope="col" className="px-5 py-4 text-right font-semibold">Spin rate <span className="block font-normal">(rpm)</span></th>
+              </tr>
+            </thead>
+            <tbody className="text-card-foreground">
+              {clubs.map((club) => (
+                <tr key={club.id} className="border-t border-border">
+                  <th scope="row" className="px-5 py-4 font-semibold">
+                    {club.clubType ?? "Club"}
+                    {[club.brand, club.model, club.shaft, club.loft].filter(Boolean).length > 0 && (
+                      <span className="mt-1 block font-normal text-muted-foreground">
+                        {[club.brand, club.model, club.shaft, club.loft].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
+                  </th>
+                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.clubSpeed)}</td>
+                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.ballSpeed)}</td>
+                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.carryDistance, 0)}</td>
+                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.totalDistance, 0)}</td>
+                  <td className="px-5 py-4 text-right tabular-nums">{fmtNum(club.spinRate, 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
-    </div>
+    </section>
+  );
+}
+
+function ClubComparisons({ clubs }: { clubs: CustomerDemoClub[] }) {
+  const comparisons = clubs.filter((club) => club.comparisonClub != null);
+  if (comparisons.length === 0) return null;
+
+  return (
+    <section aria-labelledby="club-comparisons-heading" className="mb-8">
+      <h2 id="club-comparisons-heading" className="mb-4 font-subheading text-xl font-semibold text-foreground">
+        Current vs. Demo Club Comparisons
+      </h2>
+      <div className="flex flex-col gap-4">
+        {comparisons.map((club) => {
+          const current = club.comparisonClub;
+          if (!current) return null;
+          return (
+            <div key={club.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+              <div className="px-5 py-4">
+                <h3 className="break-words font-heading text-base font-semibold text-card-foreground [overflow-wrap:anywhere]">{clubName(club)}</h3>
+                <p className="mt-2 font-body text-xs font-semibold uppercase tracking-widest text-muted-foreground">Compared with</p>
+                <p className="mt-1 break-words font-heading text-sm font-semibold text-card-foreground [overflow-wrap:anywhere]">
+                  {[current.brand, current.model, current.clubType].filter(Boolean).join(" ") || "Current Club"}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-5">
+                <CompactMetricCell label="Club Speed" value={fmtNum(current.clubSpeed)} unit="mph" />
+                <CompactMetricCell label="Ball Speed" value={fmtNum(current.ballSpeed)} unit="mph" />
+                <CompactMetricCell label="Spin Rate" value={fmtNum(current.spinRate, 0)} unit="rpm" />
+                <CompactMetricCell label="Carry" value={fmtNum(current.carryDistance, 0)} unit="yds" />
+                <CompactMetricCell label="Total" value={fmtNum(current.totalDistance, 0)} unit="yds" />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function EquipmentPricing({ clubs, estimatedTotal }: {
+  clubs: CustomerDemoClub[];
+  estimatedTotal: number | null;
+}) {
+  if (clubs.length === 0) return null;
+
+  return (
+    <section aria-labelledby="equipment-pricing-heading">
+      <h2 id="equipment-pricing-heading" className="mb-4 font-subheading text-xl font-semibold text-foreground">
+        Equipment Pricing
+      </h2>
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <table className="w-full table-fixed text-left font-body text-sm">
+          <thead className="bg-muted text-xs text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-5 py-4 font-semibold">Club</th>
+              <th scope="col" className="w-36 px-5 py-4 text-right font-semibold">Estimated price</th>
+            </tr>
+          </thead>
+          <tbody className="text-card-foreground">
+            {clubs.map((club) => (
+              <tr key={club.id} className="border-t border-border">
+                <th scope="row" className="break-words px-5 py-4 font-medium [overflow-wrap:anywhere]">{clubName(club)}</th>
+                <td className="px-5 py-4 text-right tabular-nums">
+                  {club.estimatedPrice != null ? fmtPrice(club.estimatedPrice) : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {estimatedTotal != null && (
+            <tfoot>
+              <tr className="border-t border-border font-semibold text-card-foreground">
+                <th scope="row" className="px-5 py-4">Total estimated price</th>
+                <td className="px-5 py-4 text-right tabular-nums">{fmtPrice(estimatedTotal)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+        {estimatedTotal != null && clubs.some((club) => club.estimatedPrice == null) && (
+          <p className="border-t border-border px-5 py-3 font-body text-xs text-muted-foreground">
+            Total includes available estimates only.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -247,74 +208,26 @@ export function FittingPresentation({
 }) {
   return (
     <>
-      {/* Header */}
-      <div className="mb-8">
-        <span className="inline-block rounded-xl bg-emerald-50 px-4 py-2 text-sm font-semibold tracking-wide text-emerald-700 font-body">
-          SWING LOCKER
-        </span>
-        <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 font-heading">
-          Demo Session
-        </h1>
-        <p className="mt-1 font-body text-sm text-slate-700">
-          {session.customerName}
-        </p>
-        <p className="mt-1 font-body text-sm text-slate-500">
-          {formatSessionDateOnly(session.demoDate)}
-        </p>
-      </div>
+      <SwingLockerHero customerName={session.customerName} fittingDate={session.demoDate} />
 
-      {/* Notes */}
+      <ClubResults clubs={session.clubs} />
+      <ClubComparisons clubs={session.clubs} />
+
       {session.notes && (
-        <div className="mb-8 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div className="mb-8 rounded-xl border border-border bg-card px-5 py-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
-            <span className="h-3.5 w-0.5 rounded-full bg-emerald-500 shrink-0" />
-            <h2 className="font-subheading text-base font-semibold text-slate-800">
+            <span className="h-3.5 w-0.5 rounded-full bg-accent shrink-0" />
+            <h2 className="font-subheading text-base font-semibold text-card-foreground">
               Session Notes
             </h2>
           </div>
-          <p className="font-body text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+          <p className="font-body text-sm text-card-foreground leading-relaxed whitespace-pre-wrap break-words">
             {session.notes}
           </p>
         </div>
       )}
 
-      {/* Clubs section */}
-      <div className="flex items-center gap-2 mb-4">
-        <span className="h-3.5 w-0.5 rounded-full bg-emerald-500 shrink-0" />
-        <h2 className="font-subheading text-base font-semibold text-slate-800">
-          Clubs Tested
-        </h2>
-      </div>
-
-      {session.clubs.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
-          <p className="font-body text-sm text-slate-500">
-            No club data recorded for this session.
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {session.clubs.map((club) => (
-            <ClubCard
-              key={club.id}
-              club={club}
-              comparisonClub={club.comparisonClub ?? undefined}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Estimated total */}
-      {session.estimatedTotal != null && (
-        <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 flex items-center justify-between shadow-sm">
-          <p className="font-body text-sm font-semibold text-emerald-800">
-            Estimated Total
-          </p>
-          <p className="font-heading text-xl font-bold text-emerald-900 tabular-nums">
-            {fmtPrice(session.estimatedTotal)}
-          </p>
-        </div>
-      )}
+      <EquipmentPricing clubs={session.clubs} estimatedTotal={session.estimatedTotal} />
 
       {session.clubs.length > 0 && purchaseAction}
     </>

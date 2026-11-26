@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
+import { IconArrowLeft } from "@tabler/icons-react";
 import {
   SWING_LOCKER_SESSION_COOKIE,
   verifySwingLockerSessionToken,
@@ -37,14 +38,15 @@ export default async function SessionDetailPage({
   if (!session) notFound();
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-10">
-      <div className="mx-auto max-w-3xl">
+    <main className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6 sm:py-10 lg:px-8">
+      <div className="mx-auto max-w-7xl">
         <div className="mb-6">
           <Link
             href="/swing-locker/dashboard"
-            className="font-body text-sm text-emerald-600 hover:text-emerald-800 underline underline-offset-2"
+            className="inline-flex items-center gap-1.5 font-body text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
-            ← Back to Dashboard
+            <IconArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
+            Back to My Swing Locker
           </Link>
         </div>
         <FittingPresentation
