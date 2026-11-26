@@ -20,21 +20,61 @@ function buttonLabel(status: string | null): string {
   return "Send Access";
 }
 
+export function AccessStatusBadge({
+  status,
+  showNotSent = false,
+}: {
+  status: string | null;
+  showNotSent?: boolean;
+}) {
+  if (!status) {
+    return showNotSent ? (
+      <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Not Sent
+      </span>
+    ) : null;
+  }
+
+  return (
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${BADGE_STYLES[status] ?? "bg-muted text-muted-foreground"}`}
+    >
+      {BADGE_LABELS[status] ?? status}
+    </span>
+  );
+}
+
 type Props = {
   sessionId: number;
   initialStatus: string | null;
   clientHasContact: boolean;
   /** "row" (default) = compact table cell; "card" = standalone card section */
   variant?: "row" | "card";
+  secondary?: boolean;
 };
 
 export default function SendAccessButton({
-  sessionId,
   initialStatus,
+  ...props
+}: Props) {
+  const [status, setStatus] = useState(initialStatus);
+
+  return <ControlledSendAccessButton {...props} status={status} onStatusChange={setStatus} />;
+}
+
+export function ControlledSendAccessButton({
+  sessionId,
   clientHasContact,
   variant = "row",
-}: Props) {
-  const [status, setStatus] = useState<string | null>(initialStatus);
+  secondary = false,
+  status,
+  onStatusChange,
+  showBadge = true,
+}: Omit<Props, "initialStatus"> & {
+  status: string | null;
+  onStatusChange: (status: string) => void;
+  showBadge?: boolean;
+}) {
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -55,7 +95,7 @@ export default function SendAccessButton({
         return;
       }
 
-      setStatus("pending");
+      onStatusChange("pending");
       setSuccessMsg("Swing Locker access marked for sending.");
     } catch {
       setErrorMsg("Network error. Please try again.");
@@ -64,29 +104,21 @@ export default function SendAccessButton({
     }
   }
 
-  const badge = status ? (
-    <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${BADGE_STYLES[status] ?? "bg-muted text-muted-foreground"}`}
-    >
-      {BADGE_LABELS[status] ?? status}
-    </span>
-  ) : null;
-
   // card variant — used on the session review page
   if (variant === "card") {
     return (
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          {badge ?? (
-            <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Not Sent
-            </span>
-          )}
+          {showBadge && <AccessStatusBadge status={status} showNotSent />}
           {clientHasContact ? (
             <button
               onClick={handleClick}
               disabled={submitting}
-              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground shadow-xs hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold shadow-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                secondary
+                  ? "border border-border bg-card text-foreground hover:bg-muted"
+                  : "bg-primary text-primary-foreground hover:bg-primary-hover"
+              }`}
             >
               {submitting ? "Sending…" : buttonLabel(status)}
             </button>
@@ -105,7 +137,7 @@ export default function SendAccessButton({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-2">
-        {badge}
+        {showBadge && <AccessStatusBadge status={status} />}
         {clientHasContact ? (
           <button
             onClick={handleClick}
