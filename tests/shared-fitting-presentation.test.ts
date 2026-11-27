@@ -103,6 +103,7 @@ test("customer and staff share finalized fitting data without preview mutations"
   const session = {
     id: 31, clientId: 7, status: "finalized",
     demoDate: new Date("2026-04-15T00:00:00.000Z"),
+    createdAt: new Date("2026-04-16T00:00:00.000Z"),
     client: { firstName: "Alex", lastName: "Golfer" },
     notes: "Existing session note",
     clubTests: [...finalizedPlan.map((row) => finalizedClubs.get(row.summary.id)!), otherCurrent],
@@ -110,7 +111,7 @@ test("customer and staff share finalized fitting data without preview mutations"
   const otherSession = { ...session, id: 32, clubTests: [demo] };
   const draft = { ...session, id: 33, status: "draft" };
   const otherCustomer = { ...session, id: 34, clientId: 8 };
-  const sessions = [session, otherSession, draft, otherCustomer];
+  const sessions = [otherSession, session, draft, otherCustomer];
   let hasRequest = false;
   let cookieReads = 0;
   let cookie = "";
@@ -142,12 +143,42 @@ test("customer and staff share finalized fitting data without preview mutations"
           assert.equal(args.select.clubTests?.select.metrics?.select.avgMaxHeight, true);
           return found;
         },
-        async findMany(args: { where: { clientId: number; status: string } }) {
+        async findMany(args: {
+          where: { clientId: number; status: string };
+          orderBy: { demoDate?: string; createdAt?: string; id?: string }[];
+          select: {
+            id: boolean;
+            demoDate: boolean;
+            status: boolean;
+            clubTests: { select: {
+              id: boolean;
+              clubType: boolean;
+              clubRole: boolean;
+              tags: boolean;
+              includeInReport: boolean;
+              availableForPurchase: boolean;
+              estimatedPrice: boolean;
+            } };
+          };
+        }) {
+          assert.deepEqual(args.orderBy, [
+            { demoDate: "desc" },
+            { createdAt: "desc" },
+            { id: "desc" },
+          ]);
           return sessions
             .filter((row) => row.clientId === args.where.clientId && row.status === args.where.status)
             .map((row) => ({
               id: row.id, demoDate: row.demoDate, status: row.status,
-              clubTests: row.clubTests.filter((item) => item.clubRole === "demo"),
+              clubTests: row.clubTests.map((item) => ({
+                id: item.id,
+                clubType: item.clubType,
+                clubRole: item.clubRole,
+                tags: item.tags,
+                includeInReport: item.includeInReport,
+                availableForPurchase: item.availableForPurchase,
+                estimatedPrice: item.estimatedPrice,
+              })),
             }));
         },
       },
@@ -471,6 +502,17 @@ test("customer and staff share finalized fitting data without preview mutations"
   );
 
   const dashboard = renderToStaticMarkup(await Dashboard());
+  assert.match(dashboard, /Welcome, Alex/);
+  assert.match(dashboard, /Your Fitting History/);
+  assert.match(dashboard, /Included Driver Fitting/);
+  assert.match(dashboard, /April 15, 2026/);
+  assert.match(dashboard, /1 included club/);
+  assert.match(dashboard, /Included Driver · Stiff/);
+  assert.match(dashboard, /Recommended clubs/);
+  assert.match(dashboard, /View Fitting/);
+  assert.match(dashboard, /Most Recent Fitting/);
+  assert.doesNotMatch(dashboard, /Demo Sessions|View Session|bg-slate|bg-white|emerald/);
+  assert.ok(dashboard.indexOf("sessions/32") < dashboard.indexOf("sessions/31"));
   assert.match(dashboard, /href="\/swing-locker\/dashboard\/sessions\/31"/);
   assert.match(dashboard, /href="\/swing-locker\/dashboard\/sessions\/32"/);
   assert.doesNotMatch(dashboard, /sessions\/33|sessions\/34/);

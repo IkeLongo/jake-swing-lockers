@@ -35,10 +35,18 @@ const customerShotSnapshotSchema: z.ZodType<CustomerShotSnapshot> = z.object({
 export interface CustomerSessionSummary {
   id: number;
   demoDate: Date;
-  clubsTestedCount: number;
+  includedClubCount: number;
+  includedClubs: CustomerSessionClubSummary[];
+  recommendedClubs: CustomerSessionClubSummary[];
   /** Sum of estimatedPrice across eligible clubs. Null if no prices are set. */
   estimatedTotal: number | null;
   status: string;
+}
+
+export interface CustomerSessionClubSummary {
+  id: number;
+  name: string | null;
+  label: string;
 }
 
 export interface CustomerClub {
@@ -105,26 +113,77 @@ export async function getCustomerSessions(
       clientId: golfClientId,
       status: "finalized",
     },
-    orderBy: { demoDate: "desc" },
+    orderBy: [
+      { demoDate: "desc" },
+      { createdAt: "desc" },
+      { id: "desc" },
+    ],
     select: {
       id: true,
       demoDate: true,
       status: true,
       clubTests: {
-        select: { clubRole: true, availableForPurchase: true, estimatedPrice: true },
+        select: {
+          id: true,
+          clubType: true,
+          clubRole: true,
+          tags: true,
+          includeInReport: true,
+          availableForPurchase: true,
+          estimatedPrice: true,
+        },
       },
     },
   });
 
-  return rows.map((row) => ({
-    id: row.id,
-    demoDate: row.demoDate,
-    status: row.status,
-    clubsTestedCount: row.clubTests.filter((club) => club.clubRole === "demo").length,
-    estimatedTotal: row.clubTests.some((c) => c.availableForPurchase && c.estimatedPrice !== null)
-      ? sumPrices(row.clubTests.filter((c) => c.availableForPurchase).map((c) => c.estimatedPrice))
-      : null,
-  }));
+  return rows.map((row) => {
+    const includedRows = row.clubTests.filter(
+      (club) => club.includeInReport ?? club.clubRole === "demo",
+    );
+    const summarizeClub = (club: (typeof row.clubTests)[number]): CustomerSessionClubSummary => {
+      const tags = Array.isArray(club.tags)
+        ? club.tags.filter((tag): tag is string => typeof tag === "string")
+        : [];
+      const tagList = tags.join(", ");
+      let name = club.clubType?.trim() ?? "";
+      if (tagList) {
+        for (const suffix of [` - ${tagList}`, ` · ${tagList}`]) {
+          if (name.endsWith(suffix)) {
+            name = name.slice(0, -suffix.length);
+            break;
+          }
+        }
+      }
+      const fallbackClubName = name || "Club";
+      const label = tags.length > 0
+        ? `${fallbackClubName} · ${tagList}`
+        : fallbackClubName;
+      return {
+        id: club.id,
+        name: name || null,
+        label,
+      };
+    };
+    const uniqueClubs = (clubs: typeof row.clubTests) =>
+      [...new Map(clubs.map((club) => [club.id, summarizeClub(club)])).values()];
+    const includedClubs = uniqueClubs(includedRows);
+    const recommendedClubs = uniqueClubs(
+      row.clubTests.filter((club) => club.availableForPurchase),
+    );
+    const priceRows = row.clubTests.filter((club) => club.availableForPurchase);
+
+    return {
+      id: row.id,
+      demoDate: row.demoDate,
+      status: row.status,
+      includedClubCount: includedClubs.length,
+      includedClubs,
+      recommendedClubs,
+      estimatedTotal: priceRows.some((club) => club.estimatedPrice !== null)
+        ? sumPrices(priceRows.map((club) => club.estimatedPrice))
+        : null,
+    };
+  });
 }
 
 /**
