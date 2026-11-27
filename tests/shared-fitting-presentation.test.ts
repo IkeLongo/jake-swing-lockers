@@ -401,7 +401,11 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(preview, /Recommended Clubs[\s\S]*Included Driver - Stiff[\s\S]*\$300/);
   assert.doesNotMatch(preview, /Current vs\. Demo Club Comparisons|Equipment Pricing|Total estimated price|Total includes available estimates only/);
   assert.doesNotMatch(preview, /Unrelated Current|Excluded|mailto:|<form/);
-  assert.match(preview, /<button[^>]*disabled[^>]*>Request Purchase<\/button>/);
+  const previewPurchaseButton = preview.match(/<button[^>]*>Request Purchase<\/button>/)?.[0];
+  assert.ok(previewPurchaseButton);
+  assert.match(previewPurchaseButton, /bg-primary[\s\S]*text-primary-foreground/);
+  assert.match(previewPurchaseButton, /hover:bg-primary-hover[\s\S]*focus-visible:ring-primary\/40[\s\S]*disabled:cursor-not-allowed[\s\S]*disabled:opacity-50/);
+  assert.doesNotMatch(previewPurchaseButton, /emerald/);
 
   const customerToken = signSwingLockerSessionToken({ golfClientId: 7, expiresAt: Date.now() + 60_000 });
   cookie = `staff_session=${staffToken}; swing_locker_session=${customerToken}`;
@@ -445,7 +449,11 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(customer, /Current Driver · Used · Current Brand/);
   assert.match(customer, /Recommended Clubs[\s\S]*Included Driver - Stiff[\s\S]*\$300/);
   assert.doesNotMatch(customer, /Current vs\. Demo Club Comparisons|Equipment Pricing|Total estimated price|Total includes available estimates only/);
-  assert.match(customer, /<button(?![^>]*disabled)[^>]*>Request Purchase<\/button>/);
+  const customerPurchaseButton = customer.match(/<button[^>]*>Request Purchase<\/button>/)?.[0];
+  assert.ok(customerPurchaseButton);
+  assert.match(customerPurchaseButton, /bg-primary[\s\S]*text-primary-foreground/);
+  assert.match(customerPurchaseButton, /hover:bg-primary-hover[\s\S]*focus-visible:ring-primary\/40[\s\S]*disabled:cursor-not-allowed[\s\S]*disabled:opacity-50/);
+  assert.doesNotMatch(customerPurchaseButton, /emerald/);
   assert.doesNotMatch(customer, /Staff Preview|Unrelated Current|Excluded/);
   demo.availableForPurchase = false;
   const noSaleCustomer = renderToStaticMarkup(await CustomerPage({ params: Promise.resolve({ id: "31" }) }));

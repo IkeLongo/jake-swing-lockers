@@ -100,7 +100,7 @@ export function PurchaseRequestTrigger({ sessionId, clubs }: PurchaseRequestTrig
       <div className="mt-6">
         <button
           onClick={openModal}
-          className="w-full rounded-xl bg-emerald-600 px-5 py-3.5 font-body text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 active:bg-emerald-800 transition-colors"
+          className="w-full rounded-xl bg-primary px-5 py-3.5 font-body text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Request Purchase
         </button>
@@ -116,7 +116,7 @@ export function PurchaseRequestTrigger({ sessionId, clubs }: PurchaseRequestTrig
       <div className="mt-6">
         <button
           disabled
-          className="w-full rounded-xl bg-emerald-600 px-5 py-3.5 font-body text-sm font-semibold text-white shadow-sm opacity-50 cursor-default"
+          className="w-full rounded-xl bg-primary px-5 py-3.5 font-body text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Request Purchase
         </button>
@@ -244,7 +244,7 @@ export function PurchaseRequestTrigger({ sessionId, clubs }: PurchaseRequestTrig
                 <button
                   onClick={handleSubmit}
                   disabled={checkedIds.size === 0 || step === "submitting"}
-                  className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 font-body text-sm font-semibold text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 rounded-xl bg-primary px-4 py-3 font-body text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {step === "submitting" ? "Submitting…" : "Submit Request"}
                 </button>

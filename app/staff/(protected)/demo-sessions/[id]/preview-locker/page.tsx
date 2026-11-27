@@ -78,7 +78,7 @@ export default async function PreviewLockerPage({
                 <button
                   type="button"
                   disabled
-                  className="w-full cursor-not-allowed rounded-xl bg-emerald-600 px-5 py-3.5 font-body text-sm font-semibold text-white shadow-sm opacity-50"
+                  className="w-full rounded-xl bg-primary px-5 py-3.5 font-body text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Request Purchase
                 </button>
