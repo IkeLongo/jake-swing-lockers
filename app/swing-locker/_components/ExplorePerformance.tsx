@@ -1,9 +1,27 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState, useSyncExternalStore } from "react";
+import { ClubFlightVisualization } from "@/app/_components/visualizations/ClubFlightVisualization";
 import { DispersionChart } from "@/app/_components/visualizations/DispersionChart";
 import type { DispersionPoint } from "@/lib/golf/dispersion";
+import { buildCustomerShotFlights } from "@/lib/golf/flight/customerShotFlights";
 import type { CustomerClub, CustomerDemoClub } from "@/lib/queries/customer-sessions";
+
+function subscribeThemeColors(onChange: () => void) {
+  // Three.js needs resolved colors and cannot read CSS variables itself.
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+  return () => observer.disconnect();
+}
+
+function readThemeColors() {
+  const styles = getComputedStyle(document.documentElement);
+  return `${styles.getPropertyValue("--primary").trim()}|${styles.getPropertyValue("--accent").trim()}`;
+}
+
+function readServerThemeColors() {
+  return "";
+}
 
 function clubName(club: CustomerClub): string {
   const name = club.clubType?.trim() || "Club";
@@ -47,27 +65,56 @@ export function linkedDispersionClubs(clubs: readonly CustomerDemoClub[], select
 export function ExplorePerformance({ clubs }: { clubs: CustomerDemoClub[] }) {
   const selectId = useId();
   const [selectedId, setSelectedId] = useState<number | null>(clubs[0]?.id ?? null);
-  const clubsById = new Map<number, CustomerClub>(clubs.map((club) => [club.id, club]));
-  for (const club of clubs) {
-    if (club.comparisonClub && !clubsById.has(club.comparisonClub.id)) {
-      clubsById.set(club.comparisonClub.id, club.comparisonClub);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const themeColors = useSyncExternalStore(subscribeThemeColors, readThemeColors, readServerThemeColors);
+  const clubsById = useMemo(() => {
+    const result = new Map<number, CustomerClub>(clubs.map((club) => [club.id, club]));
+    for (const club of clubs) {
+      if (club.comparisonClub && !result.has(club.comparisonClub.id)) {
+        result.set(club.comparisonClub.id, club.comparisonClub);
+      }
     }
-  }
+    return result;
+  }, [clubs]);
   const selected = (selectedId === null ? undefined : clubsById.get(selectedId)) ?? clubs[0];
-  const linkedClubs = selected ? linkedDispersionClubs(clubs, selected.id) : [];
+  const linkedClubs = useMemo(
+    () => selected ? linkedDispersionClubs(clubs, selected.id) : [],
+    [clubs, selected],
+  );
+  const flightData = useMemo(
+    () => buildCustomerShotFlights(selected ? [selected, ...linkedClubs] : []),
+    [selected, linkedClubs],
+  );
   const selectedData = selected ? clubDispersion(selected) : { points: [], includedShotCount: 0 };
   const comparisons = linkedClubs.map((club) => ({ club, data: clubDispersion(club) }));
   const points = [...selectedData.points, ...comparisons.flatMap(({ data }) => data.points)];
   const includedShotCount = selectedData.includedShotCount +
     comparisons.reduce((total, { data }) => total + data.includedShotCount, 0);
-  const colors = new Map<number, string>(
+  const colors = useMemo(() => new Map<number, string>(
     [...clubsById.keys()].sort((a, b) => a - b).map((id, index) => [
       id,
       index === 0 ? "var(--primary)" : index === 1 ? "var(--accent)"
-        : `hsl(${(210 + (index - 2) * 137.508) % 360} 70% 48%)`,
+        : `hsl(${(210 + (index - 2) * 137.508) % 360}, 70%, 48%)`,
     ]),
+  ), [clubsById]);
+  const names = useMemo(
+    () => new Map([...clubsById.values()].map((club) => [club.id, clubName(club)])),
+    [clubsById],
   );
-  const names = new Map([...clubsById.values()].map((club) => [club.id, clubName(club)]));
+  const clubOptions = useMemo(() => {
+    if (!themeColors) return null;
+    const [primary, accent] = themeColors.split("|");
+    const hexColor = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+    if (!primary || !accent || !hexColor.test(primary) || !hexColor.test(accent)) return null;
+    return {
+      colorsBySummaryId: new Map([...colors].map(([id, color]) => [
+        id,
+        color === "var(--primary)" ? primary
+          : color === "var(--accent)" ? accent : color,
+      ])),
+      namesBySummaryId: names,
+    };
+  }, [colors, names, themeColors]);
 
   return (
     <section aria-labelledby="explore-performance-heading" className="mb-8">
@@ -75,13 +122,7 @@ export function ExplorePerformance({ clubs }: { clubs: CustomerDemoClub[] }) {
         Explore Your Performance
       </h2>
       <div className="min-w-0 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="font-heading text-base font-semibold text-card-foreground">Shot Dispersion</h3>
-            <p className="mt-1 font-body text-sm text-muted-foreground">
-              See where your shots landed.
-            </p>
-          </div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-end">
           {selected && (
             <div className="w-full min-w-0 sm:w-64">
               <label htmlFor={selectId} className="mb-1.5 block font-body text-xs font-semibold text-muted-foreground">
@@ -114,23 +155,50 @@ export function ExplorePerformance({ clubs }: { clubs: CustomerDemoClub[] }) {
           </div>
         )}
 
-        {selected && selectedData.points.length === 0 && points.length > 0 && (
-          <p className="mt-4 font-body text-sm text-muted-foreground">
-            No measured dispersion is available for {clubName(selected)}.
-          </p>
-        )}
-        {comparisons.filter(({ data }) => data.points.length === 0).map(({ club }) => (
-          <p key={club.id} className="mt-2 font-body text-sm text-muted-foreground">
-            No measured dispersion is available for {clubName(club)}.
-          </p>
-        ))}
-        <div className="mx-auto mt-4 flex w-full max-w-md min-w-0">
-          <DispersionChart
-            points={points}
-            includedShotCount={includedShotCount}
-            colorsBySummaryId={colors}
-            namesBySummaryId={names}
-          />
+        <div className="mt-5 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+          <div className="flex min-w-0 flex-col">
+            <h3 className="font-heading text-base font-semibold text-card-foreground">Shot Dispersion</h3>
+            <p className="mt-1 font-body text-sm text-muted-foreground">See where your shots landed.</p>
+            {selected && selectedData.points.length === 0 && points.length > 0 && (
+              <p className="mt-4 font-body text-sm text-muted-foreground">
+                No measured dispersion is available for {clubName(selected)}.
+              </p>
+            )}
+            {comparisons.filter(({ data }) => data.points.length === 0).map(({ club }) => (
+              <p key={club.id} className="mt-2 font-body text-sm text-muted-foreground">
+                No measured dispersion is available for {clubName(club)}.
+              </p>
+            ))}
+            <div className="mx-auto mt-4 flex w-full max-w-md min-w-0">
+              <DispersionChart
+                points={points}
+                includedShotCount={includedShotCount}
+                colorsBySummaryId={colors}
+                namesBySummaryId={names}
+              />
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-col">
+            <h3 className="font-heading text-base font-semibold text-card-foreground">Shot Analyzer</h3>
+            <p className="mt-1 font-body text-sm text-muted-foreground">Modeled flight from measured shot data.</p>
+            <div className="mt-4 flex min-w-0 flex-1">
+              {flightData.flights.length === 0 || clubOptions ? (
+                <ClubFlightVisualization
+                  flights={flightData.flights}
+                  includedShotCount={flightData.includedShotCount}
+                  selectedShotId={selectedShotId}
+                  onSelectedShotChange={setSelectedShotId}
+                  embedded
+                  showSelectedFlightDetail={false}
+                  clubOptions={clubOptions ?? undefined}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground" role={themeColors ? "alert" : "status"}>
+                  {themeColors ? "Unable to load shot analyzer colors." : "Loading shot analyzer…"}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
         <p className="mt-4 font-body text-xs text-muted-foreground">
           Lateral values are signed; left and right direction has not been verified.

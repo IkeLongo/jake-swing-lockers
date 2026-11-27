@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
-import { ClubFlightVisualization } from "./ClubFlightVisualization";
+import { ClubFlightVisualization } from "@/app/_components/visualizations/ClubFlightVisualization";
 import { DispersionChart } from "@/app/_components/visualizations/DispersionChart";
 import { GappingChart } from "./GappingChart";
 import { buildGappingRows } from "./reviewFittingGapping";

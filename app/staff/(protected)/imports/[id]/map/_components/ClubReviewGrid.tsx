@@ -21,7 +21,7 @@ import {
 import {
   ClubFlightVisualization,
   FLIGHT_PALETTE,
-} from "./ClubFlightVisualization";
+} from "@/app/_components/visualizations/ClubFlightVisualization";
 import {
   canSelectTest,
   getComparisonGroupForSummary,

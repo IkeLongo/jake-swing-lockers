@@ -11,6 +11,8 @@ import { Prisma } from "../app/generated/prisma/client";
 import { signStaffSessionToken } from "../lib/auth/session";
 import { signSwingLockerSessionToken } from "../lib/auth/swing-locker-session";
 import { flattenPlan, planComparisonGroups } from "../lib/imports/finalizationPlan";
+import { buildCustomerShotFlights } from "../lib/golf/flight/customerShotFlights";
+import { toGolfShotVizFlights } from "../lib/golf/flight/golfShotVizAdapter";
 import type { CustomerDemoClub, CustomerSessionDetail } from "../lib/queries/customer-sessions";
 import { FittingPresentation } from "../app/swing-locker/_components/FittingPresentation";
 import { ExplorePerformance, linkedDispersionClubs } from "../app/swing-locker/_components/ExplorePerformance";
@@ -535,6 +537,10 @@ test("customer dispersion plots only usable approved shots and handles missing c
 
   const standalone = render([club]);
   assert.match(standalone, /Select club/);
+  assert.match(standalone, /Shot Dispersion[\s\S]*Shot Analyzer/);
+  assert.match(standalone, /Modeled flight from measured shot data/);
+  assert.match(standalone, /No flight visualization available for this selection/);
+  assert.equal(standalone.match(/<select/g)?.length, 1);
   assert.match(standalone, /See where your shots landed/);
   assert.match(standalone, /Iron · Stiff/);
   assert.match(standalone, /2 of 5 included shots plotted/);
@@ -575,4 +581,61 @@ test("customer dispersion plots only usable approved shots and handles missing c
   assert.deepEqual(linkedDispersionClubs([first, second, unlinked], 2).map((item) => item.id), [1, 3]);
   assert.deepEqual(linkedDispersionClubs([first, second, unlinked], 1).map((item) => item.id), [2]);
   assert.deepEqual(linkedDispersionClubs([first, second, unlinked], 4), []);
+});
+
+test("customer flight models use selected and linked approved shots without filling missing measurements", () => {
+  const measurements = {
+    carryYd: 200, carrySideYd: -7, apexDistanceYd: 100, apexHeightYd: 30,
+    apexSideYd: -4, launchAngleDeg: 14, launchDirectionDeg: -2,
+    landingAngleDeg: 40, totalYd: 220, totalSideYd: -9,
+  };
+  const base: CustomerDemoClub = {
+    id: 1, clubType: "Iron", tags: [], brand: null, model: null, shaft: null, loft: null,
+    clubSpeed: null, ballSpeed: null, smashFactor: null, spinRate: null,
+    carryDistance: null, totalDistance: null, avgMaxHeight: null,
+    launchAngle: null, dispersion: null, estimatedPrice: null, comparisonClub: null,
+    approvedShotSnapshot: {
+      version: 1,
+      shots: [
+        { lateralSignConvention: "unknown", measurements },
+        { lateralSignConvention: "unknown", measurements: { ...measurements, carrySideYd: null } },
+        { lateralSignConvention: "unknown", measurements: { ...measurements, apexHeightYd: null } },
+      ],
+    },
+  };
+  const linked = {
+    ...base, id: 2, clubType: "Wood", comparisonClub: undefined,
+    approvedShotSnapshot: {
+      version: 1 as const,
+      shots: [{ lateralSignConvention: "unknown" as const, measurements: {
+        ...measurements, launchDirectionDeg: 0, apexSideYd: 0, carrySideYd: 0,
+      } }],
+    },
+  };
+  const first = { ...base, comparisonClub: linked };
+  const second = { ...base, id: 3, comparisonClub: linked, approvedShotSnapshot: null };
+  const unrelated = { ...base, id: 4 };
+  const clubs = [first, second, unrelated];
+
+  const firstData = buildCustomerShotFlights([first, ...linkedDispersionClubs(clubs, first.id)]);
+  assert.equal(firstData.includedShotCount, 4);
+  assert.deepEqual(firstData.flights.map((flight) => flight.shotId), ["1:0", "2:0"]);
+  const rendered = toGolfShotVizFlights(firstData.flights);
+  assert.ok(rendered.every((flight) => flight.lateralDataAvailable));
+  assert.ok(rendered[0]!.points.some((point) => point[2] < 0));
+  assert.ok(rendered[1]!.points.every((point) => point[2] === 0));
+
+  const linkedData = buildCustomerShotFlights([linked, ...linkedDispersionClubs(clubs, linked.id)]);
+  assert.equal(linkedData.includedShotCount, 4);
+  assert.deepEqual(linkedData.flights.map((flight) => flight.shotId), ["2:0", "1:0"]);
+  assert.deepEqual(buildCustomerShotFlights([{ id: 5, approvedShotSnapshot: null }]), {
+    includedShotCount: 0, flights: [],
+  });
+  assert.equal(buildCustomerShotFlights([{
+    id: 6,
+    approvedShotSnapshot: {
+      version: 1,
+      shots: [{ lateralSignConvention: "unknown", measurements: { ...measurements, launchDirectionDeg: null } }],
+    },
+  }]).flights.length, 0);
 });
