@@ -92,6 +92,7 @@ interface ClubReviewGridProps {
     summaryId: number,
     metrics: ShotReviewSummaryMetrics,
   ) => void;
+  onShotSavingChange: (saving: boolean) => void;
 }
 
 const sharedTransition = { type: "spring", stiffness: 260, damping: 28 } as const;
@@ -194,6 +195,7 @@ export function ClubReviewGrid({
   onSaveTests,
   onPriceSaved,
   onShotSummaryUpdated,
+  onShotSavingChange,
 }: ClubReviewGridProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [shotData, setShotData] = useState<Record<number, ShotReviewResponse>>({});
@@ -371,6 +373,7 @@ export function ClubReviewGrid({
     if (savingShotIdsRef.current.has(shot.id)) return;
 
     savingShotIdsRef.current.add(shot.id);
+    onShotSavingChange(true);
     setSavingShotIds((current) => new Set(current).add(shot.id));
     setShotActionErrors((current) => {
       const next = { ...current };
@@ -445,6 +448,7 @@ export function ClubReviewGrid({
       }));
     } finally {
       savingShotIdsRef.current.delete(shot.id);
+      if (savingShotIdsRef.current.size === 0) onShotSavingChange(false);
       setSavingShotIds((current) => {
         const next = new Set(current);
         next.delete(shot.id);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
 import {
   ClubReviewGrid,
@@ -34,6 +35,7 @@ interface Props {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ClubSummarySection({ batchId, initialSummaries, parserMode, sessionId, sessionStatus, needsRefinalization: initialNeedsRefinalization, hideHeading = false, hideFinalize = false }: Props) {
+  const router = useRouter();
   const [summaries, setSummaries] =
     useState<SerializedClubSummary[]>(initialSummaries);
   const [generating, setGenerating] = useState(false);
@@ -44,14 +46,61 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
 
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [finalizeSuccess, setFinalizeSuccess] = useState(false);
+  const [savingShots, setSavingShots] = useState(false);
   const [finalized, setFinalized] = useState(
     sessionStatus === "finalized",
   );
   // Tracks whether edits have been made since last finalization
   const [dirty, setDirty] = useState(initialNeedsRefinalization ?? false);
+  const [previousSummaries, setPreviousSummaries] = useState(initialSummaries);
+  if (previousSummaries !== initialSummaries) {
+    setPreviousSummaries(initialSummaries);
+    setSummaries(initialSummaries);
+    setDirty(initialNeedsRefinalization ?? false);
+  }
 
   const hasSummaries = summaries.length > 0;
   const hasUnassigned = summaries.some((s) => s.clubName === "Unassigned");
+
+  function markDirty() {
+    if (finalized) {
+      setDirty(true);
+      setFinalizeSuccess(false);
+      setFinalizeError(null);
+    }
+  }
+
+  async function handleFinalize() {
+    if (!sessionId || finalizing) return;
+    setFinalizing(true);
+    setFinalizeError(null);
+    setFinalizeSuccess(false);
+    try {
+      const res = await fetch(`/api/staff/demo-sessions/${sessionId}/finalize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        alreadyFinalized?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.success) {
+        setFinalizeError(data.error ?? "Failed to finalize. Please try again.");
+        return;
+      }
+      setFinalized(true);
+      setDirty(false);
+      setFinalizeSuccess(!data.alreadyFinalized);
+      router.refresh();
+    } catch {
+      setFinalizeError("Network error — please try again.");
+    } finally {
+      setFinalizing(false);
+    }
+  }
 
   async function handleGenerate() {
     setGenerating(true);
@@ -127,7 +176,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       prev.map((s) => (s.id === summaryId ? { ...s, ...identity } : s)),
     );
     // If the session was finalized, mark it as needing re-finalization
-    if (finalized) setDirty(true);
+    markDirty();
   }
 
   function handlePriceSaved(summaryId: number, estimatedPrice: number | null) {
@@ -136,7 +185,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
         summary.id === summaryId ? { ...summary, estimatedPrice } : summary,
       ),
     );
-    if (finalized) setDirty(true);
+    markDirty();
   }
 
   function handleShotSummaryUpdated(
@@ -148,7 +197,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
         summary.id === summaryId ? { ...summary, ...metrics } : summary,
       ),
     );
-    if (finalized) setDirty(true);
+    markDirty();
   }
 
   async function handleToggleInclude(id: number, currentIncluded: boolean) {
@@ -194,7 +243,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
         }
 
         // If the session was finalized, mark it as needing re-finalization
-        if (finalized) setDirty(true);
+        markDirty();
       }
     } catch {
       // Revert on network error
@@ -229,7 +278,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       setSummaries((prev) => prev.map((s) => s.id === id
         ? { ...s, availableForPurchase: saved }
         : s));
-      if (finalized) setDirty(true);
+      markDirty();
     } catch {
       setToggleError("Network error — please try again.");
     } finally {
@@ -286,7 +335,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
         result.testSummaryIds,
       ),
     );
-    if (shouldMarkComparisonDirty(result.changed, finalized)) setDirty(true);
+    if (shouldMarkComparisonDirty(result.changed, finalized)) markDirty();
     return result;
   }
 
@@ -382,11 +431,41 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           onSaveTests={handleSaveTests}
           onPriceSaved={handlePriceSaved}
           onShotSummaryUpdated={handleShotSummaryUpdated}
+          onShotSavingChange={setSavingShots}
         />
       )}
 
+      {hasSummaries && parserMode === "trackman-result" && finalized && sessionId && (
+        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card px-5 py-4 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground" role="status">
+              {toggling.size > 0 || savingShots
+                ? "Saving changes…"
+                : dirty
+                  ? "Changes are pending. Re-finalize to update the Swing Locker."
+                  : finalizeSuccess
+                    ? "Fitting re-finalized. The Swing Locker is up to date."
+                    : "The Swing Locker is up to date."}
+            </p>
+            {finalizeError && (
+              <p className="mt-2 text-sm text-red-600 dark:text-red-400" role="alert">
+                {finalizeError}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={!dirty || finalizing || toggling.size > 0 || savingShots}
+            onClick={handleFinalize}
+            className="shrink-0 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {finalizing ? "Re-finalizing…" : "Re-finalize Fitting"}
+          </button>
+        </div>
+      )}
+
       {/* ── Finalize section ────────────────────────────────────────────────── */}
-      {hasSummaries && !hideFinalize && (
+      {hasSummaries && !hideFinalize && !(parserMode === "trackman-result" && finalized) && (
         <div className="rounded-xl border border-border bg-card px-5 py-5 shadow-xs">
           {finalized && !dirty ? (
             // ── Clean finalized state ────────────────────────────────────────────
@@ -445,35 +524,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
                 </div>
                 <button
                   disabled={finalizing || !sessionId}
-                  onClick={() => {
-                    if (!sessionId) return;
-                    setFinalizing(true);
-                    setFinalizeError(null);
-                    fetch(`/api/staff/demo-sessions/${sessionId}/finalize`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ batchId }),
-                    })
-                      .then(async (res) => {
-                        const data = (await res.json().catch(() => ({}))) as {
-                          success?: boolean;
-                          alreadyFinalized?: boolean;
-                          error?: string;
-                        };
-                        if (!res.ok || !data.success) {
-                          setFinalizeError(
-                            data.error ?? "Failed to finalize. Please try again.",
-                          );
-                        } else {
-                          setFinalized(true);
-                          setDirty(false);
-                        }
-                      })
-                      .catch(() => {
-                        setFinalizeError("Network error — please try again.");
-                      })
-                      .finally(() => setFinalizing(false));
-                  }}
+                  onClick={handleFinalize}
                   className="shrink-0 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-xs hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   {finalizing

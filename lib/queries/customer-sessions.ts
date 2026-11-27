@@ -44,6 +44,7 @@ export interface CustomerSessionSummary {
 export interface CustomerClub {
   id: number;
   clubType: string | null;
+  tags: string[];
   brand: string | null;
   model: string | null;
   shaft: string | null;
@@ -54,6 +55,7 @@ export interface CustomerClub {
   spinRate: number | null;
   carryDistance: number | null;
   totalDistance: number | null;
+  avgMaxHeight: number | null;
   launchAngle: number | null;
   dispersion: number | null;
   estimatedPrice: number | null;
@@ -76,6 +78,7 @@ export interface CustomerSessionDetail {
   customerName: string;
   notes: string | null;
   clubs: CustomerDemoClub[];
+  resultsClubs: CustomerClub[];
   purchaseClubs: CustomerPurchaseClub[];
   /** Sum of estimatedPrice across eligible clubs. Null if no prices are set. */
   estimatedTotal: number | null;
@@ -160,6 +163,7 @@ export async function getCustomerSession(
           loft: true,
           estimatedPrice: true,
           clubRole: true,
+          includeInReport: true,
           availableForPurchase: true,
           tags: true,
           pairIndex: true,
@@ -173,6 +177,7 @@ export async function getCustomerSession(
               spinRate: true,
               carryDistance: true,
               totalDistance: true,
+              avgMaxHeight: true,
               launchAngle: true,
               dispersion: true,
             },
@@ -184,7 +189,10 @@ export async function getCustomerSession(
 
   if (!row) return null;
 
+  const mappedClubs = new Map<number, CustomerClub>();
   const toCustomerClub = (ct: (typeof row.clubTests)[number]): CustomerClub => {
+    const mapped = mappedClubs.get(ct.id);
+    if (mapped) return mapped;
     let approvedShotSnapshot: CustomerShotSnapshot | null = null;
     if (ct.approvedShotSnapshot !== null) {
       const parsed = customerShotSnapshotSchema.safeParse(ct.approvedShotSnapshot);
@@ -195,9 +203,12 @@ export async function getCustomerSession(
       }
     }
 
-    return {
+    const club: CustomerClub = {
       id: ct.id,
       clubType: ct.clubType,
+      tags: Array.isArray(ct.tags)
+        ? ct.tags.filter((tag): tag is string => typeof tag === "string")
+        : [],
       brand: ct.brand,
       model: ct.model,
       shaft: ct.shaft,
@@ -209,10 +220,13 @@ export async function getCustomerSession(
       spinRate: ct.metrics?.spinRate ?? null,
       carryDistance: toNum(ct.metrics?.carryDistance),
       totalDistance: toNum(ct.metrics?.totalDistance),
+      avgMaxHeight: toNum(ct.metrics?.avgMaxHeight),
       launchAngle: toNum(ct.metrics?.launchAngle),
       dispersion: toNum(ct.metrics?.dispersion),
       approvedShotSnapshot,
     };
+    mappedClubs.set(ct.id, club);
+    return club;
   };
   const currentByTestId = new Map(
     groupFinalizedClubs(row.clubTests).flatMap((group) =>
@@ -222,6 +236,9 @@ export async function getCustomerSession(
     ),
   );
   const demoClubs = row.clubTests.filter((club) => club.clubRole === "demo");
+  const resultsClubs = row.clubTests
+    .filter((club) => club.includeInReport ?? (club.clubRole === "demo"))
+    .map(toCustomerClub);
   const clubs: CustomerDemoClub[] = demoClubs.map((club) => {
     const current = currentByTestId.get(club.id);
     return {
@@ -242,6 +259,7 @@ export async function getCustomerSession(
       [row.client.firstName, row.client.lastName].filter(Boolean).join(" ") || "Golfer",
     notes: row.notes,
     clubs,
+    resultsClubs,
     purchaseClubs,
     estimatedTotal: purchaseClubs.some((club) => club.estimatedPrice !== null)
       ? sumPrices(purchaseClubs.map((club) => club.estimatedPrice))

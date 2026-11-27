@@ -13,7 +13,7 @@ import { signSwingLockerSessionToken } from "../lib/auth/swing-locker-session";
 import { flattenPlan, planComparisonGroups } from "../lib/imports/finalizationPlan";
 import type { CustomerDemoClub, CustomerSessionDetail } from "../lib/queries/customer-sessions";
 import { FittingPresentation } from "../app/swing-locker/_components/FittingPresentation";
-import { ExplorePerformance } from "../app/swing-locker/_components/ExplorePerformance";
+import { ExplorePerformance, linkedDispersionClubs } from "../app/swing-locker/_components/ExplorePerformance";
 
 const nextHeaders: typeof import("next/headers") =
   createRequire(resolve("tests", "shared-fitting-presentation.test.ts"))("next/headers");
@@ -51,6 +51,7 @@ test("customer and staff share finalized fitting data without preview mutations"
     brand: null as string | null, model: null as string | null,
     shaft: null as string | null, loft: null as string | null,
     estimatedPrice: null as Prisma.Decimal | null,
+    includeInReport: null as boolean | null,
     availableForPurchase: false,
     tags: [] as string[],
     approvedShotSnapshot: null as Prisma.JsonValue,
@@ -58,24 +59,30 @@ test("customer and staff share finalized fitting data without preview mutations"
       clubSpeed: decimal("90"), ballSpeed: decimal("130"),
       smashFactor: decimal("1.44"), spinRate: 2500,
       carryDistance: decimal("210"), totalDistance: decimal("230"),
+      avgMaxHeight: decimal("30") as Prisma.Decimal | null,
       launchAngle: decimal("12"), dispersion: decimal("8"),
     },
   });
   const current = {
     ...club(10, "current", "Current Driver", 0),
     brand: "Current Brand",
+    tags: ["Used"],
+    includeInReport: false,
     approvedShotSnapshot: snapshot(100, 190) as Prisma.JsonValue,
   };
   const demo = {
     ...club(11, "demo", "Included Driver", 0),
     currentClubTestId: current.id,
     shaft: "Regular",
+    tags: ["Stiff"],
+    includeInReport: true,
     estimatedPrice: decimal("299.75"),
     availableForPurchase: true,
     approvedShotSnapshot: snapshot(101) as Prisma.JsonValue,
   };
   const otherCurrent = {
     ...club(12, "current", "Unrelated Current", 1),
+    includeInReport: false,
     approvedShotSnapshot: snapshot(102) as Prisma.JsonValue,
   };
   const finalizedPlan = flattenPlan(planComparisonGroups([
@@ -108,7 +115,11 @@ test("customer and staff share finalized fitting data without preview mutations"
       demoSession: {
         async findFirst(args: {
           where: { id: number; clientId?: number; status?: string };
-          select: { clientId?: boolean; clubTests?: { select: { approvedShotSnapshot?: boolean } } };
+          select: { clientId?: boolean; clubTests?: { select: {
+            approvedShotSnapshot?: boolean;
+            includeInReport?: boolean;
+            metrics?: { select: { avgMaxHeight?: boolean } };
+          } } };
         }) {
           queries.push(args.where);
           const found = sessions.find((row) =>
@@ -119,6 +130,8 @@ test("customer and staff share finalized fitting data without preview mutations"
           if (!found) return null;
           if (args.select.clientId) return { clientId: found.clientId };
           assert.equal(args.select.clubTests?.select.approvedShotSnapshot, true);
+          assert.equal(args.select.clubTests?.select.includeInReport, true);
+          assert.equal(args.select.clubTests?.select.metrics?.select.avgMaxHeight, true);
           return found;
         },
         async findMany(args: { where: { clientId: number; status: string } }) {
@@ -167,8 +180,12 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.equal(fitting.demoDate, "2026-04-15T00:00:00.000Z");
   assert.equal(fitting.estimatedTotal, 299.75);
   assert.equal(fitting.clubs.length, 1);
+  assert.deepEqual(fitting.resultsClubs.map((item) => item.id), [11]);
+  assert.equal(fitting.resultsClubs[0]?.avgMaxHeight, 30);
   assert.equal(fitting.clubs[0]?.shaft, "Regular");
   assert.equal(fitting.clubs[0]?.launchAngle, 12);
+  assert.deepEqual(fitting.clubs[0]?.tags, ["Stiff"]);
+  assert.deepEqual(fitting.clubs[0]?.comparisonClub?.tags, ["Used"]);
   assert.equal(fitting.clubs[0]?.comparisonClub?.clubType, "Current Driver");
   const expectedSnapshot = {
     version: 1,
@@ -187,6 +204,49 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.equal(await getCustomerSession(8, 31), null);
   assert.equal(await getCustomerSession(7, 33), null);
   assert.ok(queries.some((where) => where.id === 31 && where.clientId === 7 && where.status === "finalized"));
+
+  const originalResultClubs = session.clubTests;
+  session.clubTests = [
+    { ...current, clubType: "6Iron - Xxio 10", tags: ["Xxio 10"], includeInReport: true },
+    { ...demo, clubType: "6Iron", tags: ["Mens14"], availableForPurchase: false },
+    { ...demo, id: 15, clubType: "7Iron", tags: ["Mens14"], availableForPurchase: false },
+    otherCurrent,
+  ];
+  const allResults = await getCustomerSession(7, 31);
+  assert.ok(allResults);
+  assert.deepEqual(allResults.resultsClubs.map((item) => item.id), [10, 11, 15]);
+  assert.equal(allResults.purchaseClubs.length, 0);
+  const resultsHtml = renderToStaticMarkup(createElement(FittingPresentation, {
+    session: allResults, purchaseAction: null,
+  })).match(/<section aria-labelledby="club-results-heading"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(resultsHtml);
+  assert.match(resultsHtml, /6Iron · Xxio 10/);
+  assert.match(resultsHtml, /6Iron · Mens14/);
+  assert.match(resultsHtml, /7Iron · Mens14/);
+  assert.equal(resultsHtml.match(/<tr class="border-t border-border">/g)?.length, 3);
+  assert.doesNotMatch(resultsHtml, /Unrelated Current|Xxio 10 · Xxio 10/);
+  session.clubTests = [
+    { ...current, includeInReport: null },
+    { ...demo, includeInReport: null, metrics: { ...demo.metrics, avgMaxHeight: null } },
+  ];
+  const legacyResults = await getCustomerSession(7, 31);
+  assert.deepEqual(legacyResults?.resultsClubs.map((item) => item.id), [11]);
+  assert.equal(legacyResults?.resultsClubs[0]?.avgMaxHeight, null);
+  session.clubTests = originalResultClubs;
+
+  const originalGroupedClubs = session.clubTests;
+  session.clubTests = [
+    current,
+    demo,
+    { ...demo, id: 15, clubType: "Second Driver", tags: ["Regular"], approvedShotSnapshot: snapshot(105, 220) },
+  ];
+  const grouped = await getCustomerSession(7, 31);
+  assert.ok(grouped);
+  assert.deepEqual(grouped.clubs.map((item) => item.comparisonClub?.id), [10, 10]);
+  assert.deepEqual(linkedDispersionClubs(grouped.clubs, 10).map((item) => item.id), [11, 15]);
+  const groupedMarkup = renderToStaticMarkup(createElement(ExplorePerformance, { clubs: grouped.clubs }));
+  assert.match(groupedMarkup, /Second Driver · Regular/);
+  session.clubTests = originalGroupedClubs;
 
   const purchaseSource = session.clubTests;
   session.clubTests = [
@@ -272,7 +332,8 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(preview, /April 15, 2026/);
   assert.match(preview, /Explore Your Performance/);
   assert.match(preview, /2 of 2 included shots plotted/);
-  assert.match(preview, /Compare current: Current Driver/);
+  assert.match(preview, /Current Driver · Used · Current Brand/);
+  assert.match(preview, /Included Driver · Stiff/);
   assert.match(preview, /Included Driver/);
   assert.match(preview, /Current Brand Current Driver/);
   assert.doesNotMatch(preview, /Unrelated Current|Excluded|mailto:|<form/);
@@ -304,7 +365,7 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.equal(fittingElement.props.purchaseAction.type, PurchaseRequestTrigger);
   assert.deepEqual(fittingElement.props.purchaseAction.props, {
     sessionId: 31,
-    clubs: [{ id: 11, label: "Included Driver", estimatedPrice: 299.75 }],
+    clubs: [{ id: 11, label: "Included Driver - Stiff", estimatedPrice: 299.75 }],
   });
   const customer = renderToStaticMarkup(customerPage);
   assert.match(customer, /href="\/swing-locker\/dashboard"/);
@@ -358,8 +419,10 @@ test("customer and staff share finalized fitting data without preview mutations"
 test("results, comparisons, and pricing display finalized clubs in order", () => {
   const current = {
     id: 1, clubType: "Current Driver", brand: "Current Brand", model: null,
+    tags: [] as string[],
     shaft: null, loft: null, clubSpeed: 88, ballSpeed: 120, smashFactor: null,
     spinRate: 2200, carryDistance: 190, totalDistance: 210, launchAngle: null,
+    avgMaxHeight: 30,
     dispersion: null, estimatedPrice: null, approvedShotSnapshot: null,
   };
   const driver: CustomerDemoClub = {
@@ -370,11 +433,11 @@ test("results, comparisons, and pricing display finalized clubs in order", () =>
   const iron: CustomerDemoClub = {
     ...driver, id: 3, clubType: "Demo Iron", brand: null, shaft: null,
     clubSpeed: null, ballSpeed: null, carryDistance: null, totalDistance: null,
-    spinRate: null, estimatedPrice: null, comparisonClub: null,
+    avgMaxHeight: null, spinRate: null, estimatedPrice: null, comparisonClub: null,
   };
   const session: CustomerSessionDetail = {
     id: 31, demoDate: "2026-04-15T00:00:00.000Z", customerName: "Alex Golfer",
-    notes: null, clubs: [driver, iron],
+    notes: null, clubs: [driver, iron], resultsClubs: [current, driver, iron],
     purchaseClubs: [
       { id: driver.id, label: "Demo Driver · Demo Brand", estimatedPrice: 49.75 },
       { id: iron.id, label: "Demo Iron", estimatedPrice: null },
@@ -398,14 +461,14 @@ test("results, comparisons, and pricing display finalized clubs in order", () =>
   assert.match(results, /Demo Driver/);
   assert.match(results, /Demo Brand · Regular/);
   assert.match(results, /Demo Iron/);
-  assert.match(results, /95\.5/);
   assert.match(results, />0\.0<\/td>/);
-  assert.match(results, />214<\/td>/);
-  assert.match(results, /Club speed[\s\S]*Ball speed[\s\S]*Carry[\s\S]*Total[\s\S]*Spin rate/);
-  assert.doesNotMatch(results, /Current Driver|\$50|Estimated price/);
+  assert.match(results, />213\.6<\/td>/);
+  assert.match(results, />98\.4<\/td>/);
+  assert.match(results, /Club<\/th>[\s\S]*Avg Carry[\s\S]*Avg Total[\s\S]*Ball Speed[\s\S]*Avg Height/);
+  assert.doesNotMatch(results, /Club speed|Spin rate|\$50|Estimated price/);
   const rows = results.match(/<tr class="border-t border-border">[\s\S]*?<\/tr>/g);
-  assert.equal(rows?.length, 2);
-  assert.equal(rows?.[1].match(/>—<\/td>/g)?.length, 5);
+  assert.equal(rows?.length, 3);
+  assert.equal(rows?.[2].match(/>—<\/td>/g)?.length, 4);
   assert.match(comparisons, /Demo Driver[\s\S]*Current Brand Current Driver[\s\S]*88\.0/);
   assert.doesNotMatch(comparisons, /Demo Iron/);
   assert.match(pricing, /Demo Driver · Demo Brand[\s\S]*\$50[\s\S]*Demo Iron[\s\S]*—/);
@@ -415,14 +478,15 @@ test("results, comparisons, and pricing display finalized clubs in order", () =>
 
 test("single and empty fittings handle missing prices and results", () => {
   const club: CustomerDemoClub = {
-    id: 1, clubType: "Iron", brand: null, model: null, shaft: null, loft: null,
+    id: 1, clubType: "Iron", tags: [], brand: null, model: null, shaft: null, loft: null,
     clubSpeed: null, ballSpeed: null, smashFactor: null, spinRate: null,
     carryDistance: null, totalDistance: null, launchAngle: null, dispersion: null,
+    avgMaxHeight: null,
     estimatedPrice: null, approvedShotSnapshot: null, comparisonClub: null,
   };
   const session: CustomerSessionDetail = {
     id: 31, demoDate: "2026-04-15T00:00:00.000Z", customerName: "Alex Golfer",
-    notes: null, clubs: [club], purchaseClubs: [{ id: club.id, label: "Iron", estimatedPrice: null }], estimatedTotal: null,
+    notes: null, clubs: [club], resultsClubs: [club], purchaseClubs: [{ id: club.id, label: "Iron", estimatedPrice: null }], estimatedTotal: null,
   };
   const render = (data: CustomerSessionDetail) => renderToStaticMarkup(
     createElement(FittingPresentation, {
@@ -434,8 +498,10 @@ test("single and empty fittings handle missing prices and results", () => {
   assert.match(single, /Equipment Pricing[\s\S]*Iron[\s\S]*—/);
   assert.doesNotMatch(single, /Total estimated price|Current vs\. Demo Club Comparisons/);
   assert.match(single, /Purchase action/);
+  const zeroHeight = render({ ...session, resultsClubs: [{ ...club, avgMaxHeight: 0 }] });
+  assert.match(zeroHeight, />0\.0<\/td>/);
 
-  const empty = render({ ...session, clubs: [], purchaseClubs: [] });
+  const empty = render({ ...session, clubs: [], resultsClubs: [], purchaseClubs: [] });
   assert.match(empty, /No club data recorded for this session/);
   assert.doesNotMatch(empty, /Equipment Pricing|Purchase action|Current vs\. Demo Club Comparisons/);
 });
@@ -447,9 +513,10 @@ test("customer dispersion plots only usable approved shots and handles missing c
     landingAngleDeg: null, totalYd: null, totalSideYd: null,
   };
   const base = {
-    id: 1, clubType: "Demo Iron", brand: null, model: null, shaft: null, loft: null,
+    id: 1, clubType: "Iron", tags: ["Stiff"], brand: null, model: null, shaft: null, loft: null,
     clubSpeed: null, ballSpeed: null, smashFactor: null, spinRate: null,
     carryDistance: null, totalDistance: null, launchAngle: null, dispersion: null,
+    avgMaxHeight: null,
     estimatedPrice: null,
     approvedShotSnapshot: {
       version: 1 as const,
@@ -467,27 +534,45 @@ test("customer dispersion plots only usable approved shots and handles missing c
     renderToStaticMarkup(createElement(ExplorePerformance, { clubs }));
 
   const standalone = render([club]);
-  assert.match(standalone, /Demo club/);
+  assert.match(standalone, /Select club/);
+  assert.match(standalone, /See where your shots landed/);
+  assert.match(standalone, /Iron · Stiff/);
   assert.match(standalone, /2 of 5 included shots plotted/);
   assert.match(standalone, /3 without measured carry or lateral omitted/);
   assert.match(standalone, /Lateral: -3 yd/);
   assert.match(standalone, /Lateral: 0 yd/);
-  assert.doesNotMatch(standalone, /Compare current/);
+  assert.doesNotMatch(standalone, /Demo:|Compare current:|Current:/);
 
-  const noCurrent = render([{ ...club, comparisonClub: { ...base, id: 2, approvedShotSnapshot: null } }]);
-  assert.match(noCurrent, /No measured dispersion is available for the current club/);
+  const noCurrent = render([{ ...club, comparisonClub: { ...base, id: 2, clubType: "Wood", tags: [], approvedShotSnapshot: null } }]);
+  assert.match(noCurrent, /No measured dispersion is available for Wood/);
   assert.doesNotMatch(noCurrent, /type="checkbox"/);
 
   const noDemo = render([{
     ...club,
     approvedShotSnapshot: null,
-    comparisonClub: { ...base, id: 2, clubType: "Current Iron" },
+    comparisonClub: { ...base, id: 2, clubType: "Wood - Used", tags: ["Used"] },
   }]);
-  assert.match(noDemo, /No measured dispersion is available for this demo club/);
-  assert.match(noDemo, /Compare current: Current Iron/);
+  assert.match(noDemo, /No measured dispersion is available for Iron · Stiff/);
+  assert.match(noDemo, /Wood · Used/);
+  assert.doesNotMatch(noDemo, /Wood · Used · Used/);
+  assert.doesNotMatch(noDemo, /type="checkbox"/);
   assert.match(noDemo, /2 of 5 included shots plotted/);
+
+  const combined = render([{ ...club, comparisonClub: { ...base, id: 2, clubType: "Wood", tags: ["Used"] } }]);
+  assert.doesNotMatch(combined, /type="checkbox"/);
+  assert.match(combined, /4 of 10 included shots plotted/);
+  assert.match(combined, /Iron · Stiff · Shot 1/);
+  assert.match(combined, /Wood · Used · Shot 1/);
 
   assert.match(render([{ ...club, approvedShotSnapshot: null }]), /No measured dispersion available/);
   assert.match(render([{ ...club, approvedShotSnapshot: { version: 1, shots: [] } }]), /No measured dispersion available/);
   assert.match(render([]), /No measured dispersion available/);
+
+  const comparison = { ...base, id: 2, clubType: "Wood", tags: [] };
+  const first = { ...club, comparisonClub: comparison };
+  const second = { ...club, id: 3, clubType: "Driver", tags: ["Regular"], comparisonClub: comparison };
+  const unlinked = { ...club, id: 4 };
+  assert.deepEqual(linkedDispersionClubs([first, second, unlinked], 2).map((item) => item.id), [1, 3]);
+  assert.deepEqual(linkedDispersionClubs([first, second, unlinked], 1).map((item) => item.id), [2]);
+  assert.deepEqual(linkedDispersionClubs([first, second, unlinked], 4), []);
 });

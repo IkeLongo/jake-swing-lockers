@@ -81,6 +81,7 @@ export function createPrismaFinalizeStore(
         data: {
           demoSessionId: sessionId,
           clubType: row.clubType,
+          includeInReport: row.summary.includeInReport,
           tags: Array.isArray(row.summary.tags)
             ? row.summary.tags.filter((tag): tag is string => typeof tag === "string")
             : [],
@@ -108,6 +109,7 @@ export function createPrismaFinalizeStore(
             s.avgSpinRate !== null ? Math.round(s.avgSpinRate.toNumber()) : null,
           carryDistance: s.avgCarry,
           totalDistance: s.avgTotal,
+          avgMaxHeight: s.avgMaxHeight,
         },
       });
     },

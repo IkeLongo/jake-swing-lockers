@@ -40,7 +40,7 @@ import { createPrismaFinalizeStore, hasUnfinalizedPurchaseClub } from "@/lib/imp
 //   avgSpinRate    → ClubTestMetrics.spinRate  (rounded to Int)
 //   avgCarry       → ClubTestMetrics.carryDistance
 //   avgTotal       → ClubTestMetrics.totalDistance
-//   avgMaxHeight   → (no column in ClubTestMetrics V1 — skipped, see TODO)
+//   avgMaxHeight   → ClubTestMetrics.avgMaxHeight
 //
 // TODO (post-finalization): Swing Locker link generation
 // TODO (post-finalization): GHL follow-up sync trigger
@@ -123,6 +123,19 @@ export async function POST(
   let includedTestCount: number;
   try {
     const result = await db.$transaction(async (tx) => {
+      if (isRefinalize) {
+        await tx.$queryRaw`SELECT id FROM DemoSession WHERE id = ${sessionId} FOR UPDATE`;
+        const currentSession = await tx.demoSession.findUnique({
+          where: { id: sessionId },
+          select: { status: true, needsRefinalization: true },
+        });
+        if (currentSession?.status !== "finalized") {
+          return { status: "session_changed" as const };
+        }
+        if (!currentSession.needsRefinalization) {
+          return { status: "already_finalized" as const };
+        }
+      }
       const batchSummaries = await tx.importClubSummary.findMany({
         where: { importBatchId: batchId },
         orderBy: { id: "asc" },
@@ -139,6 +152,10 @@ export async function POST(
           where: { demoSessionId: sessionId },
         });
         if (purchaseRequestCount > 0) return { status: "purchase_requests" as const };
+        const otherBatches = await tx.importBatch.count({
+          where: { demoSessionId: sessionId, id: { not: batchId }, clubSummaries: { some: {} } },
+        });
+        if (otherBatches > 0) return { status: "multiple_batches" as const };
       }
 
       const store = createPrismaFinalizeStore(tx);
@@ -185,6 +202,25 @@ export async function POST(
         },
         { status: 409 },
       );
+    }
+    if (result.status === "multiple_batches") {
+      return NextResponse.json(
+        { error: "Re-finalization is unavailable because this session has clubs from multiple import batches." },
+        { status: 409 },
+      );
+    }
+    if (result.status === "session_changed") {
+      return NextResponse.json(
+        { error: "Session status changed; reload and try again." },
+        { status: 409 },
+      );
+    }
+    if (result.status === "already_finalized") {
+      return NextResponse.json({
+        success: true,
+        alreadyFinalized: true,
+        message: "This demo session has already been finalized.",
+      });
     }
     includedTestCount = result.clubCount;
   } catch (err) {

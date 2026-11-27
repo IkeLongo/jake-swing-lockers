@@ -16,10 +16,8 @@ test("staff eligibility requires inclusion and customer requests reject ineligib
     else process.env.SESSION_SECRET = originalSecret;
   });
   const summary = { id: 2, importBatchId: 1, includeInReport: true, availableForPurchase: false };
-  Object.defineProperty(globalThis, "prisma", {
-    configurable: true,
-    writable: true,
-    value: {
+  let needsRefinalization = false;
+  const tx = {
       importClubSummary: {
         async findFirst() { return { ...summary }; },
         async update({ where, data }: {
@@ -33,8 +31,19 @@ test("staff eligibility requires inclusion and customer requests reject ineligib
           return { ...summary };
         },
       },
-      importBatch: { async findUnique() { return { demoSessionId: null }; } },
-      demoSession: { async findFirst() { return { id: 31 }; } },
+      importBatch: { async findUnique() { return { demoSessionId: 31 }; } },
+      demoSession: {
+        async findFirst() { return { id: 31 }; },
+        async updateMany({ where, data }: { where: { id: number; status: string }; data: { needsRefinalization: boolean } }) {
+          assert.equal(where.id, 31);
+          assert.equal(where.status, "finalized");
+          needsRefinalization = data.needsRefinalization;
+          return { count: 1 };
+        },
+      },
+  };
+  const prisma = {
+      ...tx,
       demoClubTest: {
         async findMany({ where }: { where: { availableForPurchase: boolean; demoSessionId: number } }) {
           assert.equal(where.availableForPurchase, true);
@@ -42,7 +51,12 @@ test("staff eligibility requires inclusion and customer requests reject ineligib
           return [];
         },
       },
-    },
+    async $transaction(fn: (client: typeof tx) => Promise<unknown>) { return fn(tx); },
+  };
+  Object.defineProperty(globalThis, "prisma", {
+    configurable: true,
+    writable: true,
+    value: prisma,
   });
   const { PATCH } = await import("../app/api/staff/imports/[id]/club-summaries/[summaryId]/route");
   const token = signStaffSessionToken({ staffUserId: 1, expiresAt: Date.now() + 60_000 });
@@ -54,12 +68,22 @@ test("staff eligibility requires inclusion and customer requests reject ineligib
 
   assert.equal((await patch({ availableForPurchase: true })).status, 200);
   assert.equal(summary.availableForPurchase, true);
+  assert.equal(needsRefinalization, true);
+  needsRefinalization = false;
   assert.equal((await patch({ includeInReport: false })).status, 200);
   assert.equal(summary.availableForPurchase, false);
+  assert.equal(needsRefinalization, true);
+  needsRefinalization = false;
   assert.equal((await patch({ availableForPurchase: true })).status, 422);
   assert.equal(summary.availableForPurchase, false);
+  assert.equal(needsRefinalization, false);
   assert.equal((await patch({ includeInReport: true, availableForPurchase: true })).status, 200);
   assert.equal(summary.availableForPurchase, true);
+  for (const edit of [{ estimatedPrice: 425 }, { clubName: "Driver", tags: ["Stiff"] }, { avgCarry: 200 }]) {
+    needsRefinalization = false;
+    assert.equal((await patch(edit)).status, 200);
+    assert.equal(needsRefinalization, true);
+  }
   const { POST } = await import("../app/api/swing-locker/purchase-requests/route");
   const customerToken = signSwingLockerSessionToken({ golfClientId: 7, expiresAt: Date.now() + 60_000 });
   const response = await POST(new NextRequest("http://localhost/api/swing-locker/purchase-requests", {

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { NextRequest } from "next/server";
+import { Prisma } from "@/app/generated/prisma/client";
+import { signStaffSessionToken } from "@/lib/auth/session";
 import {
   aggregateTrackManClubGroups,
   type ClubSummaryInput,
@@ -275,4 +278,94 @@ test("aggregation summary shape remains unchanged for existing callers", () => {
     "validSpinRateCount",
     "validTotalCount",
   ]);
+});
+
+test("finalized TrackMan shot edits mark the session dirty and recalculate included shots", async (t) => {
+  const previousPrisma = Object.getOwnPropertyDescriptor(globalThis, "prisma");
+  const previousSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "test-only-session-secret-at-least-32-characters";
+  t.after(() => {
+    if (previousPrisma) Object.defineProperty(globalThis, "prisma", previousPrisma);
+    else Reflect.deleteProperty(globalThis, "prisma");
+    if (previousSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSecret;
+  });
+
+  const batch = {
+    parserMode: "trackman-result",
+    demoSessionId: 7 as number | null,
+    status: "finalized",
+    demoSession: { status: "finalized" },
+  };
+  const rows = [
+    { id: 1, importBatchId: 1, clubSummaryId: 2, rawData: shot("Driver", [], { "Measurement.Carry": "200" }), includedInSummary: true },
+    { id: 2, importBatchId: 1, clubSummaryId: 2, rawData: shot("Driver", [], { "Measurement.Carry": "100" }), includedInSummary: true },
+  ];
+  let dirty = false;
+  const tx = {
+    importBatch: { async findUnique() { return batch; } },
+    demoSession: {
+      async updateMany({ where, data }: { where: { id: number; status: string }; data: { needsRefinalization: boolean } }) {
+        assert.deepEqual(where, { id: 7, status: "finalized" });
+        dirty = data.needsRefinalization;
+        return { count: 1 };
+      },
+    },
+    importClubSummary: {
+      async findFirst() { return { id: 2 }; },
+      async update({ data }: { data: ReturnType<typeof calculateIncludedTrackManSummaryMetrics> }) {
+        const decimal = (n: number | null) => n === null ? null : new Prisma.Decimal(n);
+        return {
+          id: 2, ...data,
+          avgClubSpeed: decimal(data.avgClubSpeed),
+          avgBallSpeed: decimal(data.avgBallSpeed),
+          avgSpinRate: decimal(data.avgSpinRate),
+          avgMaxHeight: decimal(data.avgMaxHeight),
+          avgCarry: decimal(data.avgCarry),
+          avgTotal: decimal(data.avgTotal),
+        };
+      },
+    },
+    importRow: {
+      async findUnique({ where }: { where: { id: number } }) { return rows.find((row) => row.id === where.id) ?? null; },
+      async updateMany({ where, data }: { where: { id: number }; data: { includedInSummary: boolean } }) {
+        const row = rows.find((item) => item.id === where.id);
+        if (!row) return { count: 0 };
+        row.includedInSummary = data.includedInSummary;
+        return { count: 1 };
+      },
+      async findMany() { return rows; },
+    },
+  };
+  Object.defineProperty(globalThis, "prisma", {
+    configurable: true,
+    writable: true,
+    value: { async $transaction(fn: (client: typeof tx) => Promise<unknown>) { return fn(tx); } },
+  });
+  const { PATCH } = await import("@/app/api/staff/imports/[id]/club-summaries/[summaryId]/shots/[rowId]/route");
+  const token = signStaffSessionToken({ staffUserId: 1, expiresAt: Date.now() + 60_000 });
+  const patch = (rowId: number, included: boolean) => PATCH(new NextRequest("http://localhost/shot", {
+    method: "PATCH",
+    headers: { cookie: `staff_session=${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ included }),
+  }), { params: Promise.resolve({ id: "1", summaryId: "2", rowId: String(rowId) }) });
+
+  const response = await patch(2, false);
+  assert.equal(response.status, 200);
+  assert.equal(dirty, true);
+  assert.equal(rows[1]!.includedInSummary, false);
+  assert.equal((await response.json()).summary.avgCarry, 200);
+
+  dirty = false;
+  assert.equal((await patch(99, false)).status, 404);
+  assert.equal(dirty, false);
+  batch.demoSession.status = "draft";
+  assert.equal((await patch(1, false)).status, 409);
+  assert.equal(rows[0]!.includedInSummary, true);
+  assert.equal(dirty, false);
+
+  batch.demoSessionId = null;
+  batch.status = "reviewing";
+  assert.equal((await patch(2, true)).status, 200);
+  assert.equal(dirty, false);
 });

@@ -131,6 +131,8 @@ model DemoClubTest {
   // Null for legacy/manual rows, which are grouped via pairIndex + clubRole.
   currentClubTestId Int?
   approvedShotSnapshot Json?
+  // Null for records finalized before inclusion was persisted.
+  includeInReport   Boolean?
   availableForPurchase Boolean @default(false)
   tags              Json?
   createdAt         DateTime @default(now())
@@ -154,6 +156,8 @@ model ClubTestMetrics {
   smashFactor   Decimal? @db.Decimal(5, 2)
   carryDistance Decimal? @db.Decimal(6, 2)
   totalDistance Decimal? @db.Decimal(6, 2)
+  // Uses the same units as ImportClubSummary.avgMaxHeight.
+  avgMaxHeight  Decimal? @db.Decimal(6, 2)
   launchAngle   Decimal? @db.Decimal(5, 2)
   spinRate      Int?
   dispersion    Decimal? @db.Decimal(6, 2)

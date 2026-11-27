@@ -205,13 +205,8 @@ export async function PATCH(
   const requireIncluded = body.availableForPurchase === true && body.includeInReport !== true;
   const where = { id: summaryIdNum, ...(requireIncluded ? { includeInReport: true } : {}) };
   try {
-    if (currentSummaryId === undefined) {
-      updated = await db.importClubSummary.update({
-        where,
-        data: update,
-      });
-    } else {
-      const result = await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
+      if (currentSummaryId !== undefined) {
         const assigned = await assignStagedCurrent(
           createPrismaComparisonStore(tx),
           batchId,
@@ -219,37 +214,33 @@ export async function PATCH(
           currentSummaryId,
         );
         if (!assigned.ok) return assigned;
-        const row = await tx.importClubSummary.update({ where, data: update });
-        return { ok: true as const, row };
-      });
-      if (!result.ok) {
-        return NextResponse.json({ error: result.error }, { status: result.status });
       }
-      updated = result.row;
+      const row = await tx.importClubSummary.update({ where, data: update });
+      const batch = await tx.importBatch.findUnique({
+        where: { id: batchId },
+        select: { demoSessionId: true },
+      });
+      if (batch?.demoSessionId) {
+        await tx.demoSession.updateMany({
+          where: {
+            id: batch.demoSessionId,
+            status: "finalized",
+            needsRefinalization: false,
+          },
+          data: { needsRefinalization: true },
+        });
+      }
+      return { ok: true as const, row };
+    });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
+    updated = result.row;
   } catch (error) {
     if (requireIncluded && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       return NextResponse.json({ error: "Only included clubs can be marked for sale." }, { status: 422 });
     }
     throw error;
-  }
-
-  // ── Flag session as needing re-finalization ──────────────────────────────────
-  // If the related DemoSession is already finalized, mark it dirty so the UI
-  // prompts the rep to re-finalize and push the new values into DemoClubTest.
-  const batch = await db.importBatch.findUnique({
-    where: { id: batchId },
-    select: { demoSessionId: true },
-  });
-  if (batch?.demoSessionId) {
-    await db.demoSession.updateMany({
-      where: {
-        id: batch.demoSessionId,
-        status: "finalized",
-        needsRefinalization: false,
-      },
-      data: { needsRefinalization: true },
-    });
   }
 
   return NextResponse.json({ success: true, summary: updated });

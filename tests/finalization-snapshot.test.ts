@@ -12,6 +12,8 @@ import {
 } from "@/lib/imports/finalizationPlan";
 import { createPrismaFinalizeStore } from "@/lib/imports/finalizationStore";
 
+const routeDb = {};
+
 function summary(id: number, overrides: Partial<ImportClubSummary> = {}): ImportClubSummary {
   return {
     id,
@@ -117,6 +119,7 @@ function harness(parserMode = "trackman-result") {
     rows,
     clubs,
     metrics,
+    tx,
     rowReads: () => rowReads,
     store: () => createPrismaFinalizeStore(tx as unknown as Prisma.TransactionClient),
   };
@@ -169,6 +172,23 @@ test("finalization and re-finalization persist sale eligibility and tags", async
   assert.deepEqual(h.clubs.map(({ data }) => [data.availableForPurchase, data.tags]), [
     [false, ["Used"]], [false, ["Stiff"]],
   ]);
+});
+
+test("finalization and re-finalization persist inclusion and approved height", async () => {
+  const h = harness();
+  const makePlan = (included: boolean, height: string) => flattenPlan(planComparisonGroups([
+    summary(10, { includeInReport: included, avgMaxHeight: new Prisma.Decimal(height) }),
+    summary(20, { currentSummaryId: 10, avgMaxHeight: new Prisma.Decimal("25.75") }),
+  ]));
+  const store = h.store();
+  await persistPlan(store, 7, makePlan(false, "30.25"));
+  assert.deepEqual(h.clubs.map(({ data }) => data.includeInReport), [false, true]);
+  assert.deepEqual(h.metrics.map((metric) => String(metric.avgMaxHeight)), ["30.25", "25.75"]);
+
+  await deleteSessionClubs(store, 7);
+  await persistPlan(store, 7, makePlan(true, "35.5"));
+  assert.deepEqual(h.clubs.map(({ data }) => data.includeInReport), [true, true]);
+  assert.deepEqual(h.metrics.map((metric) => String(metric.avgMaxHeight)), ["35.5", "25.75"]);
 });
 
 test("finalization persists usable snapshots independently for standalone demo clubs", async () => {
@@ -231,10 +251,11 @@ test("re-finalization blocks purchase requests before replacing clubs", async ()
   const previousPrisma = Object.getOwnPropertyDescriptor(globalThis, "prisma");
   process.env.SESSION_SECRET = "test-only-session-secret-at-least-32-characters";
   let purchaseChecks = 0;
+  let purchaseCount = 1;
   Object.defineProperty(globalThis, "prisma", {
     configurable: true,
     writable: true,
-    value: {
+    value: Object.assign(routeDb, {
       demoSession: {
         async findUnique() {
           return { id: 7, status: "finalized", needsRefinalization: true };
@@ -247,16 +268,21 @@ test("re-finalization blocks purchase requests before replacing clubs", async ()
       },
       async $transaction(fn: (tx: object) => Promise<unknown>) {
         return fn({
+          async $queryRaw() { return [{ id: 7 }]; },
+          demoSession: {
+            async findUnique() { return { status: "finalized", needsRefinalization: true }; },
+          },
           importClubSummary: { async findMany() { return [summary(20)]; } },
           purchaseRequest: {
             async count() {
               purchaseChecks++;
-              return 1;
+              return purchaseCount;
             },
           },
+          importBatch: { async count() { return 1; } },
         });
       },
-    },
+    }),
   });
 
   try {
@@ -271,10 +297,103 @@ test("re-finalization blocks purchase requests before replacing clubs", async ()
     assert.equal(response.status, 409);
     assert.match((await response.json()).error, /purchase requests/);
     assert.equal(purchaseChecks, 1);
+    purchaseCount = 0;
+    const multiBatchResponse = await POST(new NextRequest("http://localhost/finalize", {
+      method: "POST",
+      headers: { cookie: `staff_session=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ batchId: 1 }),
+    }), { params: Promise.resolve({ id: "7" }) });
+    assert.equal(multiBatchResponse.status, 409);
+    assert.match((await multiBatchResponse.json()).error, /multiple import batches/);
   } finally {
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
     if (previousPrisma) Object.defineProperty(globalThis, "prisma", previousPrisma);
     else Reflect.deleteProperty(globalThis, "prisma");
   }
+});
+
+test("re-finalization publishes revised club data while preserving session associations", async (t) => {
+  const previousSecret = process.env.SESSION_SECRET;
+  const previousPrisma = Object.getOwnPropertyDescriptor(globalThis, "prisma");
+  process.env.SESSION_SECRET = "test-only-session-secret-at-least-32-characters";
+  t.after(() => {
+    if (previousSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSecret;
+    if (previousPrisma) Object.defineProperty(globalThis, "prisma", previousPrisma);
+    else Reflect.deleteProperty(globalThis, "prisma");
+  });
+  const h = harness();
+  await persistPlan(h.store(), 7, flattenPlan(planComparisonGroups([summary(20)])));
+  const oldClubId = h.clubs[0]!.id;
+  h.rows[1]!.includedInSummary = false;
+  h.rows[2]!.includedInSummary = true;
+  const session = {
+    id: 7, status: "finalized", needsRefinalization: true,
+    clientId: 55, ghlOpportunityId: "opportunity-1", lockerToken: "locker-1",
+  };
+  const revised = summary(20, {
+    clubName: "Revised driver",
+    tags: ["Stiff"],
+    availableForPurchase: true,
+    estimatedPrice: new Prisma.Decimal(425),
+    avgCarry: new Prisma.Decimal(190),
+    avgMaxHeight: new Prisma.Decimal("31.25"),
+  });
+  const tx = {
+    ...h.tx,
+    async $queryRaw() { return [{ id: 7 }]; },
+    demoSession: {
+      async findUnique({ select }: { select: { clientId?: boolean } }) {
+        if (select.clientId) return null;
+        return { ...session };
+      },
+      async update({ data }: { data: { status: string; needsRefinalization: boolean } }) {
+        Object.assign(session, data);
+        return session;
+      },
+    },
+    importClubSummary: { async findMany() { return [revised]; } },
+    importBatch: {
+      ...h.tx.importBatch,
+      async count() { return 0; },
+      async update() { return { id: 1 }; },
+    },
+    purchaseRequest: { async count() { return 0; } },
+  };
+  Object.defineProperty(globalThis, "prisma", {
+    configurable: true,
+    value: Object.assign(routeDb, {
+      demoSession: { async findUnique() { return { ...session }; } },
+      importBatch: { async findUnique() { return { id: 1, demoSessionId: 7, status: "finalized" }; } },
+      async $transaction(fn: (client: typeof tx) => Promise<unknown>) { return fn(tx); },
+    }),
+  });
+  const { POST } = await import("@/app/api/staff/demo-sessions/[id]/finalize/route");
+  const token = signStaffSessionToken({ staffUserId: 1, expiresAt: Date.now() + 60_000 });
+  const response = await POST(new NextRequest("http://localhost/finalize", {
+    method: "POST",
+    headers: { cookie: `staff_session=${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ batchId: 1 }),
+  }), { params: Promise.resolve({ id: "7" }) });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).isRefinalize, true);
+  assert.deepEqual(session, {
+    id: 7, status: "finalized", needsRefinalization: false,
+    clientId: 55, ghlOpportunityId: "opportunity-1", lockerToken: "locker-1",
+  });
+  assert.equal(h.clubs.length, 1);
+  assert.notEqual(h.clubs[0]!.id, oldClubId);
+  const club = h.clubs[0]!.data;
+  assert.equal(club.clubType, "Revised driver");
+  assert.deepEqual(club.tags, ["Stiff"]);
+  assert.equal(club.availableForPurchase, true);
+  assert.equal(String(club.estimatedPrice), "425");
+  assert.equal(String(h.metrics[0]!.carryDistance), "190");
+  assert.equal(club.includeInReport, true);
+  assert.equal(String(h.metrics[0]!.avgMaxHeight), "31.25");
+  const snapshot = club.approvedShotSnapshot;
+  assert.ok(snapshot && typeof snapshot === "object" && "shots" in snapshot);
+  assert.ok(Array.isArray(snapshot.shots));
+  assert.deepEqual(snapshot.shots.map((item) => item.sourceRowId), [3]);
 });

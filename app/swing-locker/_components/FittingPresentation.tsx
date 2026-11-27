@@ -22,6 +22,14 @@ function clubName(club: CustomerClub): string {
   return [club.clubType, club.brand, club.model].filter(Boolean).join(" · ") || "Club";
 }
 
+function resultClubName(club: CustomerClub): string {
+  const name = club.clubType?.trim() || "Club";
+  const tags = club.tags.join(", ");
+  const suffix = ` - ${tags}`;
+  const baseName = tags && name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+  return tags && !baseName.endsWith(` · ${tags}`) ? `${baseName} · ${tags}` : baseName;
+}
+
 function CompactMetricCell({
   label,
   value,
@@ -48,7 +56,7 @@ function CompactMetricCell({
   );
 }
 
-function ClubResults({ clubs }: { clubs: CustomerDemoClub[] }) {
+function ClubResults({ clubs }: { clubs: CustomerClub[] }) {
   return (
     <section aria-labelledby="club-results-heading" className="mb-8">
       <h2 id="club-results-heading" className="mb-4 font-subheading text-xl font-semibold text-foreground">
@@ -71,29 +79,27 @@ function ClubResults({ clubs }: { clubs: CustomerDemoClub[] }) {
             <thead className="bg-muted text-xs text-muted-foreground">
               <tr>
                 <th scope="col" className="px-5 py-4 font-semibold">Club</th>
-                <th scope="col" className="px-4 py-4 text-right font-semibold">Club speed <span className="block font-normal">(mph)</span></th>
-                <th scope="col" className="px-4 py-4 text-right font-semibold">Ball speed <span className="block font-normal">(mph)</span></th>
-                <th scope="col" className="px-4 py-4 text-right font-semibold">Carry <span className="block font-normal">(yds)</span></th>
-                <th scope="col" className="px-4 py-4 text-right font-semibold">Total <span className="block font-normal">(yds)</span></th>
-                <th scope="col" className="px-5 py-4 text-right font-semibold">Spin rate <span className="block font-normal">(rpm)</span></th>
+                <th scope="col" className="px-4 py-4 text-right font-semibold">Avg Carry <span className="block font-normal">(yd)</span></th>
+                <th scope="col" className="px-4 py-4 text-right font-semibold">Avg Total <span className="block font-normal">(yd)</span></th>
+                <th scope="col" className="px-4 py-4 text-right font-semibold">Ball Speed <span className="block font-normal">(mph)</span></th>
+                <th scope="col" className="px-5 py-4 text-right font-semibold">Avg Height <span className="block font-normal">(ft)</span></th>
               </tr>
             </thead>
             <tbody className="text-card-foreground">
               {clubs.map((club) => (
                 <tr key={club.id} className="border-t border-border">
                   <th scope="row" className="px-5 py-4 font-semibold">
-                    {club.clubType ?? "Club"}
+                    {resultClubName(club)}
                     {[club.brand, club.model, club.shaft, club.loft].filter(Boolean).length > 0 && (
                       <span className="mt-1 block font-normal text-muted-foreground">
                         {[club.brand, club.model, club.shaft, club.loft].filter(Boolean).join(" · ")}
                       </span>
                     )}
                   </th>
-                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.clubSpeed)}</td>
+                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.carryDistance)}</td>
+                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.totalDistance)}</td>
                   <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.ballSpeed)}</td>
-                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.carryDistance, 0)}</td>
-                  <td className="px-4 py-4 text-right tabular-nums">{fmtNum(club.totalDistance, 0)}</td>
-                  <td className="px-5 py-4 text-right tabular-nums">{fmtNum(club.spinRate, 0)}</td>
+                  <td className="px-5 py-4 text-right tabular-nums">{fmtNum(club.avgMaxHeight === null ? null : club.avgMaxHeight * 3.28084)}</td>
                 </tr>
               ))}
             </tbody>
@@ -211,7 +217,7 @@ export function FittingPresentation({
     <>
       <SwingLockerHero customerName={session.customerName} fittingDate={session.demoDate} />
 
-      <ClubResults clubs={session.clubs} />
+      <ClubResults clubs={session.resultsClubs} />
       <ExplorePerformance clubs={session.clubs} />
       <ClubComparisons clubs={session.clubs} />
 

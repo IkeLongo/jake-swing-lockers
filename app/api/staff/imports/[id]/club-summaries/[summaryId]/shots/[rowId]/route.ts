@@ -53,7 +53,12 @@ export async function PATCH(
   return db.$transaction(async (tx) => {
     const batch = await tx.importBatch.findUnique({
       where: { id: batchId },
-      select: { parserMode: true, demoSessionId: true },
+      select: {
+        parserMode: true,
+        demoSessionId: true,
+        status: true,
+        demoSession: { select: { status: true } },
+      },
     });
     if (!batch) {
       return NextResponse.json(
@@ -61,9 +66,14 @@ export async function PATCH(
         { status: 404 },
       );
     }
-    if (!isStagedTrackManBatch(batch)) {
+    const isFinalizedTrackMan =
+      batch.parserMode === "trackman-result" &&
+      batch.status === "finalized" &&
+      batch.demoSessionId !== null &&
+      batch.demoSession?.status === "finalized";
+    if (!isStagedTrackManBatch(batch) && !isFinalizedTrackMan) {
       return NextResponse.json(
-        { error: "Shot review is only available for unconfirmed TrackMan imports." },
+        { error: "Shot review is only available for unconfirmed or finalized TrackMan imports." },
         { status: 409 },
       );
     }
@@ -91,6 +101,19 @@ export async function PATCH(
         { error: "Shot not found for this club summary." },
         { status: 404 },
       );
+    }
+
+    if (isFinalizedTrackMan && batch.demoSessionId !== null) {
+      const sessionUpdate = await tx.demoSession.updateMany({
+        where: { id: batch.demoSessionId, status: "finalized" },
+        data: { needsRefinalization: true },
+      });
+      if (sessionUpdate.count !== 1) {
+        return NextResponse.json(
+          { error: "Session status changed; reload and try again." },
+          { status: 409 },
+        );
+      }
     }
 
     const update = await tx.importRow.updateMany({

@@ -6,7 +6,17 @@ import type { DispersionPoint } from "@/lib/golf/dispersion";
 import type { CustomerClub, CustomerDemoClub } from "@/lib/queries/customer-sessions";
 
 function clubName(club: CustomerClub): string {
-  return [club.clubType, club.brand, club.model].filter(Boolean).join(" · ") || "Club";
+  const name = club.clubType?.trim() || "Club";
+  const tags = club.tags.join(", ");
+  // Some finalized comparison names already include their tags.
+  const legacySuffix = ` - ${tags}`;
+  const baseName = tags && name.endsWith(legacySuffix)
+    ? name.slice(0, -legacySuffix.length)
+    : name;
+  const labeledName = tags && !baseName.endsWith(` · ${tags}`)
+    ? `${baseName} · ${tags}`
+    : baseName;
+  return [labeledName, club.brand, club.model].filter(Boolean).join(" · ");
 }
 
 function clubDispersion(club: CustomerClub) {
@@ -28,28 +38,36 @@ function clubDispersion(club: CustomerClub) {
   return { points, includedShotCount: shots.length };
 }
 
+export function linkedDispersionClubs(clubs: readonly CustomerDemoClub[], selectedId: number): CustomerClub[] {
+  const selectedTest = clubs.find((club) => club.id === selectedId);
+  if (selectedTest) return selectedTest.comparisonClub ? [selectedTest.comparisonClub] : [];
+  return clubs.filter((club) => club.comparisonClub?.id === selectedId);
+}
+
 export function ExplorePerformance({ clubs }: { clubs: CustomerDemoClub[] }) {
   const selectId = useId();
   const [selectedId, setSelectedId] = useState<number | null>(clubs[0]?.id ?? null);
-  const [showCurrent, setShowCurrent] = useState(true);
-  const selected = clubs.find((club) => club.id === selectedId) ?? clubs[0];
-  const demo = selected ? clubDispersion(selected) : { points: [], includedShotCount: 0 };
-  const currentClub = selected?.comparisonClub ?? null;
-  const current = currentClub ? clubDispersion(currentClub) : null;
-  const hasCurrent = current !== null && current.points.length > 0;
-  const comparing = hasCurrent && showCurrent;
-  const points = comparing ? [...demo.points, ...current.points] : demo.points;
-  const includedShotCount = demo.includedShotCount + (comparing ? current.includedShotCount : 0);
-  const colors = new Map<number, string>();
-  const names = new Map<number, string>();
-  if (selected) {
-    colors.set(selected.id, "var(--primary)");
-    names.set(selected.id, clubName(selected));
+  const clubsById = new Map<number, CustomerClub>(clubs.map((club) => [club.id, club]));
+  for (const club of clubs) {
+    if (club.comparisonClub && !clubsById.has(club.comparisonClub.id)) {
+      clubsById.set(club.comparisonClub.id, club.comparisonClub);
+    }
   }
-  if (currentClub && comparing) {
-    colors.set(currentClub.id, "var(--accent)");
-    names.set(currentClub.id, clubName(currentClub));
-  }
+  const selected = (selectedId === null ? undefined : clubsById.get(selectedId)) ?? clubs[0];
+  const linkedClubs = selected ? linkedDispersionClubs(clubs, selected.id) : [];
+  const selectedData = selected ? clubDispersion(selected) : { points: [], includedShotCount: 0 };
+  const comparisons = linkedClubs.map((club) => ({ club, data: clubDispersion(club) }));
+  const points = [...selectedData.points, ...comparisons.flatMap(({ data }) => data.points)];
+  const includedShotCount = selectedData.includedShotCount +
+    comparisons.reduce((total, { data }) => total + data.includedShotCount, 0);
+  const colors = new Map<number, string>(
+    [...clubsById.keys()].sort((a, b) => a - b).map((id, index) => [
+      id,
+      index === 0 ? "var(--primary)" : index === 1 ? "var(--accent)"
+        : `hsl(${(210 + (index - 2) * 137.508) % 360} 70% 48%)`,
+    ]),
+  );
+  const names = new Map([...clubsById.values()].map((club) => [club.id, clubName(club)]));
 
   return (
     <section aria-labelledby="explore-performance-heading" className="mb-8">
@@ -61,24 +79,21 @@ export function ExplorePerformance({ clubs }: { clubs: CustomerDemoClub[] }) {
           <div className="min-w-0">
             <h3 className="font-heading text-base font-semibold text-card-foreground">Shot Dispersion</h3>
             <p className="mt-1 font-body text-sm text-muted-foreground">
-              Explore where your approved shots landed.
+              See where your shots landed.
             </p>
           </div>
           {selected && (
             <div className="w-full min-w-0 sm:w-64">
               <label htmlFor={selectId} className="mb-1.5 block font-body text-xs font-semibold text-muted-foreground">
-                Demo club
+                Select club
               </label>
               <select
                 id={selectId}
                 value={selected.id}
-                onChange={(event) => {
-                  setSelectedId(Number(event.target.value));
-                  setShowCurrent(true);
-                }}
+                onChange={(event) => setSelectedId(Number(event.target.value))}
                 className="w-full rounded-lg border border-border bg-card px-3 py-2 font-body text-sm text-card-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                {clubs.map((club) => <option key={club.id} value={club.id}>{clubName(club)}</option>)}
+                {[...clubsById.values()].map((club) => <option key={club.id} value={club.id}>{clubName(club)}</option>)}
               </select>
             </div>
           )}
@@ -87,34 +102,28 @@ export function ExplorePerformance({ clubs }: { clubs: CustomerDemoClub[] }) {
         {selected && (
           <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3 font-body text-sm text-card-foreground">
             <span className="inline-flex min-w-0 items-center gap-2">
-              <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full bg-primary" />
-              <span className="break-words">Demo: {clubName(selected)}</span>
+              <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: colors.get(selected.id) }} />
+              <span className="break-words">{clubName(selected)}</span>
             </span>
-            {currentClub && hasCurrent && (
-              <label className="inline-flex min-w-0 cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={showCurrent}
-                  onChange={(event) => setShowCurrent(event.target.checked)}
-                  className="h-4 w-4 shrink-0 accent-primary"
-                />
-                <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full bg-accent" />
-                <span className="break-words">Compare current: {clubName(currentClub)}</span>
-              </label>
-            )}
+            {comparisons.map(({ club }) => (
+              <span key={club.id} className="inline-flex min-w-0 items-center gap-2">
+                <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: colors.get(club.id) }} />
+                <span className="break-words">{clubName(club)}</span>
+              </span>
+            ))}
           </div>
         )}
 
-        {selected && demo.points.length === 0 && comparing && (
+        {selected && selectedData.points.length === 0 && points.length > 0 && (
           <p className="mt-4 font-body text-sm text-muted-foreground">
-            No measured dispersion is available for this demo club.
+            No measured dispersion is available for {clubName(selected)}.
           </p>
         )}
-        {currentClub && !hasCurrent && (
-          <p className="mt-2 font-body text-sm text-muted-foreground">
-            No measured dispersion is available for the current club.
+        {comparisons.filter(({ data }) => data.points.length === 0).map(({ club }) => (
+          <p key={club.id} className="mt-2 font-body text-sm text-muted-foreground">
+            No measured dispersion is available for {clubName(club)}.
           </p>
-        )}
+        ))}
         <div className="mx-auto mt-4 flex w-full max-w-md min-w-0">
           <DispersionChart
             points={points}

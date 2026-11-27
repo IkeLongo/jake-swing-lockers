@@ -79,7 +79,7 @@ export default function SessionDetailsCard({
         <div className="shrink-0">
           {isFinalized ? (
             <p className="text-xs text-muted-foreground font-body">
-              Finalized sessions cannot be edited.
+              Session and customer details are locked after finalization. Club results can still be updated.
             </p>
           ) : (
             <button
