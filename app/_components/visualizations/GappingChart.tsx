@@ -4,13 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import {
   computeGappingBounds,
   type GappingClubRow,
-} from "./reviewFittingGapping";
+} from "@/lib/golf/gapping";
 
 interface GappingChartProps {
   rows: readonly GappingClubRow[];
   includedShotCount: number;
   colorsBySummaryId: ReadonlyMap<number, string>;
   namesBySummaryId: ReadonlyMap<number, string>;
+  averageLabel?: string;
+  emptyMessage?: string;
 }
 
 const MIN_WIDTH = 320;
@@ -27,6 +29,8 @@ export function GappingChart({
   includedShotCount,
   colorsBySummaryId,
   namesBySummaryId,
+  averageLabel,
+  emptyMessage,
 }: GappingChartProps) {
   const bounds = useMemo(() => computeGappingBounds(rows), [rows]);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
@@ -48,7 +52,7 @@ export function GappingChart({
         className="flex min-h-32 flex-1 items-center justify-center rounded-xl bg-muted/40 px-4 text-center text-sm text-muted-foreground"
         role="status"
       >
-        No measured carry available for this selection.
+        {emptyMessage ?? "No measured carry available for this selection."}
       </p>
     );
   }
@@ -162,7 +166,7 @@ export function GappingChart({
                   </title>
                 </circle>
               ))}
-              <g tabIndex={0} aria-label={`${name} average carry ${yd(row.averageCarryYd)} yards`}>
+              <g tabIndex={0} aria-label={`${name} ${(averageLabel ?? "average carry").toLowerCase()} ${yd(row.averageCarryYd)} yards`}>
                 <path
                   d={`M ${x(row.averageCarryYd)} ${cy - 8} L ${x(row.averageCarryYd) + 8} ${cy} L ${x(row.averageCarryYd)} ${cy + 8} L ${x(row.averageCarryYd) - 8} ${cy} Z`}
                   fill={color}
@@ -171,7 +175,7 @@ export function GappingChart({
                   strokeWidth={1.5}
                 />
                 <title>
-                  {`${name}\nAverage carry: ${yd(row.averageCarryYd)} yd\nRange: ${yd(row.minCarryYd)}–${yd(row.maxCarryYd)} yd\nShots: ${row.points.length}`}
+                  {`${name}\n${averageLabel ?? "Average carry"}: ${yd(row.averageCarryYd)} yd\nRange: ${yd(row.minCarryYd)}–${yd(row.maxCarryYd)} yd\nShots: ${row.points.length}`}
                 </title>
               </g>
             </g>
@@ -179,7 +183,7 @@ export function GappingChart({
         })}
       </svg>
       <p className="mt-1 text-xs text-muted-foreground">
-        {plotted} of {includedShotCount} included shots plotted · ◆ = club average · line = min–max
+        {plotted} of {includedShotCount} included shots plotted · ◆ = {averageLabel?.toLowerCase() ?? "club average"} · line = min–max
       </p>
     </div>
   );

@@ -5,7 +5,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
 import { ClubFlightVisualization } from "@/app/_components/visualizations/ClubFlightVisualization";
 import { DispersionChart } from "@/app/_components/visualizations/DispersionChart";
-import { GappingChart } from "./GappingChart";
+import { GappingChart } from "@/app/_components/visualizations/GappingChart";
 import { buildGappingRows } from "./reviewFittingGapping";
 import { buildDispersionPoints } from "./reviewFittingDispersion";
 import type { SerializedClubSummary } from "./clubSummaryTypes";

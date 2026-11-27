@@ -127,3 +127,10 @@ test("bounds pad the visible range and do not force zero", () => {
   assert.ok(single.minYd < 180 && single.maxYd > 180);
   assert.ok(single.maxYd - single.minYd >= MIN_GAPPING_SPAN_YD);
 });
+
+test("bounds include negative measured carry values", () => {
+  const rows = buildGappingRows([shot("1", 21, -20), shot("2", 21, 10)], null).rows;
+  const bounds = computeGappingBounds(rows);
+  assert.ok(bounds.minYd <= -20);
+  assert.ok(bounds.maxYd >= 10);
+});

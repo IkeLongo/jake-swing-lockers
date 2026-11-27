@@ -11,11 +11,13 @@ import { Prisma } from "../app/generated/prisma/client";
 import { signStaffSessionToken } from "../lib/auth/session";
 import { signSwingLockerSessionToken } from "../lib/auth/swing-locker-session";
 import { flattenPlan, planComparisonGroups } from "../lib/imports/finalizationPlan";
+import { buildApprovedShotSnapshot } from "../lib/imports/approvedShotSnapshot";
+import { createTrackManMeasuredShot } from "../lib/imports/trackmanMeasurements";
 import { buildCustomerShotFlights } from "../lib/golf/flight/customerShotFlights";
 import { toGolfShotVizFlights } from "../lib/golf/flight/golfShotVizAdapter";
-import type { CustomerDemoClub, CustomerSessionDetail } from "../lib/queries/customer-sessions";
+import type { CustomerClub, CustomerDemoClub, CustomerSessionDetail } from "../lib/queries/customer-sessions";
 import { FittingPresentation } from "../app/swing-locker/_components/FittingPresentation";
-import { ExplorePerformance, linkedDispersionClubs } from "../app/swing-locker/_components/ExplorePerformance";
+import { buildCustomerGapping, ExplorePerformance, linkedDispersionClubs } from "../app/swing-locker/_components/ExplorePerformance";
 
 const nextHeaders: typeof import("next/headers") =
   createRequire(resolve("tests", "shared-fitting-presentation.test.ts"))("next/headers");
@@ -227,6 +229,14 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(resultsHtml, /7Iron · Mens14/);
   assert.equal(resultsHtml.match(/<tr class="border-t border-border">/g)?.length, 3);
   assert.doesNotMatch(resultsHtml, /Unrelated Current|Xxio 10 · Xxio 10/);
+  const allGapping = renderToStaticMarkup(createElement(FittingPresentation, {
+    session: allResults, purchaseAction: null,
+  })).match(/<section aria-labelledby="club-gapping-heading"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(allGapping);
+  assert.match(allGapping, /6Iron · Xxio 10/);
+  assert.match(allGapping, /6Iron · Mens14/);
+  assert.match(allGapping, /7Iron · Mens14/);
+  assert.doesNotMatch(allGapping, /Unrelated Current/);
   session.clubTests = [
     { ...current, includeInReport: null },
     { ...demo, includeInReport: null, metrics: { ...demo.metrics, avgMaxHeight: null } },
@@ -246,7 +256,7 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.ok(grouped);
   assert.deepEqual(grouped.clubs.map((item) => item.comparisonClub?.id), [10, 10]);
   assert.deepEqual(linkedDispersionClubs(grouped.clubs, 10).map((item) => item.id), [11, 15]);
-  const groupedMarkup = renderToStaticMarkup(createElement(ExplorePerformance, { clubs: grouped.clubs }));
+  const groupedMarkup = renderToStaticMarkup(createElement(ExplorePerformance, { clubs: grouped.clubs, resultsClubs: grouped.resultsClubs }));
   assert.match(groupedMarkup, /Second Driver · Regular/);
   session.clubTests = originalGroupedClubs;
 
@@ -295,7 +305,7 @@ test("customer and staff share finalized fitting data without preview mutations"
   for (const [index, expectedCarry] of [210, 160].entries()) {
     const selectedClub: CustomerDemoClub = standalone.clubs[index]!;
     assert.equal(selectedClub.comparisonClub, null);
-    const html = renderToStaticMarkup(createElement(ExplorePerformance, { clubs: [selectedClub] }));
+    const html = renderToStaticMarkup(createElement(ExplorePerformance, { clubs: [selectedClub], resultsClubs: [selectedClub] }));
     assert.match(html, /1 of 1 included shots plotted/);
     assert.match(html, new RegExp(`Carry: ${expectedCarry} yd`));
     assert.doesNotMatch(html, /No measured dispersion available|Compare current/);
@@ -533,7 +543,7 @@ test("customer dispersion plots only usable approved shots and handles missing c
   };
   const club: CustomerDemoClub = { ...base, comparisonClub: null };
   const render = (clubs: CustomerDemoClub[]) =>
-    renderToStaticMarkup(createElement(ExplorePerformance, { clubs }));
+    renderToStaticMarkup(createElement(ExplorePerformance, { clubs, resultsClubs: clubs }));
 
   const standalone = render([club]);
   assert.match(standalone, /Select club/);
@@ -638,4 +648,87 @@ test("customer flight models use selected and linked approved shots without fill
       shots: [{ lateralSignConvention: "unknown", measurements: { ...measurements, launchDirectionDeg: null } }],
     },
   }]).flights.length, 0);
+});
+
+test("customer gapping uses approved normalized carries for ranges and averages", () => {
+  function snapshot(summaryId: number, unit: "[m]" | "[yrd]", values: (string | null)[]) {
+    return buildApprovedShotSnapshot({
+      batch: { id: 1, parserMode: "trackman-result" },
+      summary: { id: summaryId, importBatchId: 1 },
+      rows: values.map((value, rowIndex) => ({
+        id: rowIndex + 1,
+        importBatchId: 1,
+        clubSummaryId: summaryId,
+        rowIndex,
+        includedInSummary: rowIndex !== 3,
+        rawData: {
+          measuredShot: createTrackManMeasuredShot({
+            headers: ["Measurement.Carry"],
+            shotRow: [value],
+            siUnitRow: ["[m]"],
+            conversionFactorRow: [unit === "[m]" ? "1" : "1.09361"],
+            displayUnitRow: [unit],
+            exportFormat: "xlsx",
+            selectedUnitSystem: unit === "[m]" ? "metric" : "imperial",
+          }),
+        },
+      })),
+    });
+  }
+  const base: CustomerClub = {
+    id: 1, clubType: "6Iron", tags: ["Metric"], brand: null, model: null, shaft: null, loft: null,
+    clubSpeed: null, ballSpeed: null, smashFactor: null, spinRate: null,
+    carryDistance: 999, totalDistance: null, avgMaxHeight: null,
+    launchAngle: null, dispersion: null, estimatedPrice: null,
+    approvedShotSnapshot: snapshot(1, "[m]", ["100", "110", null, "900"]),
+  };
+  const imperial: CustomerClub = {
+    ...base, id: 2, tags: ["Imperial"],
+    approvedShotSnapshot: snapshot(2, "[yrd]", ["110", "120"]),
+  };
+  const legacy: CustomerClub = { ...base, id: 3, clubType: "Wedge", tags: [], approvedShotSnapshot: null };
+  const noCarry: CustomerClub = {
+    ...base, id: 4, clubType: "Putter", tags: [],
+    approvedShotSnapshot: snapshot(4, "[yrd]", [null]),
+  };
+  const data = buildCustomerGapping([base, imperial, legacy, noCarry]);
+  assert.equal(data.includedShotCount, 6);
+  assert.deepEqual(data.unavailableClubs.map((club) => club.id), [3, 4]);
+  const metric = data.rows.find((row) => row.summaryId === 1)!;
+  assert.equal(metric.points.length, 2);
+  assert.ok(Math.abs(metric.minCarryYd - 109.36132983377078) < 1e-8);
+  assert.ok(Math.abs(metric.maxCarryYd - 120.29746281714786) < 1e-8);
+  assert.ok(Math.abs(metric.averageCarryYd - (metric.minCarryYd + metric.maxCarryYd) / 2) < 1e-8);
+  const imperialRow = data.rows.find((row) => row.summaryId === 2)!;
+  assert.deepEqual(
+    [imperialRow.minCarryYd, imperialRow.maxCarryYd, imperialRow.averageCarryYd],
+    [110, 120, 115],
+  );
+  assert.ok(data.rows.every((row) => row.averageCarryYd !== 999));
+  const zero = buildCustomerGapping([{
+    ...base, id: 5, approvedShotSnapshot: snapshot(5, "[yrd]", ["0"]),
+  }]);
+  assert.equal(zero.rows[0]?.averageCarryYd, 0);
+  assert.equal(zero.rows[0]?.minCarryYd, 0);
+
+  const first: CustomerDemoClub = { ...base, comparisonClub: null };
+  const second: CustomerDemoClub = { ...imperial, comparisonClub: null };
+  const render = (clubs: CustomerDemoClub[]) => renderToStaticMarkup(createElement(ExplorePerformance, {
+    clubs, resultsClubs: [base, imperial, legacy, noCarry],
+  })).match(/<section aria-labelledby="club-gapping-heading"[\s\S]*?<\/section>/)?.[0];
+  const gapping = render([first, second]);
+  assert.ok(gapping);
+  assert.equal(render([second, first]), gapping);
+  assert.match(gapping, /6Iron · Metric/);
+  assert.match(gapping, /6Iron · Imperial/);
+  assert.match(gapping, /average carry of approved shots/);
+  assert.match(gapping, /Range: 110\.0–120\.0 yd/);
+  assert.match(gapping, /No approved carry measurements: Wedge, Putter/);
+  assert.doesNotMatch(gapping, /(?:Carry:|shots:|Range:) (?:999|900)\.0/i);
+  const historical = renderToStaticMarkup(createElement(ExplorePerformance, {
+    clubs: [], resultsClubs: [legacy],
+  }));
+  assert.match(historical, /No approved carry measurements are available/);
+  assert.match(historical, /No approved carry measurements: Wedge/);
+  assert.doesNotMatch(historical, /999\.0/);
 });

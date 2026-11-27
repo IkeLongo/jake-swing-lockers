@@ -218,7 +218,7 @@ export function FittingPresentation({
       <SwingLockerHero customerName={session.customerName} fittingDate={session.demoDate} />
 
       <ClubResults clubs={session.resultsClubs} />
-      <ExplorePerformance clubs={session.clubs} />
+      <ExplorePerformance clubs={session.clubs} resultsClubs={session.resultsClubs} />
       <ClubComparisons clubs={session.clubs} />
 
       {session.notes && (
