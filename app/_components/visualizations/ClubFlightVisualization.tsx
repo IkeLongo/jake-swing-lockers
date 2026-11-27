@@ -23,6 +23,7 @@ interface ClubFlightVisualizationProps {
   onSelectedShotChange: (shotId: string | null) => void;
   embedded?: boolean;
   showSelectedFlightDetail?: boolean;
+  showIncludedShotCount?: boolean;
   showBottomBorder?: boolean;
   clubOptions?: GolfShotVizClubOptions;
   clubLegend?: readonly {
@@ -54,6 +55,7 @@ export function ClubFlightVisualization({
   onSelectedShotChange,
   embedded = false,
   showSelectedFlightDetail = true,
+  showIncludedShotCount = true,
   showBottomBorder = true,
   clubOptions,
   clubLegend = [],
@@ -161,24 +163,29 @@ export function ClubFlightVisualization({
               onSelect={handleSelect}
             />
           </div>
-          <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>
-              {renderableCount} of {includedShotCount} included shots shown
-            </span>
-            {centeredOnlyCount > 0 && (
-              <span>
-                Lateral position unavailable for {centeredOnlyCount} modeled{" "}
-                {centeredOnlyCount === 1 ? "shot" : "shots"}; centered only to
-                show flight height and distance.
-              </span>
-            )}
-            {showSelectedFlightDetail && selectedShotId && (
-              <SelectedFlightDetail
-                flights={rendererFlights}
-                selectedShotId={selectedShotId}
-              />
-            )}
-          </div>
+          {(showIncludedShotCount || centeredOnlyCount > 0 ||
+            (showSelectedFlightDetail && selectedShotId)) && (
+            <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              {showIncludedShotCount && (
+                <span>
+                  {renderableCount} of {includedShotCount} included shots shown
+                </span>
+              )}
+              {centeredOnlyCount > 0 && (
+                <span>
+                  Lateral position unavailable for {centeredOnlyCount} modeled{" "}
+                  {centeredOnlyCount === 1 ? "shot" : "shots"}; centered only to
+                  show flight height and distance.
+                </span>
+              )}
+              {showSelectedFlightDetail && selectedShotId && (
+                <SelectedFlightDetail
+                  flights={rendererFlights}
+                  selectedShotId={selectedShotId}
+                />
+              )}
+            </div>
+          )}
           {clubLegend.length > 0 && (
             <ul
               aria-label="Club colors"

@@ -13,6 +13,7 @@ interface GappingChartProps {
   namesBySummaryId: ReadonlyMap<number, string>;
   averageLabel?: string;
   emptyMessage?: string;
+  showShotCount?: boolean;
 }
 
 const MIN_WIDTH = 320;
@@ -31,6 +32,7 @@ export function GappingChart({
   namesBySummaryId,
   averageLabel,
   emptyMessage,
+  showShotCount = true,
 }: GappingChartProps) {
   const bounds = useMemo(() => computeGappingBounds(rows), [rows]);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
@@ -183,7 +185,11 @@ export function GappingChart({
         })}
       </svg>
       <p className="mt-1 text-xs text-muted-foreground">
-        {plotted} of {includedShotCount} included shots plotted · ◆ = {averageLabel?.toLowerCase() ?? "club average"} · line = min–max
+        {[
+          showShotCount ? `${plotted} of ${includedShotCount} included shots plotted` : null,
+          `◆ = ${averageLabel?.toLowerCase() ?? "club average"}`,
+          "line = min–max",
+        ].filter(Boolean).join(" · ")}
       </p>
     </div>
   );

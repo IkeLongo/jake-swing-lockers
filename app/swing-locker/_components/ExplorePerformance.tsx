@@ -160,7 +160,7 @@ export function ExplorePerformance({
         Explore Your Performance
       </h2>
       <div className="min-w-0 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-end">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-start">
           {selected && (
             <div className="w-full min-w-0 sm:w-64">
               <label htmlFor={selectId} className="mb-1.5 block font-body text-xs font-semibold text-muted-foreground">
@@ -213,6 +213,7 @@ export function ExplorePerformance({
                 includedShotCount={includedShotCount}
                 colorsBySummaryId={colors}
                 namesBySummaryId={names}
+                showShotSummary={false}
               />
             </div>
           </div>
@@ -228,6 +229,7 @@ export function ExplorePerformance({
                   onSelectedShotChange={setSelectedShotId}
                   embedded
                   showSelectedFlightDetail={false}
+                  showIncludedShotCount={false}
                   clubOptions={clubOptions ?? undefined}
                 />
               ) : (
@@ -238,9 +240,6 @@ export function ExplorePerformance({
             </div>
           </div>
         </div>
-        <p className="mt-4 font-body text-xs text-muted-foreground">
-          Lateral values are signed; left and right direction has not been verified.
-        </p>
         <section aria-labelledby="club-gapping-heading" className="mt-6 min-w-0 border-t border-border pt-5">
           <h3 id="club-gapping-heading" className="font-heading text-base font-semibold text-card-foreground">Club Gapping</h3>
           <p className="mt-1 font-body text-sm text-muted-foreground">Carry distance ranges for your approved shots.</p>
@@ -262,6 +261,7 @@ export function ExplorePerformance({
               namesBySummaryId={gappingNames}
               averageLabel="Average carry of approved shots"
               emptyMessage="No approved carry measurements are available."
+              showShotCount={false}
             />
           </div>
           {gapping.unavailableClubs.length > 0 && (

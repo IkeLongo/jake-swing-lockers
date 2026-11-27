@@ -15,7 +15,11 @@ import { buildApprovedShotSnapshot } from "../lib/imports/approvedShotSnapshot";
 import { createTrackManMeasuredShot } from "../lib/imports/trackmanMeasurements";
 import { buildCustomerShotFlights } from "../lib/golf/flight/customerShotFlights";
 import { toGolfShotVizFlights } from "../lib/golf/flight/golfShotVizAdapter";
+import type { ModeledShotFlight } from "../lib/golf/flight/types";
 import type { CustomerClub, CustomerDemoClub, CustomerSessionDetail } from "../lib/queries/customer-sessions";
+import { ClubFlightVisualization } from "../app/_components/visualizations/ClubFlightVisualization";
+import { DispersionChart } from "../app/_components/visualizations/DispersionChart";
+import { GappingChart } from "../app/_components/visualizations/GappingChart";
 import { FittingPresentation } from "../app/swing-locker/_components/FittingPresentation";
 import { buildCustomerGapping, ExplorePerformance, linkedDispersionClubs } from "../app/swing-locker/_components/ExplorePerformance";
 
@@ -200,6 +204,51 @@ test("customer and staff share finalized fitting data without preview mutations"
     version: 1,
     shots: [{ lateralSignConvention: "unknown", measurements: { ...measurements, carryYd: 190 } }],
   });
+  const staffDispersion = renderToStaticMarkup(createElement(DispersionChart, {
+    points: [{ shotId: "test-shot", rowIndex: 0, summaryId: 11, carryYd: 210, carrySideYd: -3 }],
+    includedShotCount: 1,
+    colorsBySummaryId: new Map([[11, "#008000"]]),
+    namesBySummaryId: new Map([[11, "Included Driver"]]),
+  }));
+  assert.match(staffDispersion, /1 of 1 included shots plotted · rings = club averages/);
+  const staffFlight: ModeledShotFlight = {
+    shotId: "staff-shot",
+    rowIndex: 0,
+    included: true,
+    status: "modeled",
+    insufficientReasons: [],
+    lateralStatus: "modeled",
+    lateralReason: null,
+    measuredLandmarks: {
+      origin: { downrangeYd: 0, heightYd: 0, lateralYd: 0, provenance: "coordinate-origin" },
+      apex: null,
+      carry: null,
+      total: null,
+    },
+    modeledPoints: [
+      { downrangeYd: 0, heightYd: 0, lateralYd: 0 },
+      { downrangeYd: 100, heightYd: 20, lateralYd: 0 },
+    ],
+  };
+  const staffFlightMarkup = renderToStaticMarkup(createElement(ClubFlightVisualization, {
+    flights: [staffFlight],
+    includedShotCount: 2,
+    selectedShotId: null,
+    onSelectedShotChange: () => {},
+    embedded: true,
+    showSelectedFlightDetail: false,
+  }));
+  assert.match(staffFlightMarkup, /1 of 2 included shots shown/);
+  assert.match(staffFlightMarkup, /Perspective/);
+  assert.match(staffFlightMarkup, /Side/);
+  const staffGappingData = buildCustomerGapping(fitting.resultsClubs);
+  const staffGapping = renderToStaticMarkup(createElement(GappingChart, {
+    rows: staffGappingData.rows,
+    includedShotCount: staffGappingData.includedShotCount,
+    colorsBySummaryId: new Map([[11, "#008000"]]),
+    namesBySummaryId: new Map([[11, "Included Driver"]]),
+  }));
+  assert.match(staffGapping, /1 of 1 included shots plotted · ◆ = club average · line = min–max/);
   assert.doesNotMatch(
     JSON.stringify(fitting),
     /Unrelated Current|Excluded|clientId|lockerToken|ghl|rawData|sourceBatchId|sourceSummaryId|sourceRowId/i,
@@ -306,7 +355,7 @@ test("customer and staff share finalized fitting data without preview mutations"
     const selectedClub: CustomerDemoClub = standalone.clubs[index]!;
     assert.equal(selectedClub.comparisonClub, null);
     const html = renderToStaticMarkup(createElement(ExplorePerformance, { clubs: [selectedClub], resultsClubs: [selectedClub] }));
-    assert.match(html, /1 of 1 included shots plotted/);
+    assert.doesNotMatch(html, /included shots (?:plotted|shown)/);
     assert.match(html, new RegExp(`Carry: ${expectedCarry} yd`));
     assert.doesNotMatch(html, /No measured dispersion available|Compare current/);
   }
@@ -343,7 +392,9 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(preview, /Prepared for Alex Golfer/);
   assert.match(preview, /April 15, 2026/);
   assert.match(preview, /Explore Your Performance/);
-  assert.match(preview, /2 of 2 included shots plotted/);
+  assert.match(preview, /average carry of approved shots · line = min–max/);
+  assert.doesNotMatch(preview, /included shots (?:plotted|shown)|Lateral values are signed|rings = club averages/);
+  assert.match(preview, /sm:justify-start/);
   assert.match(preview, /Current Driver · Used · Current Brand/);
   assert.match(preview, /Included Driver · Stiff/);
   assert.match(preview, /Included Driver/);
@@ -388,7 +439,8 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(customer, /Prepared for Alex Golfer/);
   assert.match(customer, /April 15, 2026/);
   assert.match(customer, /Explore Your Performance/);
-  assert.match(customer, /2 of 2 included shots plotted/);
+  assert.match(customer, /average carry of approved shots · line = min–max/);
+  assert.doesNotMatch(customer, /included shots (?:plotted|shown)|Lateral values are signed|rings = club averages/);
   assert.match(customer, /Included Driver/);
   assert.match(customer, /Current Driver · Used · Current Brand/);
   assert.match(customer, /Recommended Clubs[\s\S]*Included Driver - Stiff[\s\S]*\$300/);
@@ -550,8 +602,8 @@ test("customer dispersion plots only usable approved shots and handles missing c
   assert.equal(standalone.match(/<select/g)?.length, 1);
   assert.match(standalone, /See where your shots landed/);
   assert.match(standalone, /Iron · Stiff/);
-  assert.match(standalone, /2 of 5 included shots plotted/);
-  assert.match(standalone, /3 without measured carry or lateral omitted/);
+  assert.match(standalone, /◆ = average carry of approved shots · line = min–max/);
+  assert.doesNotMatch(standalone, /included shots (?:plotted|shown)|without measured carry or lateral omitted|Lateral values are signed/);
   assert.match(standalone, /Lateral: -3 yd/);
   assert.match(standalone, /Lateral: 0 yd/);
   assert.doesNotMatch(standalone, /Demo:|Compare current:|Current:/);
@@ -569,11 +621,11 @@ test("customer dispersion plots only usable approved shots and handles missing c
   assert.match(noDemo, /Wood · Used/);
   assert.doesNotMatch(noDemo, /Wood · Used · Used/);
   assert.doesNotMatch(noDemo, /type="checkbox"/);
-  assert.match(noDemo, /2 of 5 included shots plotted/);
+  assert.doesNotMatch(noDemo, /included shots (?:plotted|shown)/);
 
   const combined = render([{ ...club, comparisonClub: { ...base, id: 2, clubType: "Wood", tags: ["Used"] } }]);
   assert.doesNotMatch(combined, /type="checkbox"/);
-  assert.match(combined, /4 of 10 included shots plotted/);
+  assert.doesNotMatch(combined, /included shots (?:plotted|shown)/);
   assert.match(combined, /Iron · Stiff · Shot 1/);
   assert.match(combined, /Wood · Used · Shot 1/);
 

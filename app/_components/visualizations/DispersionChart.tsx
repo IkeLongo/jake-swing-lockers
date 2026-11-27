@@ -12,6 +12,7 @@ interface DispersionChartProps {
   includedShotCount: number;
   colorsBySummaryId: ReadonlyMap<number, string>;
   namesBySummaryId: ReadonlyMap<number, string>;
+  showShotSummary?: boolean;
 }
 
 // TODO: Future dispersion improvements (not implemented yet):
@@ -40,6 +41,7 @@ export function DispersionChart({
   includedShotCount,
   colorsBySummaryId,
   namesBySummaryId,
+  showShotSummary = true,
 }: DispersionChartProps) {
   const [hoveredShotId, setHoveredShotId] = useState<string | null>(null);
   const bounds = useMemo(() => computeDispersionBounds(points), [points]);
@@ -205,16 +207,24 @@ export function DispersionChart({
           ))}
         </svg>
       </div>
-      <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span aria-live="polite">
-          {hovered
-            ? `${nameOf(hovered.summaryId)} · Shot ${hovered.rowIndex + 1} · Carry ${hovered.carryYd.toFixed(1)} yd · Lateral ${hovered.carrySideYd.toFixed(1)} yd`
-            : `${points.length} of ${includedShotCount} included shots plotted · rings = club averages`}
-        </span>
-        {omittedCount > 0 && !hovered && (
-          <span>{omittedCount} without measured carry or lateral omitted</span>
-        )}
-      </div>
+      {(showShotSummary || hovered) && (
+        <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {hovered ? (
+            <span aria-live="polite">
+              {`${nameOf(hovered.summaryId)} · Shot ${hovered.rowIndex + 1} · Carry ${hovered.carryYd.toFixed(1)} yd · Lateral ${hovered.carrySideYd.toFixed(1)} yd`}
+            </span>
+          ) : (
+            <>
+              <span aria-live="polite">
+                {`${points.length} of ${includedShotCount} included shots plotted · rings = club averages`}
+              </span>
+              {omittedCount > 0 && (
+                <span>{omittedCount} without measured carry or lateral omitted</span>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
