@@ -125,6 +125,7 @@ export default async function ImportMapPage({
     validTotalCount: s.validTotalCount,
     isManuallyEdited: s.isManuallyEdited,
     includeInReport: s.includeInReport,
+    availableForPurchase: s.availableForPurchase,
     estimatedPrice: toNum(s.estimatedPrice),
     currentSummaryId: s.currentSummaryId ?? null,
   }));

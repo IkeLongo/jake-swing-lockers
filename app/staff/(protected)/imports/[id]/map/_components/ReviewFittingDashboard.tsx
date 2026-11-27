@@ -4,10 +4,11 @@ import { useMemo, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import type { FittingVisualizationData } from "@/lib/imports/fittingVisualizationData";
 import { ClubFlightVisualization } from "./ClubFlightVisualization";
-import { DispersionChart } from "./DispersionChart";
+import { DispersionChart } from "@/app/_components/visualizations/DispersionChart";
 import { GappingChart } from "./GappingChart";
 import { buildGappingRows } from "./reviewFittingGapping";
 import { buildDispersionPoints } from "./reviewFittingDispersion";
+import type { SerializedClubSummary } from "./clubSummaryTypes";
 import {
   buildFittingFlightModel,
   buildFittingClubLegend,
@@ -18,11 +19,15 @@ import {
   type ClubResultSummary,
 } from "./reviewFittingDashboardState";
 
+type SaleClubSummary = ClubResultSummary & Pick<SerializedClubSummary, "availableForPurchase">;
+
 interface ReviewFittingDashboardProps {
-  summaries: readonly ClubResultSummary[];
+  summaries: readonly SaleClubSummary[];
   colorsBySummaryId: ReadonlyMap<number, string>;
   onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
   onToggleInclude?: (summaryId: number, currentlyIncluded: boolean) => void;
+  onToggleSale?: (summaryId: number, availableForPurchase: boolean) => void;
+  toggling?: ReadonlySet<number>;
   visualizationData: FittingVisualizationData | null;
   visualizationLoading: boolean;
   visualizationError: string | null;
@@ -34,6 +39,8 @@ export function ReviewFittingDashboard({
   colorsBySummaryId,
   onOpenSummary,
   onToggleInclude,
+  onToggleSale,
+  toggling,
   visualizationData,
   visualizationLoading,
   visualizationError,
@@ -181,6 +188,8 @@ export function ReviewFittingDashboard({
         selectedSummaryIds={normalizedSelection}
         onOpenSummary={onOpenSummary}
         onToggleInclude={onToggleInclude}
+        onToggleSale={onToggleSale}
+        toggling={toggling}
       />
     </div>
   );
@@ -335,11 +344,15 @@ function ClubResults({
   selectedSummaryIds,
   onOpenSummary,
   onToggleInclude,
+  onToggleSale,
+  toggling,
 }: {
-  summaries: readonly ClubResultSummary[];
+  summaries: readonly SaleClubSummary[];
   selectedSummaryIds: ClubFilterSelection;
   onOpenSummary: (summaryId: number, trigger: HTMLElement) => void;
   onToggleInclude?: (summaryId: number, currentlyIncluded: boolean) => void;
+  onToggleSale?: (summaryId: number, availableForPurchase: boolean) => void;
+  toggling?: ReadonlySet<number>;
 }) {
   return (
     <section aria-labelledby="club-results-heading" className="min-w-0">
@@ -354,8 +367,8 @@ function ClubResults({
           Select a club to review its fitting details.
         </p>
       </div>
-      <div className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
-        <table className="w-full table-fixed border-collapse text-left">
+      <div className="min-w-0 overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="w-full min-w-[42rem] table-fixed border-collapse text-left">
           <caption className="sr-only">
             Club results and average fitting metrics
           </caption>
@@ -411,9 +424,12 @@ function ClubResults({
               </th>
               <th
                 scope="col"
-                className="hidden px-3 py-3 text-center xl:table-cell xl:w-[8%]"
+                className="px-3 py-3 text-center xl:w-[8%]"
               >
                 Include
+              </th>
+              <th scope="col" className="px-3 py-3 text-center xl:w-[8%]">
+                For Sale
               </th>
             </tr>
           </thead>
@@ -434,6 +450,7 @@ function ClubResults({
                     onOpenSummary(summary.id, event.currentTarget);
                   }}
                   onKeyDown={(event: KeyboardEvent<HTMLTableRowElement>) => {
+                    if (event.target !== event.currentTarget) return;
                     if (event.key !== "Enter" && event.key !== " ") return;
                     event.preventDefault();
                     onOpenSummary(summary.id, event.currentTarget);
@@ -488,10 +505,11 @@ function ClubResults({
                       ? `$${summary.estimatedPrice.toFixed(2)}`
                       : "—"}
                   </td>
-                  <td className="hidden px-3 py-3 text-center xl:table-cell">
+                  <td className="px-3 py-3 text-center">
                     {onToggleInclude && (
                       <button
                         type="button"
+                        disabled={toggling?.has(summary.id)}
                         onClick={(e) => {
                           e.stopPropagation();
                           onToggleInclude(summary.id, isIncluded);
@@ -511,6 +529,19 @@ function ClubResults({
                           }`}
                         />
                       </button>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    {onToggleSale && (
+                      <input
+                        type="checkbox"
+                        aria-label={`For sale: ${summary.clubName}`}
+                        checked={summary.availableForPurchase}
+                        disabled={!isIncluded || toggling?.has(summary.id)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => onToggleSale(summary.id, event.target.checked)}
+                        className="h-4 w-4 accent-primary disabled:opacity-50"
+                      />
                     )}
                   </td>
                 </tr>

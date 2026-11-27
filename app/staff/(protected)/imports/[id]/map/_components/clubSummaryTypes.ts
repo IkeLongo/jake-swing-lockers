@@ -20,6 +20,7 @@ export interface SerializedClubSummary {
   validTotalCount: number;
   isManuallyEdited: boolean;
   includeInReport: boolean;
+  availableForPurchase: boolean;
   /** Optional price entered during review; copied into DemoClubTest on finalization. */
   estimatedPrice: number | null;
   /** Current summary ID when this summary is a Test in a comparison group. */

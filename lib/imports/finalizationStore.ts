@@ -1,6 +1,21 @@
 import type { Prisma, ImportClubSummary } from "@/app/generated/prisma/client";
 import { buildApprovedShotSnapshot } from "./approvedShotSnapshot";
-import type { FinalizeStore } from "./finalizationPlan";
+import type { FinalizeStore, PlannableSummary, PlannedClubRow } from "./finalizationPlan";
+
+export type PurchaseEligibleSummary = PlannableSummary & {
+  availableForPurchase: boolean;
+};
+
+export function hasUnfinalizedPurchaseClub<S extends PurchaseEligibleSummary>(
+  summaries: readonly S[],
+  rows: readonly PlannedClubRow<S>[],
+): boolean {
+  const finalizedIds = new Set(rows.map((row) => row.summary.id));
+  return summaries.some(
+    (summary) => summary.availableForPurchase &&
+      (!summary.includeInReport || !finalizedIds.has(summary.id)),
+  );
+}
 
 /** Prisma-backed FinalizeStore. Must be created from a transaction client. */
 export function createPrismaFinalizeStore(
@@ -66,6 +81,10 @@ export function createPrismaFinalizeStore(
         data: {
           demoSessionId: sessionId,
           clubType: row.clubType,
+          tags: Array.isArray(row.summary.tags)
+            ? row.summary.tags.filter((tag): tag is string => typeof tag === "string")
+            : [],
+          availableForPurchase: row.summary.includeInReport && row.summary.availableForPurchase,
           estimatedPrice: row.summary.estimatedPrice ?? null,
           sortOrder: row.sortOrder,
           clubRole: row.clubRole,

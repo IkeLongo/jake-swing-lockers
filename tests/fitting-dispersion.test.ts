@@ -4,11 +4,11 @@ import type { FittingVisualizationShot } from "@/lib/imports/fittingVisualizatio
 import type { ShotReviewMeasurements } from "@/lib/imports/golfShotMeasurements";
 import {
   buildClubDispersionAverages,
-  buildDispersionPoints,
   computeDispersionBounds,
   MIN_CARRY_SPAN_YD,
   MIN_LATERAL_HALF_RANGE_YD,
-} from "../app/staff/(protected)/imports/[id]/map/_components/reviewFittingDispersion";
+} from "@/lib/golf/dispersion";
+import { buildDispersionPoints } from "../app/staff/(protected)/imports/[id]/map/_components/reviewFittingDispersion";
 import { createClubColorMap } from "../app/staff/(protected)/imports/[id]/map/_components/reviewFittingDashboardState";
 
 function shot(
@@ -138,4 +138,11 @@ test("bounds apply minimum symmetric lateral range and carry padding", () => {
   assert.ok(wide.maxLateralYd >= 40);
   assert.ok(wide.minCarryYd <= 100 && wide.maxCarryYd >= 200);
   assert.ok(wide.minCarryYd >= 0);
+});
+
+test("bounds include negative carry measurements", () => {
+  const bounds = computeDispersionBounds(
+    buildDispersionPoints([shot("1", 21, -25, -2)], null).points,
+  );
+  assert.ok(bounds.minCarryYd <= -25 && bounds.maxCarryYd >= -25);
 });

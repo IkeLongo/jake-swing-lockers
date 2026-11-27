@@ -3,6 +3,7 @@ import { groupFinalizedClubs } from "@/lib/comparison/groupFinalizedClubs";
 import { sumPrices } from "@/lib/fitting-value";
 import type { ApprovedShotSnapshotV1 } from "@/lib/imports/approvedShotSnapshot";
 import { z } from "zod";
+import { purchaseClubName } from "@/lib/purchase-request-workflow";
 
 export type CustomerShotSnapshot = {
   version: ApprovedShotSnapshotV1["version"];
@@ -35,7 +36,7 @@ export interface CustomerSessionSummary {
   id: number;
   demoDate: Date;
   clubsTestedCount: number;
-  /** Sum of estimatedPrice across all club tests. Null if no prices are set. */
+  /** Sum of estimatedPrice across eligible clubs. Null if no prices are set. */
   estimatedTotal: number | null;
   status: string;
 }
@@ -63,13 +64,20 @@ export interface CustomerDemoClub extends CustomerClub {
   comparisonClub: CustomerClub | null;
 }
 
+export interface CustomerPurchaseClub {
+  id: number;
+  label: string;
+  estimatedPrice: number | null;
+}
+
 export interface CustomerSessionDetail {
   id: number;
   demoDate: string;
   customerName: string;
   notes: string | null;
   clubs: CustomerDemoClub[];
-  /** Sum of estimatedPrice across demo clubs. Null if no prices are set. */
+  purchaseClubs: CustomerPurchaseClub[];
+  /** Sum of estimatedPrice across eligible clubs. Null if no prices are set. */
   estimatedTotal: number | null;
 }
 
@@ -100,8 +108,7 @@ export async function getCustomerSessions(
       demoDate: true,
       status: true,
       clubTests: {
-        where: { clubRole: "demo" },
-        select: { estimatedPrice: true },
+        select: { clubRole: true, availableForPurchase: true, estimatedPrice: true },
       },
     },
   });
@@ -110,9 +117,9 @@ export async function getCustomerSessions(
     id: row.id,
     demoDate: row.demoDate,
     status: row.status,
-    clubsTestedCount: row.clubTests.length,
-    estimatedTotal: row.clubTests.some((c) => c.estimatedPrice !== null)
-      ? sumPrices(row.clubTests.map((c) => c.estimatedPrice))
+    clubsTestedCount: row.clubTests.filter((club) => club.clubRole === "demo").length,
+    estimatedTotal: row.clubTests.some((c) => c.availableForPurchase && c.estimatedPrice !== null)
+      ? sumPrices(row.clubTests.filter((c) => c.availableForPurchase).map((c) => c.estimatedPrice))
       : null,
   }));
 }
@@ -153,6 +160,8 @@ export async function getCustomerSession(
           loft: true,
           estimatedPrice: true,
           clubRole: true,
+          availableForPurchase: true,
+          tags: true,
           pairIndex: true,
           currentClubTestId: true,
           approvedShotSnapshot: true,
@@ -220,6 +229,11 @@ export async function getCustomerSession(
       comparisonClub: current ? toCustomerClub(current) : null,
     };
   });
+  const purchaseClubs = row.clubTests.filter((club) => club.availableForPurchase).map((club) => ({
+    id: club.id,
+    label: [purchaseClubName(club), club.brand, club.model].filter(Boolean).join(" — "),
+    estimatedPrice: toNum(club.estimatedPrice),
+  }));
 
   return {
     id: row.id,
@@ -228,8 +242,9 @@ export async function getCustomerSession(
       [row.client.firstName, row.client.lastName].filter(Boolean).join(" ") || "Golfer",
     notes: row.notes,
     clubs,
-    estimatedTotal: demoClubs.some((club) => club.estimatedPrice !== null)
-      ? sumPrices(demoClubs.map((club) => club.estimatedPrice))
+    purchaseClubs,
+    estimatedTotal: purchaseClubs.some((club) => club.estimatedPrice !== null)
+      ? sumPrices(purchaseClubs.map((club) => club.estimatedPrice))
       : null,
   };
 }

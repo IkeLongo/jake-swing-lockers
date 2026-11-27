@@ -5,7 +5,7 @@ import {
   buildClubDispersionAverages,
   computeDispersionBounds,
   type DispersionPoint,
-} from "./reviewFittingDispersion";
+} from "@/lib/golf/dispersion";
 
 interface DispersionChartProps {
   points: readonly DispersionPoint[];

@@ -36,6 +36,7 @@ const summary = (
     validTotalCount: 0,
     isManuallyEdited: false,
     includeInReport: true,
+    availableForPurchase: false,
     estimatedPrice: null,
     currentSummaryId,
   });

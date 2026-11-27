@@ -82,6 +82,7 @@ interface ClubReviewGridProps {
     identity: ClubIdentity,
   ) => void;
   onToggleInclude: (summaryId: number, currentIncluded: boolean) => void;
+  onToggleSale: (summaryId: number, availableForPurchase: boolean) => void;
   onSaveTests: (
     currentSummaryId: number,
     testSummaryIds: number[],
@@ -189,6 +190,7 @@ export function ClubReviewGrid({
   toggling,
   onIdentitySaved,
   onToggleInclude,
+  onToggleSale,
   onSaveTests,
   onPriceSaved,
   onShotSummaryUpdated,
@@ -566,6 +568,8 @@ export function ClubReviewGrid({
           colorsBySummaryId={colorsBySummaryId}
           onOpenSummary={openSummary}
           onToggleInclude={onToggleInclude}
+          onToggleSale={onToggleSale}
+          toggling={toggling}
           visualizationData={visualizationData}
           visualizationLoading={visualizationLoading}
           visualizationError={visualizationError}

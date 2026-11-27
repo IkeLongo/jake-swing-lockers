@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import type { CustomerClub, CustomerDemoClub, CustomerSessionDetail } from "@/lib/queries/customer-sessions";
+import type { CustomerClub, CustomerDemoClub, CustomerPurchaseClub, CustomerSessionDetail } from "@/lib/queries/customer-sessions";
+import { ExplorePerformance } from "./ExplorePerformance";
 import { SwingLockerHero } from "./SwingLockerHero";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -141,7 +142,7 @@ function ClubComparisons({ clubs }: { clubs: CustomerDemoClub[] }) {
 }
 
 function EquipmentPricing({ clubs, estimatedTotal }: {
-  clubs: CustomerDemoClub[];
+  clubs: CustomerPurchaseClub[];
   estimatedTotal: number | null;
 }) {
   if (clubs.length === 0) return null;
@@ -162,7 +163,7 @@ function EquipmentPricing({ clubs, estimatedTotal }: {
           <tbody className="text-card-foreground">
             {clubs.map((club) => (
               <tr key={club.id} className="border-t border-border">
-                <th scope="row" className="break-words px-5 py-4 font-medium [overflow-wrap:anywhere]">{clubName(club)}</th>
+                <th scope="row" className="break-words px-5 py-4 font-medium [overflow-wrap:anywhere]">{club.label}</th>
                 <td className="px-5 py-4 text-right tabular-nums">
                   {club.estimatedPrice != null ? fmtPrice(club.estimatedPrice) : "—"}
                 </td>
@@ -211,6 +212,7 @@ export function FittingPresentation({
       <SwingLockerHero customerName={session.customerName} fittingDate={session.demoDate} />
 
       <ClubResults clubs={session.clubs} />
+      <ExplorePerformance clubs={session.clubs} />
       <ClubComparisons clubs={session.clubs} />
 
       {session.notes && (
@@ -227,9 +229,9 @@ export function FittingPresentation({
         </div>
       )}
 
-      <EquipmentPricing clubs={session.clubs} estimatedTotal={session.estimatedTotal} />
+      <EquipmentPricing clubs={session.purchaseClubs} estimatedTotal={session.estimatedTotal} />
 
-      {session.clubs.length > 0 && purchaseAction}
+      {purchaseAction}
     </>
   );
 }

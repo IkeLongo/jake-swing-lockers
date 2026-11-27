@@ -11,7 +11,7 @@ import {
   getOpportunityById,
   STAGE_CONSIDERING_PURCHASE,
 } from "@/lib/ghl/opportunities";
-import { isDuplicatePurchaseRequest } from "@/lib/purchase-request-workflow";
+import { isDuplicatePurchaseRequest, purchaseClubName } from "@/lib/purchase-request-workflow";
 import { drainPurchaseRequestOpportunityValue } from "@/lib/ghl/purchaseRequestOpportunityValue";
 
 export async function POST(req: NextRequest) {
@@ -78,13 +78,14 @@ export async function POST(req: NextRequest) {
     where: {
       id: { in: clubIdList },
       demoSessionId, // security: clubs must belong to the verified session
+      availableForPurchase: true,
     },
-    select: { id: true, clubType: true, estimatedPrice: true },
+    select: { id: true, clubType: true, clubRole: true, tags: true, estimatedPrice: true },
   });
 
   if (clubs.length !== clubIdList.length) {
     return NextResponse.json(
-      { error: "One or more club IDs are invalid for this session" },
+      { error: "One or more clubs are not available for purchase in this session" },
       { status: 400 }
     );
   }
@@ -101,7 +102,7 @@ export async function POST(req: NextRequest) {
   // ── Create request ──────────────────────────────────────────────────────────
   const items = clubs.map((club) => ({
     demoClubTestId: club.id,
-    clubType: club.clubType,
+    clubType: purchaseClubName(club),
     estimatedPrice: club.estimatedPrice != null ? Number(club.estimatedPrice) : null,
   }));
 

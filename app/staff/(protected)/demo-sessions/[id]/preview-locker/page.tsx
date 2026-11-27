@@ -73,7 +73,7 @@ export default async function PreviewLockerPage({
           purchaseAction={
             existingRequest ? (
               <PurchaseRequestSubmitted />
-            ) : (
+            ) : session.purchaseClubs.length > 0 ? (
               <div className="mt-6">
                 <button
                   type="button"
@@ -83,7 +83,7 @@ export default async function PreviewLockerPage({
                   Request Purchase
                 </button>
               </div>
-            )
+            ) : null
           }
         />
       </div>

@@ -6,9 +6,7 @@ import { useState } from "react";
 
 export interface ModalClub {
   id: number;
-  clubType: string | null;
-  brand: string | null;
-  model: string | null;
+  label: string;
   estimatedPrice: number | null;
 }
 
@@ -27,11 +25,6 @@ function fmtPrice(value: number): string {
     currency: "USD",
     maximumFractionDigits: 0,
   }).format(value);
-}
-
-function clubLabel(club: ModalClub): string {
-  const parts = [club.clubType, club.brand, club.model].filter(Boolean);
-  return parts.length > 0 ? parts.join(" — ") : "Club";
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -196,7 +189,7 @@ export function PurchaseRequestTrigger({ sessionId, clubs }: PurchaseRequestTrig
                         className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                       />
                       <span className="flex-1 font-body text-sm text-slate-800 leading-snug">
-                        {clubLabel(club)}
+                        {club.label}
                       </span>
                       {club.estimatedPrice != null && (
                         <span className="font-body text-sm font-semibold text-emerald-700 shrink-0">

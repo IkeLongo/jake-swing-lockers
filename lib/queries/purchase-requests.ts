@@ -3,6 +3,7 @@ import { type PurchaseRequestStatus } from "@/lib/purchase-request-status";
 import { isPurchaseRequestLockedStatus } from "@/lib/purchase-request-status";
 import {
   buildPurchaseRequestClubSnapshots,
+  purchaseClubName,
   getUniqueClubIdsPreservingOrder,
 } from "@/lib/purchase-request-workflow";
 import { enqueuePurchaseRequestOpportunityValue } from "@/lib/ghl/purchaseRequestOpportunityValue";
@@ -133,6 +134,9 @@ export async function getPurchaseRequestDetail(
               brand: true,
               model: true,
               estimatedPrice: true,
+              availableForPurchase: true,
+              clubRole: true,
+              tags: true,
             },
           },
         },
@@ -189,9 +193,12 @@ export async function getPurchaseRequestDetail(
     ? prices.reduce((sum, p) => sum + p, 0)
     : null;
 
-  const availableClubs: PurchaseRequestEditableClub[] = row.demoSession.clubTests.map((club) => ({
+  const existingClubIds = new Set(row.items.map((item) => item.demoClubTestId));
+  const availableClubs: PurchaseRequestEditableClub[] = row.demoSession.clubTests
+    .filter((club) => club.availableForPurchase || existingClubIds.has(club.id))
+    .map((club) => ({
     id: club.id,
-    clubType: club.clubType,
+    clubType: purchaseClubName(club),
     brand: club.brand,
     model: club.model,
     estimatedPrice: club.estimatedPrice != null ? Number(club.estimatedPrice) : null,
@@ -260,6 +267,9 @@ export async function replacePurchaseRequestItems(
         id: true,
         clubType: true,
         estimatedPrice: true,
+        availableForPurchase: true,
+        clubRole: true,
+        tags: true,
       },
     });
 
@@ -273,7 +283,17 @@ export async function replacePurchaseRequestItems(
 
     const existingIds = new Set(existing.items.map((item) => item.demoClubTestId));
     const newIds = uniqueIds.filter((clubId) => !existingIds.has(clubId));
-    const snapshots = buildPurchaseRequestClubSnapshots(newIds, clubs);
+    if (clubs.some((club) => newIds.includes(club.id) && !club.availableForPurchase)) {
+      return {
+        ok: false,
+        reason: "invalid_clubs",
+        message: "One or more selected clubs are not available for purchase.",
+      };
+    }
+    const snapshots = buildPurchaseRequestClubSnapshots(
+      newIds,
+      clubs.map((club) => ({ ...club, clubType: purchaseClubName(club) })),
+    );
 
     const updated = await tx.purchaseRequest.update({
       where: { id },

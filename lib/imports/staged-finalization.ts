@@ -9,9 +9,9 @@ import {
   persistPlan,
   planComparisonGroups,
   type FinalizeStore,
-  type PlannableSummary,
 } from "./finalizationPlan";
 import { resolveFittingDate } from "./opportunity-naming";
+import { hasUnfinalizedPurchaseClub, type PurchaseEligibleSummary } from "./finalizationStore";
 
 // Local-only finalization of a staged TrackMan ImportBatch:
 // ImportBatch -> GolfClient -> DemoSession -> DemoClubTest -> ClubTestMetrics.
@@ -65,7 +65,7 @@ export interface NewDemoSessionInput {
   ghlOpportunityId: string | null;
 }
 
-export interface StagedFinalizeTx<S extends PlannableSummary> {
+export interface StagedFinalizeTx<S extends PurchaseEligibleSummary> {
   /** Must take an exclusive row lock on the ImportBatch (SELECT ... FOR UPDATE). */
   lockBatch(batchId: number): Promise<void>;
   /** Must hold the singleton mutex row until the finalization transaction commits. */
@@ -90,7 +90,7 @@ export type OpportunityValidation =
   | { valid: true }
   | { valid: false; reason: "not_found" | "not_relevant" };
 
-export interface StagedFinalizeDeps<S extends PlannableSummary> {
+export interface StagedFinalizeDeps<S extends PurchaseEligibleSummary> {
   loadBatch(batchId: number): Promise<StagedFinalizeBatch | null>;
   loadSummaries(batchId: number): Promise<S[]>;
   /** Throws on GHL service failures so they are never mistaken for "not found". */
@@ -114,6 +114,7 @@ export type StagedFinalizeErrorCode =
   | "no_ghl_contact"
   | "opportunity_no_longer_valid"
   | "no_clubs"
+  | "purchase_club_not_finalized"
   | "ghl_unavailable"
   | "ghl_approval_required"
   | "saved_contact_conflict"
@@ -284,11 +285,12 @@ function stateSignature(batch: StagedFinalizeBatch): string {
   ]);
 }
 
-function planClubs<S extends PlannableSummary>(summaries: readonly S[]) {
+function planClubs<S extends PurchaseEligibleSummary>(summaries: readonly S[]) {
   const rows = flattenPlan(planComparisonGroups(summaries));
   return {
     rows,
     clubCount: rows.filter((row) => row.clubRole === "demo").length,
+    hasUnfinalizedPurchaseClub: hasUnfinalizedPurchaseClub(summaries, rows),
   };
 }
 
@@ -298,7 +300,7 @@ type ClientResolution =
 
 // Never reuses an existing customer or creates another record with an existing
 // normalized identifier. Candidates must be resolved on the customer step.
-async function resolveClientId<S extends PlannableSummary>(
+async function resolveClientId<S extends PurchaseEligibleSummary>(
   tx: StagedFinalizeTx<S>,
   batch: StagedFinalizeBatch,
 ): Promise<ClientResolution> {
@@ -339,7 +341,7 @@ async function resolveClientId<S extends PlannableSummary>(
   return { ok: true, clientId: created.id };
 }
 
-export async function finalizeStagedImport<S extends PlannableSummary>(
+export async function finalizeStagedImport<S extends PurchaseEligibleSummary>(
   deps: StagedFinalizeDeps<S>,
   input: { batchId: number; salesRep: string | null },
 ): Promise<StagedFinalizeResult> {
@@ -353,7 +355,11 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
   const invalid = validateStagedBatch(batch);
   if (invalid) return invalid;
 
-  if (planClubs(await deps.loadSummaries(batchId)).clubCount === 0) {
+  const initialPlan = planClubs(await deps.loadSummaries(batchId));
+  if (initialPlan.hasUnfinalizedPurchaseClub) {
+    return fail(400, "purchase_club_not_finalized", "A club marked for sale will not be included in this fitting. Review its inclusion and comparison selection.");
+  }
+  if (initialPlan.clubCount === 0) {
     return fail(
       400,
       "no_clubs",
@@ -413,7 +419,11 @@ export async function finalizeStagedImport<S extends PlannableSummary>(
       }
     }
 
-    const { rows, clubCount } = planClubs(await tx.loadSummaries(batchId));
+    const { rows, clubCount, hasUnfinalizedPurchaseClub: hasUnfinalizedClub } =
+      planClubs(await tx.loadSummaries(batchId));
+    if (hasUnfinalizedClub) {
+      return fail(400, "purchase_club_not_finalized", "A club marked for sale will not be included in this fitting. Review its inclusion and comparison selection.");
+    }
     if (clubCount === 0) {
       return fail(
         400,

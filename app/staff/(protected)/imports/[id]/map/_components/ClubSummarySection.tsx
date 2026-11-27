@@ -99,6 +99,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           validTotalCount: Number(s.validTotalCount),
           isManuallyEdited: Boolean(s.isManuallyEdited),
           includeInReport: s.includeInReport === undefined ? true : Boolean(s.includeInReport),
+          availableForPurchase: Boolean(s.availableForPurchase),
           estimatedPrice: toN(s.estimatedPrice),
           tags: Array.isArray(s.tags) ? (s.tags as string[]) : [],
           currentSummaryId:
@@ -152,10 +153,11 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
 
   async function handleToggleInclude(id: number, currentIncluded: boolean) {
     const nextValue = !currentIncluded;
+    const previousSale = summaries.find((summary) => summary.id === id)?.availableForPurchase ?? false;
     setToggleError(null);
     // Optimistic update
     setSummaries((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, includeInReport: nextValue } : s)),
+      prev.map((s) => (s.id === id ? { ...s, includeInReport: nextValue, availableForPurchase: nextValue ? s.availableForPurchase : false } : s)),
     );
     setToggling((prev) => new Set(prev).add(id));
 
@@ -172,20 +174,20 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
       if (!res.ok) {
         // Revert and show error
         setSummaries((prev) =>
-          prev.map((s) => (s.id === id ? { ...s, includeInReport: currentIncluded } : s)),
+          prev.map((s) => (s.id === id ? { ...s, includeInReport: currentIncluded, availableForPurchase: previousSale } : s)),
         );
         const json = (await res.json().catch(() => ({}))) as { error?: string };
         setToggleError(json.error ?? "Failed to update include status.");
       } else {
         // Sync with the value the server actually saved
         const json = (await res.json().catch(() => null)) as {
-          summary?: { includeInReport?: boolean };
+          summary?: { includeInReport?: boolean; availableForPurchase?: boolean };
         } | null;
         if (json?.summary?.includeInReport !== undefined) {
           setSummaries((prev) =>
             prev.map((s) =>
               s.id === id
-                ? { ...s, includeInReport: json!.summary!.includeInReport !== false }
+                ? { ...s, includeInReport: json!.summary!.includeInReport !== false, availableForPurchase: json!.summary!.availableForPurchase ?? s.availableForPurchase }
                 : s,
             ),
           );
@@ -197,8 +199,38 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
     } catch {
       // Revert on network error
       setSummaries((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, includeInReport: currentIncluded } : s)),
+        prev.map((s) => (s.id === id ? { ...s, includeInReport: currentIncluded, availableForPurchase: previousSale } : s)),
       );
+      setToggleError("Network error — please try again.");
+    } finally {
+      setToggling((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  async function handleToggleSale(id: number, availableForPurchase: boolean) {
+    setToggleError(null);
+    setToggling((prev) => new Set(prev).add(id));
+    try {
+      const res = await fetch(`/api/staff/imports/${batchId}/club-summaries/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ availableForPurchase }),
+      });
+      const json = await res.json() as { error?: string; summary?: { availableForPurchase: boolean } };
+      if (!res.ok || !json.summary) {
+        setToggleError(json.error ?? "Failed to update purchase availability.");
+        return;
+      }
+      const saved = json.summary.availableForPurchase;
+      setSummaries((prev) => prev.map((s) => s.id === id
+        ? { ...s, availableForPurchase: saved }
+        : s));
+      if (finalized) setDirty(true);
+    } catch {
       setToggleError("Network error — please try again.");
     } finally {
       setToggling((prev) => {
@@ -346,6 +378,7 @@ export function ClubSummarySection({ batchId, initialSummaries, parserMode, sess
           toggling={toggling}
           onIdentitySaved={handleIdentitySaved}
           onToggleInclude={handleToggleInclude}
+          onToggleSale={handleToggleSale}
           onSaveTests={handleSaveTests}
           onPriceSaved={handlePriceSaved}
           onShotSummaryUpdated={handleShotSummaryUpdated}

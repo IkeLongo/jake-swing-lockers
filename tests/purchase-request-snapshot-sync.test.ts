@@ -24,11 +24,12 @@ test("purchase request writes enqueue a value recalculation and preserve retaine
       async create() { return { id: 8 }; },
     },
     demoClubTest: {
-      async findMany() {
+      async findMany({ where }: { where: { id: { in: number[] } } }) {
         return [
-          { id: 11, clubType: "Driver", estimatedPrice: 999 },
-          { id: 12, clubType: "Wedge", estimatedPrice: 25 },
-        ];
+          { id: 11, clubType: "Driver", clubRole: "demo", tags: [], availableForPurchase: false, estimatedPrice: 999 },
+          { id: 12, clubType: "Wedge", clubRole: "demo", tags: [], availableForPurchase: true, estimatedPrice: 25 },
+          { id: 13, clubType: "Iron", clubRole: "demo", tags: [], availableForPurchase: false, estimatedPrice: 30 },
+        ].filter((club) => where.id.in.includes(club.id));
       },
     },
     demoSession: {
@@ -53,6 +54,10 @@ test("purchase request writes enqueue a value recalculation and preserve retaine
       create: [{ demoClubTestId: 12, clubType: "Wedge", estimatedPrice: 25 }],
     },
   });
+  const rejected = await replacePurchaseRequestItems(8, {
+    demoClubTestIds: [11, 13], notes: "Updated",
+  });
+  assert.equal(rejected.ok, false);
   const status = await updatePurchaseRequestStatus(8, "closed_lost");
   assert.equal(status?.opportunityId, "opp-A");
   const created = await createPurchaseRequest(1, 7, [

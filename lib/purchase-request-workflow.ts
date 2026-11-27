@@ -13,6 +13,21 @@ export interface PurchaseRequestClubSnapshot {
   estimatedPrice: number | null;
 }
 
+export function purchaseClubName(club: {
+  clubType: string | null;
+  clubRole: string;
+  tags: unknown;
+}): string {
+  const name = club.clubType || "Club";
+  const tags = Array.isArray(club.tags)
+    ? club.tags.filter((tag): tag is string => typeof tag === "string")
+    : [];
+  // Finalized current-club names already contain their tags.
+  return club.clubRole !== "current" && tags.length > 0
+    ? `${name} - ${tags.join(", ")}`
+    : name;
+}
+
 export function getUniqueClubIdsPreservingOrder(clubIds: number[]): number[] {
   return Array.from(new Set(clubIds));
 }

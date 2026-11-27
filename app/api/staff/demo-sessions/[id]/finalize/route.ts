@@ -8,7 +8,7 @@ import {
   persistPlan,
   planComparisonGroups,
 } from "@/lib/imports/finalizationPlan";
-import { createPrismaFinalizeStore } from "@/lib/imports/finalizationStore";
+import { createPrismaFinalizeStore, hasUnfinalizedPurchaseClub } from "@/lib/imports/finalizationStore";
 
 // ── POST /api/staff/demo-sessions/[id]/finalize ───────────────────────────────
 //
@@ -128,6 +128,9 @@ export async function POST(
         orderBy: { id: "asc" },
       });
       const plannedRows = flattenPlan(planComparisonGroups(batchSummaries));
+      if (hasUnfinalizedPurchaseClub(batchSummaries, plannedRows)) {
+        return { status: "purchase_club_not_finalized" as const };
+      }
       const clubCount = plannedRows.filter((r) => r.clubRole === "demo").length;
       if (clubCount === 0) return { status: "no_clubs" as const };
 
@@ -161,6 +164,12 @@ export async function POST(
       });
       return { status: "success" as const, clubCount };
     });
+    if (result.status === "purchase_club_not_finalized") {
+      return NextResponse.json(
+        { error: "A club marked for sale will not be included in this fitting. Review its inclusion and comparison selection." },
+        { status: 400 },
+      );
+    }
     if (result.status === "no_clubs") {
       return NextResponse.json(
         { error: "No clubs are included in the report. Enable at least one club before finalizing." },

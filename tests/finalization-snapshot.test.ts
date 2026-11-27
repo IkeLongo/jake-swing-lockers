@@ -33,6 +33,7 @@ function summary(id: number, overrides: Partial<ImportClubSummary> = {}): Import
     validTotalCount: 0,
     isManuallyEdited: true,
     includeInReport: true,
+    availableForPurchase: false,
     tags: [],
     estimatedPrice: null,
     linkedToSummaryId: null,
@@ -52,11 +53,11 @@ function shot(id: number, clubSummaryId: number | null, includedInSummary: boole
     rowIndex: id,
     rawData: {
       measuredShot: createTrackManMeasuredShot({
-        headers: ["Measurement.Carry"],
-        shotRow: [String(id * 10)],
-        siUnitRow: ["[m]"],
-        conversionFactorRow: ["1.09361"],
-        displayUnitRow: ["[yrd]"],
+        headers: ["Measurement.Carry", "Measurement.CarrySide"],
+        shotRow: [String(id * 10), "-6"],
+        siUnitRow: ["[m]", "[m]"],
+        conversionFactorRow: ["1.09361", "3.28084"],
+        displayUnitRow: ["[yrd]", "[ft]"],
         exportFormat: "xlsx",
         selectedUnitSystem: "US",
       }),
@@ -150,6 +151,48 @@ test("finalization persists snapshots for included tests and linked current club
     [{ sourceSummaryId: 10, rowIds: [1] }, { sourceSummaryId: 20, rowIds: [2] }],
   );
   assert.ok(h.metrics.every((metric) => String(metric.carryDistance) === "175"));
+});
+
+test("finalization and re-finalization persist sale eligibility and tags", async () => {
+  const h = harness();
+  const makePlan = (sale: boolean) => flattenPlan(planComparisonGroups([
+    summary(10, { includeInReport: false, availableForPurchase: true, tags: ["Used"] }),
+    summary(20, { currentSummaryId: 10, availableForPurchase: sale, tags: ["Stiff"] }),
+  ]));
+  await persistPlan(h.store(), 7, makePlan(true));
+  assert.deepEqual(h.clubs.map(({ data }) => [data.availableForPurchase, data.tags]), [
+    [false, ["Used"]], [true, ["Stiff"]],
+  ]);
+  const store = h.store();
+  await deleteSessionClubs(store, 7);
+  await persistPlan(store, 7, makePlan(false));
+  assert.deepEqual(h.clubs.map(({ data }) => [data.availableForPurchase, data.tags]), [
+    [false, ["Used"]], [false, ["Stiff"]],
+  ]);
+});
+
+test("finalization persists usable snapshots independently for standalone demo clubs", async () => {
+  const h = harness();
+  const rows = flattenPlan(planComparisonGroups([summary(20), summary(30)]));
+  await persistPlan(h.store(), 7, rows);
+
+  assert.equal(h.clubs.length, 2);
+  for (const [index, expected] of [
+    { summaryId: 20, rowId: 2, carryYd: 20 },
+    { summaryId: 30, rowId: 4, carryYd: 40 },
+  ].entries()) {
+    const data = h.clubs[index]!.data;
+    assert.equal(data.clubRole, "demo");
+    assert.equal(data.currentClubTestId, null);
+    const snapshot = data.approvedShotSnapshot;
+    assert.ok(snapshot && typeof snapshot === "object" && "shots" in snapshot);
+    assert.equal(snapshot.sourceSummaryId, expected.summaryId);
+    assert.ok(Array.isArray(snapshot.shots));
+    assert.equal(snapshot.shots.length, 1);
+    assert.equal(snapshot.shots[0].sourceRowId, expected.rowId);
+    assert.equal(snapshot.shots[0].measurements.carryYd, expected.carryYd);
+    assert.equal(snapshot.shots[0].measurements.carrySideYd, -2);
+  }
 });
 
 test("re-finalization replaces snapshots with the newly approved shot selection", async () => {

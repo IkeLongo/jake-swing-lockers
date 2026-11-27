@@ -19,6 +19,7 @@ import type { PlannableSummary } from "../lib/imports/finalizationPlan";
 
 interface Summary extends PlannableSummary {
   importBatchId: number;
+  availableForPurchase: boolean;
 }
 
 interface ClubRow {
@@ -116,6 +117,7 @@ function summary(id: number, over: Partial<Summary> = {}): Summary {
     clubName: `Club ${id}`,
     tags: [],
     includeInReport: true,
+    availableForPurchase: false,
     currentSummaryId: null,
     ...over,
   };
@@ -611,6 +613,16 @@ test("no persistable clubs is rejected and leaves nothing behind", async () => {
   assert.equal(r.ok === false && r.status, 400);
   assert.equal(h.state.sessions.length, 0);
   assert.equal(h.opts.locked, false);
+});
+
+test("finalization rejects a for-sale club omitted by the existing plan", async () => {
+  const h = harness(makeBatch(), [
+    summary(1, { availableForPurchase: true }),
+    summary(2, { currentSummaryId: 1, includeInReport: false }),
+  ]);
+  const result = await finalizeStagedImport(h.deps, input);
+  assert.equal(result.ok === false && result.code, "purchase_club_not_finalized");
+  assert.equal(h.state.sessions.length, 0);
 });
 
 test("comparison relationships are persisted", async () => {

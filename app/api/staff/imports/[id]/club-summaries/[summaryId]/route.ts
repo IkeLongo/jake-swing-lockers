@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { Prisma } from "@/app/generated/prisma/client";
 import { getStaffSessionFromRequest } from "@/lib/auth/requireStaffSession";
 import {
   assignStagedCurrent,
@@ -29,6 +30,7 @@ interface PatchBody {
   avgCarry?: unknown;
   avgTotal?: unknown;
   includeInReport?: unknown;
+  availableForPurchase?: unknown;
   estimatedPrice?: unknown;
   currentSummaryId?: unknown;
   // Legacy (Current → Test) link; no longer writable. Rejected explicitly so
@@ -91,6 +93,17 @@ export async function PATCH(
       );
     }
     update.includeInReport = body.includeInReport;
+    if (!body.includeInReport) update.availableForPurchase = false;
+  }
+
+  if ("availableForPurchase" in body) {
+    if (typeof body.availableForPurchase !== "boolean") {
+      return NextResponse.json({ error: "availableForPurchase must be a boolean." }, { status: 422 });
+    }
+    if (body.availableForPurchase && body.includeInReport === false) {
+      return NextResponse.json({ error: "Only included clubs can be marked for sale." }, { status: 422 });
+    }
+    update.availableForPurchase = body.availableForPurchase;
   }
 
   // clubName: must be a non-empty string
@@ -189,30 +202,36 @@ export async function PATCH(
 
   // ── Persist ─────────────────────────────────────────────────────────────────
   let updated;
-  if (currentSummaryId === undefined) {
-    updated = await db.importClubSummary.update({
-      where: { id: summaryIdNum },
-      data: update,
-    });
-  } else {
-    const result = await db.$transaction(async (tx) => {
-      const assigned = await assignStagedCurrent(
-        createPrismaComparisonStore(tx),
-        batchId,
-        summaryIdNum,
-        currentSummaryId,
-      );
-      if (!assigned.ok) return assigned;
-      const row = await tx.importClubSummary.update({
-        where: { id: summaryIdNum },
+  const requireIncluded = body.availableForPurchase === true && body.includeInReport !== true;
+  const where = { id: summaryIdNum, ...(requireIncluded ? { includeInReport: true } : {}) };
+  try {
+    if (currentSummaryId === undefined) {
+      updated = await db.importClubSummary.update({
+        where,
         data: update,
       });
-      return { ok: true as const, row };
-    });
-    if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status });
+    } else {
+      const result = await db.$transaction(async (tx) => {
+        const assigned = await assignStagedCurrent(
+          createPrismaComparisonStore(tx),
+          batchId,
+          summaryIdNum,
+          currentSummaryId,
+        );
+        if (!assigned.ok) return assigned;
+        const row = await tx.importClubSummary.update({ where, data: update });
+        return { ok: true as const, row };
+      });
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error }, { status: result.status });
+      }
+      updated = result.row;
     }
-    updated = result.row;
+  } catch (error) {
+    if (requireIncluded && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return NextResponse.json({ error: "Only included clubs can be marked for sale." }, { status: 422 });
+    }
+    throw error;
   }
 
   // ── Flag session as needing re-finalization ──────────────────────────────────

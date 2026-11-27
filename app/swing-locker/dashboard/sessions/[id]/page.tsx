@@ -54,14 +54,12 @@ export default async function SessionDetailPage({
           purchaseAction={
             existingRequest ? (
               <PurchaseRequestSubmitted />
-            ) : (
+            ) : session.purchaseClubs.length > 0 ? (
               <PurchaseRequestTrigger
                 sessionId={session.id}
-                clubs={session.clubs.map(({ id, clubType, brand, model, estimatedPrice }) => ({
-                  id, clubType, brand, model, estimatedPrice,
-                }))}
+                clubs={session.purchaseClubs}
               />
-            )
+            ) : null
           }
         />
       </div>
