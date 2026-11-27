@@ -347,7 +347,8 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(preview, /Current Driver · Used · Current Brand/);
   assert.match(preview, /Included Driver · Stiff/);
   assert.match(preview, /Included Driver/);
-  assert.match(preview, /Current Brand Current Driver/);
+  assert.match(preview, /Recommended Clubs[\s\S]*Included Driver - Stiff[\s\S]*\$300/);
+  assert.doesNotMatch(preview, /Current vs\. Demo Club Comparisons|Equipment Pricing|Total estimated price|Total includes available estimates only/);
   assert.doesNotMatch(preview, /Unrelated Current|Excluded|mailto:|<form/);
   assert.match(preview, /<button[^>]*disabled[^>]*>Request Purchase<\/button>/);
 
@@ -389,15 +390,16 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.match(customer, /Explore Your Performance/);
   assert.match(customer, /2 of 2 included shots plotted/);
   assert.match(customer, /Included Driver/);
-  assert.match(customer, /Current Brand Current Driver/);
-  assert.match(customer, /Total estimated price/);
+  assert.match(customer, /Current Driver · Used · Current Brand/);
+  assert.match(customer, /Recommended Clubs[\s\S]*Included Driver - Stiff[\s\S]*\$300/);
+  assert.doesNotMatch(customer, /Current vs\. Demo Club Comparisons|Equipment Pricing|Total estimated price|Total includes available estimates only/);
   assert.match(customer, /<button(?![^>]*disabled)[^>]*>Request Purchase<\/button>/);
   assert.doesNotMatch(customer, /Staff Preview|Unrelated Current|Excluded/);
   demo.availableForPurchase = false;
   const noSaleCustomer = renderToStaticMarkup(await CustomerPage({ params: Promise.resolve({ id: "31" }) }));
   const noSalePreview = renderToStaticMarkup(await PreviewPage(previewProps));
-  assert.doesNotMatch(noSaleCustomer, /Equipment Pricing|Request Purchase<\/button>/);
-  assert.doesNotMatch(noSalePreview, /Equipment Pricing|Request Purchase<\/button>/);
+  assert.doesNotMatch(noSaleCustomer, /Recommended Clubs|Request Purchase<\/button>/);
+  assert.doesNotMatch(noSalePreview, /Recommended Clubs|Request Purchase<\/button>/);
   demo.availableForPurchase = true;
   await assert.rejects(
     CustomerPage({ params: Promise.resolve({ id: "33" }) }),
@@ -428,7 +430,7 @@ test("customer and staff share finalized fitting data without preview mutations"
   assert.equal(networkCalls, 0);
 });
 
-test("results, comparisons, and pricing display finalized clubs in order", () => {
+test("results and recommended equipment display finalized clubs in order", () => {
   const current = {
     id: 1, clubType: "Current Driver", brand: "Current Brand", model: null,
     tags: [] as string[],
@@ -460,16 +462,13 @@ test("results, comparisons, and pricing display finalized clubs in order", () =>
     session, purchaseAction: createElement("button", null, "Purchase action"),
   }));
   const results = html.match(/<section aria-labelledby="club-results-heading"[\s\S]*?<\/section>/)?.[0];
-  const comparisons = html.match(/<section aria-labelledby="club-comparisons-heading"[\s\S]*?<\/section>/)?.[0];
-  const pricing = html.match(/<section aria-labelledby="equipment-pricing-heading"[\s\S]*?<\/section>/)?.[0];
+  const pricing = html.match(/<section aria-labelledby="recommended-equipment-heading"[\s\S]*?<\/section>/)?.[0];
   assert.ok(results);
-  assert.ok(comparisons);
   assert.ok(pricing);
-  assert.ok(html.indexOf(results) < html.indexOf(comparisons));
   assert.ok(html.indexOf(results) < html.indexOf("Explore Your Performance"));
-  assert.ok(html.indexOf("Explore Your Performance") < html.indexOf(comparisons));
-  assert.ok(html.indexOf(comparisons) < html.indexOf(pricing));
+  assert.ok(html.indexOf("Explore Your Performance") < html.indexOf(pricing));
   assert.ok(html.indexOf(pricing) < html.indexOf("Purchase action"));
+  assert.doesNotMatch(html, /club-comparisons-heading|Current vs\. Demo Club Comparisons/);
   assert.match(results, /Demo Driver/);
   assert.match(results, /Demo Brand · Regular/);
   assert.match(results, /Demo Iron/);
@@ -481,11 +480,9 @@ test("results, comparisons, and pricing display finalized clubs in order", () =>
   const rows = results.match(/<tr class="border-t border-border">[\s\S]*?<\/tr>/g);
   assert.equal(rows?.length, 3);
   assert.equal(rows?.[2].match(/>—<\/td>/g)?.length, 4);
-  assert.match(comparisons, /Demo Driver[\s\S]*Current Brand Current Driver[\s\S]*88\.0/);
-  assert.doesNotMatch(comparisons, /Demo Iron/);
+  assert.match(pricing, /Recommended Clubs/);
   assert.match(pricing, /Demo Driver · Demo Brand[\s\S]*\$50[\s\S]*Demo Iron[\s\S]*—/);
-  assert.match(pricing, /Total estimated price[\s\S]*\$50/);
-  assert.match(pricing, /Total includes available estimates only/);
+  assert.doesNotMatch(pricing, /Total estimated price|Total includes available estimates only|<tfoot/);
 });
 
 test("single and empty fittings handle missing prices and results", () => {
@@ -507,7 +504,7 @@ test("single and empty fittings handle missing prices and results", () => {
   );
   const single = render(session);
   assert.match(single, /Club Results/);
-  assert.match(single, /Equipment Pricing[\s\S]*Iron[\s\S]*—/);
+  assert.match(single, /Recommended Clubs[\s\S]*Iron[\s\S]*—/);
   assert.doesNotMatch(single, /Total estimated price|Current vs\. Demo Club Comparisons/);
   assert.match(single, /Purchase action/);
   const zeroHeight = render({ ...session, resultsClubs: [{ ...club, avgMaxHeight: 0 }] });
@@ -515,7 +512,7 @@ test("single and empty fittings handle missing prices and results", () => {
 
   const empty = render({ ...session, clubs: [], resultsClubs: [], purchaseClubs: [] });
   assert.match(empty, /No club data recorded for this session/);
-  assert.doesNotMatch(empty, /Equipment Pricing|Purchase action|Current vs\. Demo Club Comparisons/);
+  assert.doesNotMatch(empty, /Recommended Clubs|Purchase action|Current vs\. Demo Club Comparisons/);
 });
 
 test("customer dispersion plots only usable approved shots and handles missing comparisons", () => {

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CustomerClub, CustomerDemoClub, CustomerPurchaseClub, CustomerSessionDetail } from "@/lib/queries/customer-sessions";
+import type { CustomerClub, CustomerPurchaseClub, CustomerSessionDetail } from "@/lib/queries/customer-sessions";
 import { ExplorePerformance } from "./ExplorePerformance";
 import { SwingLockerHero } from "./SwingLockerHero";
 
@@ -18,42 +18,12 @@ function fmtNum(value: number | null, decimals = 1): string {
   return value.toFixed(decimals);
 }
 
-function clubName(club: CustomerClub): string {
-  return [club.clubType, club.brand, club.model].filter(Boolean).join(" · ") || "Club";
-}
-
 function resultClubName(club: CustomerClub): string {
   const name = club.clubType?.trim() || "Club";
   const tags = club.tags.join(", ");
   const suffix = ` - ${tags}`;
   const baseName = tags && name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
   return tags && !baseName.endsWith(` · ${tags}`) ? `${baseName} · ${tags}` : baseName;
-}
-
-function CompactMetricCell({
-  label,
-  value,
-  unit,
-}: {
-  label: string;
-  value: string;
-  unit?: string;
-}) {
-  return (
-    <div className="bg-card px-3 py-3 text-center">
-      <p className="font-body text-base font-semibold text-card-foreground tabular-nums leading-none">
-        {value}
-        {unit && (
-          <span className="ml-0.5 text-xs font-normal text-muted-foreground">
-            {unit}
-          </span>
-        )}
-      </p>
-      <p className="mt-1 font-body text-[10px] text-muted-foreground uppercase tracking-widest">
-        {label}
-      </p>
-    </div>
-  );
 }
 
 function ClubResults({ clubs }: { clubs: CustomerClub[] }) {
@@ -110,53 +80,13 @@ function ClubResults({ clubs }: { clubs: CustomerClub[] }) {
   );
 }
 
-function ClubComparisons({ clubs }: { clubs: CustomerDemoClub[] }) {
-  const comparisons = clubs.filter((club) => club.comparisonClub != null);
-  if (comparisons.length === 0) return null;
-
-  return (
-    <section aria-labelledby="club-comparisons-heading" className="mb-8">
-      <h2 id="club-comparisons-heading" className="mb-4 font-subheading text-xl font-semibold text-foreground">
-        Current vs. Demo Club Comparisons
-      </h2>
-      <div className="flex flex-col gap-4">
-        {comparisons.map((club) => {
-          const current = club.comparisonClub;
-          if (!current) return null;
-          return (
-            <div key={club.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-              <div className="px-5 py-4">
-                <h3 className="break-words font-heading text-base font-semibold text-card-foreground [overflow-wrap:anywhere]">{clubName(club)}</h3>
-                <p className="mt-2 font-body text-xs font-semibold uppercase tracking-widest text-muted-foreground">Compared with</p>
-                <p className="mt-1 break-words font-heading text-sm font-semibold text-card-foreground [overflow-wrap:anywhere]">
-                  {[current.brand, current.model, current.clubType].filter(Boolean).join(" ") || "Current Club"}
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-5">
-                <CompactMetricCell label="Club Speed" value={fmtNum(current.clubSpeed)} unit="mph" />
-                <CompactMetricCell label="Ball Speed" value={fmtNum(current.ballSpeed)} unit="mph" />
-                <CompactMetricCell label="Spin Rate" value={fmtNum(current.spinRate, 0)} unit="rpm" />
-                <CompactMetricCell label="Carry" value={fmtNum(current.carryDistance, 0)} unit="yds" />
-                <CompactMetricCell label="Total" value={fmtNum(current.totalDistance, 0)} unit="yds" />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function EquipmentPricing({ clubs, estimatedTotal }: {
-  clubs: CustomerPurchaseClub[];
-  estimatedTotal: number | null;
-}) {
+function RecommendedEquipment({ clubs }: { clubs: CustomerPurchaseClub[] }) {
   if (clubs.length === 0) return null;
 
   return (
-    <section aria-labelledby="equipment-pricing-heading">
-      <h2 id="equipment-pricing-heading" className="mb-4 font-subheading text-xl font-semibold text-foreground">
-        Equipment Pricing
+    <section aria-labelledby="recommended-equipment-heading">
+      <h2 id="recommended-equipment-heading" className="mb-4 font-subheading text-xl font-semibold text-foreground">
+        Recommended Clubs
       </h2>
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <table className="w-full table-fixed text-left font-body text-sm">
@@ -176,20 +106,7 @@ function EquipmentPricing({ clubs, estimatedTotal }: {
               </tr>
             ))}
           </tbody>
-          {estimatedTotal != null && (
-            <tfoot>
-              <tr className="border-t border-border font-semibold text-card-foreground">
-                <th scope="row" className="px-5 py-4">Total estimated price</th>
-                <td className="px-5 py-4 text-right tabular-nums">{fmtPrice(estimatedTotal)}</td>
-              </tr>
-            </tfoot>
-          )}
         </table>
-        {estimatedTotal != null && clubs.some((club) => club.estimatedPrice == null) && (
-          <p className="border-t border-border px-5 py-3 font-body text-xs text-muted-foreground">
-            Total includes available estimates only.
-          </p>
-        )}
       </div>
     </section>
   );
@@ -219,7 +136,6 @@ export function FittingPresentation({
 
       <ClubResults clubs={session.resultsClubs} />
       <ExplorePerformance clubs={session.clubs} resultsClubs={session.resultsClubs} />
-      <ClubComparisons clubs={session.clubs} />
 
       {session.notes && (
         <div className="mb-8 rounded-xl border border-border bg-card px-5 py-4 shadow-sm">
@@ -235,7 +151,7 @@ export function FittingPresentation({
         </div>
       )}
 
-      <EquipmentPricing clubs={session.purchaseClubs} estimatedTotal={session.estimatedTotal} />
+      <RecommendedEquipment clubs={session.purchaseClubs} />
 
       {purchaseAction}
     </>
